@@ -22,6 +22,10 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 ## ⏸️ งานที่ถูกกั้นไว้ — ห้ามเริ่มเอง
 
 - **Role-Based Permission** — นอกขอบเขต v1 ดูหัวข้อ "สถานะการพัฒนา" ท้ายไฟล์นี้
+  · **ข้อยกเว้น**: บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) อนุมัติแล้วเป็นส่วนหนึ่งของ Phase 13
+- **Phase 13–16 (multi-tenant / onboarding / รับเงินต่อร้าน)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
+  แต่**ยังไม่ได้เริ่มลงมือ** · ต้องทำตามลำดับ 13 → 14 → 15 ห้ามข้าม และก่อน migration ของ Phase 13 ต้อง
+  `pg_dump` production + ซ้อมบนสำเนาก่อนเสมอ
 
 ## 📧 ระบบอีเมล (ต่อ Resend แล้วใน Phase 5)
 
@@ -366,7 +370,8 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
 - ฐานข้อมูล: `posmobileorderdb` บน container `posmobileorder-postgres` (PostgreSQL 18, port **5437**)
   seed ไว้ 7 รายการ SKU-1001…SKU-1007 + บิลตัวอย่าง 8 บิล
 
-**ยังไม่ได้ทำ**: Phase 11 (LINE) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 13–16 แพลตฟอร์มหลายร้าน** (ร่างแล้ว ยังไม่เริ่ม — ทิศทาง: ร้านสมัครเอง,
+เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ⚠️ **production ยังรัน schema เก่า (Phase 1–2)** — branch `feat/pos-and-mobile-order` ยังไม่ merge

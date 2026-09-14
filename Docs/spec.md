@@ -962,7 +962,8 @@ enum ResourceKey {
   trust model เหมือน TRANSFER ทุกประการ ไม่ใช่การเชื่อมระบบชำระเงินจริง
 
 **ฝั่ง MJD Mobile Order (ใหม่)**
-- รองรับหลายสาขา/หลายร้าน (multi-store) — v1 มี `StoreSettings` เดียวทั้งระบบ
+- ~~รองรับหลายสาขา/หลายร้าน (multi-store) — v1 มี `StoreSettings` เดียวทั้งระบบ~~ → **ย้ายเข้า scope แล้ว
+  (2026-09-14) ดู Phase 13 ท้าย §8** — v1 ที่ส่งมอบแล้วยังเป็นร้านเดียว การแยกร้านเริ่มตั้งแต่ Phase 13
 - แบ่งบิล/หารบิลระหว่างลูกค้าหลายคนที่โต๊ะเดียวกัน (split bill)
 - ตัดสต็อกวัตถุดิบตามสูตร/BOM เมื่อขายเมนูอาหาร — `MenuItem` เป็น catalog แบน ไม่ผูกกับ `Product`/`StockTransaction`
 - ระบบชำระเงินผ่าน payment gateway จริงในแอป (คงเฉพาะ EDC ภายนอกสำหรับ CARD)
@@ -973,6 +974,9 @@ enum ResourceKey {
 - Refund บางส่วนหลังปิดบิลของมือถือออร์เดอร์ — ใช้กติกา Void เดิม (F6) เท่านั้น (void ทั้งบิล same-day)
 
 **ฝั่งสิทธิ์ผู้ใช้ (Role-Based Permission)**
+- **ข้อยกเว้นตั้งแต่ Phase 13 (2026-09-14)**: บทบาทขั้นต่ำ `OWNER` / `STAFF` ต่อร้าน (`StoreMember.role`) และ
+  `User.isPlatformAdmin` ถูกดึงเข้า scope เพราะแยกไม่ได้จาก multi-store — **ไม่ใช่** RBAC ตาม §4 (ไม่มี matrix
+  สิทธิ์ราย resource) ข้อความด้านล่างยังใช้กับ RBAC เต็มรูปแบบตามเดิม
 - **ระบบสิทธิ์ตามบทบาททั้งระบบอยู่นอกขอบเขต v1** — ไม่มีตาราง `Role` / `RolePermission`, ไม่มี `User.roleId`,
   ไม่มี page guard เช็ค `VIEW` และไม่มี action guard เช็ค `ADD`/`EDIT`/`DELETE`
   v1 มีด่านเดียวคือ **ล็อกอินแล้วหรือยัง** — ผ่านด่านนี้แล้วเข้าได้ทุกหน้า ทำได้ทุก action เท่ากันทุกคน
@@ -1364,6 +1368,279 @@ enum ResourceKey {
 > ⚠️ **กับดัก — สลับ `hasKDS` กลางไลฟ์**: ถ้าเปลี่ยนขณะมี `TableSession.status=OPEN` อยู่ รายการที่ค้างอยู่
 > ระหว่าง `COOKING`/`READY` จะกำพร้า (ไม่มีใครกด "เสิร์ฟอาหารแล้ว" เพราะ UI ไม่มีปุ่มนี้อีก) — ต้อง validate
 > ที่ server action `updateStoreSettings` ปฏิเสธการสลับถ้ามี session เปิดอยู่อย่างน้อย 1 โต๊ะ
+
+### ⏭️ Phase 13 — Multi-tenant: หลายร้านในระบบเดียว (`Store` + `storeId`)
+> 🧭 **ทิศทางใหม่ (ตัดสินใจ 2026-09-14)**: เปลี่ยนระบบจากร้านเดียวเป็น **แพลตฟอร์มให้ร้านค้าหลายรายสมัครเข้ามา
+> ใช้เอง** และรับเงินเข้าบัญชีของตัวเอง · แผนแบ่งเป็น 4 เฟส — **13 แยกข้อมูลตามร้าน (เฟสนี้)** → 14 สมัคร/
+> สร้างร้าน/เชิญพนักงาน → 15 ตั้งค่ารับเงินต่อร้าน 3 ระดับ (ก / ก+ / ข) → 16 ระบบสิทธิ์เต็มรูปแบบ (ถ้าต้องการ)
+> · เฟส 13 เป็น**ฐานที่ทุกเฟสถัดไปต้องพึ่ง** ไม่ว่าจะเลือกวิธีรับเงินแบบใด
+>
+> ⚠️ **ปลดล็อกขอบเขตบางส่วนจาก §7**: (1) multi-store ย้ายเข้า scope แล้ว (2) RBAC **ขั้นต่ำ 2 บทบาท
+> `OWNER` / `STAFF` ต่อร้าน** ทำในเฟสนี้เพราะแยกไม่ได้จากการมีหลายร้าน (เจ้าของร้านต้องคุมบัญชีรับเงิน/พนักงาน)
+> · ตาราง matrix สิทธิ์ราย resource (F10, `Role`/`RolePermission`) **ยังคงถูกพักไว้** ตามหัวข้อ
+> "Phase ถัดไป — Role-Based Permission" ไม่เอามาทำปนในเฟสนี้
+
+**การตัดสินใจเชิงสถาปัตยกรรมที่ล็อกแล้ว (ห้ามเปิดคุยใหม่ระหว่างทำ)**
+- **ฐานเดียว + คอลัมน์ `storeId`** (shared database, row-level) — ไม่แยก schema/ฐานต่อร้าน เพราะ Prisma/migration/
+  blue-green deploy ทั้งหมดออกแบบมาสำหรับฐานเดียว
+- เอนทิตีร้านชื่อ **`Store`** — ห้ามใช้ `Member` (นั่นคือ**ลูกค้า**สะสมแต้มของร้าน) และห้ามใช้ `Tenant`
+  (ผู้ใช้ไม่รู้จักคำนี้ ข้อความ UI ต้องเป็น "ร้าน")
+- `StoreSettings` เลิกเป็น singleton → **1 แถวต่อร้าน** (`id = storeId`, FK unique) — ค่าเริ่มต้นถูกสร้างพร้อมร้าน
+  ในทรานแซคชันเดียวกันเสมอ ไม่มีร้านที่ไม่มี settings
+- ผู้ใช้ 1 คนอยู่ได้หลายร้านผ่านตารางกลาง `StoreMember` — **ห้ามเพิ่ม `storeId` ลงตาราง `user`** ของ Better Auth
+- **ร้านที่กำลังทำงานอยู่ (active store) ผูกกับ session ฝั่งเซิร์ฟเวอร์** (cookie `activeStoreId` ที่ต้องถูกตรวจกับ
+  `StoreMember` **ทุกคำขอ** ห้ามเชื่อค่าใน cookie ตรง ๆ) · ไม่ใช้ subdomain ต่อร้านในเฟสนี้ (ต้อง wildcard DNS +
+  cert — ยกไปเฟสหลัง)
+- **ฝั่งลูกค้าไม่ต้องแก้ URL** — `qrToken` → `QRCode.storeId` เป็นตัวบอกร้านอยู่แล้ว ธีม/ชื่อร้าน/ค่าบริการ
+  อ่านจาก `StoreSettings` ของร้านนั้น
+- ผู้ดูแลแพลตฟอร์ม (เรา) = `User.isPlatformAdmin` — เป็นคนละแกนกับ `StoreMember.role` และไม่ผูกกับร้านใด
+
+**Schema**
+- [ ] `Store` — `id`, `slug` (unique, ใช้ใน URL/รายงาน), `name`, `status` enum `StoreStatus {ACTIVE, SUSPENDED}`,
+      `createdAt`, `updatedAt`
+- [ ] `StoreMember` — `userId` FK, `storeId` FK, `role` enum `StoreRole {OWNER, STAFF}`, `createdAt` ·
+      `@@unique([userId, storeId])` · **ต้องมี OWNER อย่างน้อย 1 คนต่อร้านเสมอ** (บังคับที่ action ไม่ใช่ DB)
+- [ ] `User.isPlatformAdmin Boolean @default(false)` ผ่าน `additionalFields` ของ Better Auth
+- [ ] เพิ่ม `storeId` (FK → Store, NOT NULL, index) ให้ **entity ราก** ที่ถูก query ตามร้านโดยตรง:
+      `Product`, `Category`, `StockTransaction`, `Sale`, `CashierClosing`, `Table`, `TableSession`, `MenuItem`,
+      `ModifierGroup`, `MobileOrder`, `QRCode`, `Notification`, `StoreSettings`, `Member`, `PaymentIntent`
+      · entity ลูกไม่ต้องมี (`SaleItem`, `MobileOrderItem`, `ModifierOption`, `MemberPointTransaction`,
+      `LineNotificationLog`) — เข้าถึงผ่านพ่อแม่ที่มี `storeId` เสมอ
+- [ ] **แก้ unique ให้เป็นต่อร้าน** (จุดที่พลาดแล้วร้าน B สร้างข้อมูลไม่ได้เพราะชนกับร้าน A):
+
+      | เดิม | ใหม่ |
+      |---|---|
+      | `Product.sku @unique` | `@@unique([storeId, sku])` |
+      | `Category.name @unique` | `@@unique([storeId, name])` |
+      | `Sale.saleNumber @unique` | `@@unique([storeId, saleNumber])` — เลขบิลเริ่ม `INV-000001` ใหม่ทุกร้าน |
+      | `Table.code @unique` | `@@unique([storeId, code])` |
+      | `Member.phone @unique` | `@@unique([storeId, phone])` — ลูกค้าคนเดียวเป็นสมาชิกได้หลายร้าน แต้มไม่รวมกัน |
+      | `CashierClosing @@unique([cashierId, closingDate])` | `@@unique([storeId, cashierId, closingDate])` |
+      | `QRCode.token`, `PaymentIntent.ref1`, `Sale.paymentReference`, `PaymentIntent.transactionId` | **คง global unique** — เป็นตัวที่เดินทางออกนอกระบบ (URL / ธนาคาร) ต้องหาร้านกลับได้จากค่าเดียว |
+
+- [ ] **Migration เขียน SQL เอง** ตามกับดัก `@@map` ใน `CLAUDE.md` ห้ามให้ Prisma generate: (1) สร้าง `store`
+      แถวแรกจาก `store_settings.store_name` เดิม (`slug = 'default'`) (2) เพิ่มคอลัมน์ `store_id` แบบ nullable →
+      backfill ทุกตารางด้วย id นั้น → `SET NOT NULL` (3) drop unique เดิม + สร้าง unique ใหม่ตามตาราง
+      ข้างบน (4) สร้าง `store_member` ให้ผู้ใช้ทุกคนที่มีอยู่เป็น `OWNER` ของร้านแรก (5) ปิดท้ายด้วย
+      `prisma migrate diff --exit-code` ต้อง `No difference detected.`
+
+**Guard และการเข้าถึงข้อมูล**
+- [ ] `requireStore()` ใน `lib/session.ts` คืน `{ user, storeId, role }` — ตรวจ session → อ่าน `activeStoreId` →
+      ยืนยันว่ามี `StoreMember` แถวนั้นและ `Store.status = ACTIVE` → ไม่ผ่านโยน `UNAUTHENTICATED`/`NO_STORE`
+      · **ทุก Server Action ที่แตะข้อมูลร้านเปลี่ยนจาก `requireUser()` เป็น `requireStore()`** (ปัจจุบัน 15 ไฟล์)
+      · `requireUser()` เหลือใช้เฉพาะหน้าที่เป็นของ "ตัวผู้ใช้" ไม่ใช่ของร้าน (`/settings` โปรไฟล์/เปลี่ยนรหัสผ่าน)
+- [ ] `requireOwner()` = `requireStore()` + `role === OWNER` — ใช้กับ: ตั้งค่าร้าน (`updateStoreSettings`),
+      จัดการพนักงาน, และทุกอย่างในเฟส 15 ที่แตะบัญชีรับเงิน
+- [ ] `requirePlatformAdmin()` — ไว้ให้เฟส 14 (`/admin/*`) · เฟสนี้แค่มี helper + เทส
+- [ ] **ชั้นกันลืม `where: { storeId }`** — Prisma Client Extension `forStore(storeId)` ใน `lib/db.ts` ที่ inject
+      `storeId` เข้า `where` ของทุก `find*/update*/delete*/count/aggregate` และเข้า `data` ของ `create*` ให้กับ
+      model ที่มีคอลัมน์นี้ · `lib/queries.ts` และ action ทั้งหมดต้องเรียกผ่าน `db.forStore(storeId)` ไม่ใช่
+      `prisma` ตรง ๆ · ชื่อ `prisma` ที่ import ตรงให้เหลือเฉพาะ: auth, health, webhook (ก่อนรู้ร้าน), และ
+      สคริปต์ · เพิ่ม ESLint rule `no-restricted-imports` กัน `@/lib/prisma` ใน `app/actions/**` และ
+      `lib/queries.ts`
+- [ ] **raw SQL 12 จุดต้องเติม `WHERE store_id = ${storeId}` ด้วยมือ** (extension ช่วยไม่ได้): `lib/queries.ts`
+      (8 จุด), `lib/close-session.ts` (2), `app/actions/products.ts` `nextSku()` (1), `app/actions/sales.ts`
+      `nextSaleNumber()` (1) — ไล่ด้วย `grep -rn '\$queryRaw\|\$executeRaw'` ตอนปิดเฟส
+- [ ] **advisory lock ต้องเป็นต่อร้าน**: `SALE_NUMBER_LOCK` ตอนนี้เป็น key เดียวทั้งระบบ → ทุกร้านต่อคิวออกเลขบิล
+      ร่วมกัน · เปลี่ยนเป็น `pg_advisory_xact_lock(hashtext(${storeId}))` ทั้งใน `lib/close-session.ts` และ
+      `app/actions/sales.ts` (ใช้ helper เดียวกัน) · `nextSku()` ก็ต้องกรองร้าน
+- [ ] ฝั่งลูกค้า `/order/[qrToken]/*` และ `/api/order/[qrToken]/*`: หา `storeId` จาก `QRCode` ครั้งเดียวต้นทาง แล้ว
+      ส่งต่อ — `(customer)/layout.tsx` อ่าน `StoreSettings` ของร้านนั้น (สี/ชื่อ/โลโก้/ค่าบริการ/`crmEnabled`)
+- [ ] Webhook SCB `/api/payments/webhook/scb/[secret]`: หาร้านจาก `PaymentIntent.ref1` แล้วปิดบิลใต้ร้านนั้น ·
+      credential ของ SCB **ยังอยู่ใน env ชุดเดียวในเฟสนี้** (ทุกร้านที่เปิด SCB ใช้ Biller ID เดียวกัน = ยังเป็น
+      ร้านของเราเท่านั้น) — แยกต่อร้านในเฟส 15
+- [ ] `proxy.ts`: ผู้ใช้ที่ล็อกอินแล้วแต่ไม่มี `StoreMember` เลย → ส่งไป `/no-store` (หน้าบอกว่ายังไม่ได้อยู่ในร้านใด
+      รอเชิญ) · หน้าเลือกร้าน `/select-store` เมื่ออยู่หลายร้านและยังไม่ได้เลือก · เฟส 14 จะเปลี่ยน `/no-store`
+      เป็น onboarding สร้างร้าน
+- [ ] `StoreSettings` เลิกอ้าง `id: "default"` ทุกจุด (ปัจจุบัน ~10 จุดในโค้ด/เทส) → อ่านด้วย `storeId` เสมอ
+
+**UI ฝั่งพนักงาน**
+- [ ] Topbar: ชื่อร้านที่ทำงานอยู่ + ตัวสลับร้าน (โผล่เฉพาะเมื่ออยู่ >1 ร้าน) · สลับ = ตั้ง cookie ใหม่ +
+      `router.refresh()`
+- [ ] `/users` → กลายเป็น "พนักงานในร้าน" (รายการ `StoreMember` ของร้านที่ทำงานอยู่) · คอลัมน์บทบาทแสดง
+      `OWNER`/`STAFF` แทน "ยังไม่กำหนดสิทธิ์" · OWNER เปลี่ยนบทบาท/ถอดพนักงานได้ · ถอด OWNER คนสุดท้ายไม่ได้
+- [ ] ปุ่ม/เมนูที่ต้องเป็น OWNER (ตั้งค่าร้าน, พนักงาน) ซ่อนจาก STAFF — แต่ **action ถูกกันที่ `requireOwner()`
+      อยู่แล้ว** UI แค่ไม่ให้งง
+- [ ] Seed/สคริปต์: `pnpm db:seed` สร้างร้านตัวอย่าง 2 ร้านเพื่อให้เทสข้ามร้านมีข้อมูลจริง ·
+      `pnpm db:create-user` รับ `--store <slug>` และ `--role OWNER|STAFF` (ค่าเริ่มต้น: ร้านแรก, OWNER)
+
+**การทดสอบ (กติกาโปรเจกต์: แตะเงิน/สต็อกต้องมีเทส — เฟสนี้แตะทุกอย่าง)**
+- [ ] `__tests__/integration/tenant-isolation.test.ts` — สร้างร้าน A/B พร้อมข้อมูลครบทุก entity แล้วยืนยันว่า
+      **ทุกฟังก์ชันใน `lib/queries.ts`** เรียกใต้ร้าน A ได้ 0 แถวของ B และ**ทุก Server Action** ที่รับ id
+      ของ B ตอบ `ok: false` ข้อความ "ไม่พบข้อมูล" (ไม่ใช่ 500 และไม่ใช่สำเร็จ) — ใช้ตารางชื่อฟังก์ชัน +
+      `it.each` เพื่อให้เพิ่ม query ใหม่แล้วเทสฟ้องถ้าลืมใส่ในตาราง
+- [ ] เลขบิลต่อร้าน: ร้าน A และ B ออก `INV-000001` ได้พร้อมกัน · ภายในร้านเดียวยิง checkout 8 บิลพร้อมกัน
+      ยังต้องได้เลขเรียงไม่มีช่องว่าง (เทสเดิมย้ายมาใส่ `storeId`)
+- [ ] กันขายเกินสต็อกแบบ concurrent (กติกาข้อ 4) และยกเลิกรายการ vs ครัวเริ่มทำ (ข้อ 7) **ยังผ่านเหมือนเดิม**
+      หลังใส่ `storeId` — เทสเดิม 18 ไฟล์ต้องเขียวทั้งหมด
+- [ ] `requireStore()`: cookie ชี้ร้านที่ไม่ได้เป็นสมาชิก → ปฏิเสธ · ร้าน `SUSPENDED` → ปฏิเสธ · STAFF เรียก action
+      ของ OWNER ตรง ๆ → ปฏิเสธ
+- [ ] Webhook: `ref1` ของร้าน A ปิดบิลได้เฉพาะโต๊ะของร้าน A และบิลออกใต้ `storeId` ของ A
+- [ ] ตรวจสอบปิดเฟส: `pnpm test` เขียวทั้งหมด · `prisma migrate diff --exit-code` สะอาด · `grep` raw SQL ครบ
+      12 จุด · ไม่มี `prisma.` ตรง ๆ เหลือใน `app/actions/**` และ `lib/queries.ts` · production migrate
+      แล้วร้าน `default` ใช้งานได้เหมือนเดิมทุกหน้า (smoke test ด้วยการล็อกอินกดจริง ไม่ใช่แค่ `/api/health`)
+
+> ⚠️ **กับดักที่คาดไว้**
+> - **ลืม `where: { storeId }` จุดเดียว = ร้านหนึ่งเห็นบิล/ลูกค้าของอีกร้าน** — เป็นเหตุการณ์ระดับ "ต้องแจ้งลูกค้า"
+>   ไม่ใช่บั๊กธรรมดา · ถึงมี extension ก็ต้องมีเทส isolation ครอบ**ทุก** query เพราะ raw SQL และ `include`
+>   ซ้อนลึกหลุดจาก extension ได้
+> - `findUnique` ด้วย id ที่รับจากผู้ใช้: `prisma.sale.findUnique({ where: { id } })` — ถ้า `id` เป็นของร้านอื่น
+>   จะเจอแถวนั้นทันที · **ต้องเปลี่ยนเป็น `findFirst({ where: { id, storeId } })`** ทุกจุดที่ id มาจากภายนอก
+> - cookie `activeStoreId` เป็นข้อมูลจากเบราว์เซอร์ = ไม่น่าเชื่อถือ ต้องตรวจกับ `StoreMember` ทุกครั้ง
+>   ห้าม cache ผลข้ามคำขอ (ถอดพนักงานแล้วต้องมีผลทันที)
+> - advisory lock key เดิมเป็นค่าคงที่ — ถ้าลืมแก้ ร้านทั้งหมดจะต่อคิวออกเลขบิลผ่าน lock เดียว ช้าลงตามจำนวนร้าน
+>   และเทสเลขบิลต่อร้านจะไม่จับได้ (ยังถูกต้องแค่ช้า) — ต้องรีวิวด้วยตา
+> - migration เฟสนี้แตะ ~15 ตารางบน production ที่มีข้อมูลจริง → ต้อง `pg_dump` ก่อน และซ้อมรันบนสำเนาฐาน
+>   production ในเครื่องก่อน merge · ห้าม merge วันที่ร้านเปิดขายอยู่
+> - `Member.phone` เลิก unique ทั้งระบบ → ฟอร์มสมัครสมาชิกบน `pay/success` ต้องรู้ `storeId` จาก session
+>   ของโต๊ะ ไม่ใช่จาก cookie พนักงาน (ลูกค้าไม่มี cookie นั้น)
+
+### ⏭️ Phase 14 — Onboarding: สมัคร/สร้างร้าน/เชิญพนักงาน + ผู้ดูแลแพลตฟอร์ม + ค่าใช้งานแบบต่ออายุ
+> ร่างคร่าว ๆ — ลงรายละเอียดเมื่อ Phase 13 ปิด
+- [ ] สมัคร → ยืนยันอีเมล → `/onboarding` สร้างร้าน (ชื่อ, slug, สีธีม) → เป็น OWNER อัตโนมัติ ในทรานแซคชันเดียว
+      กับ `StoreSettings` เริ่มต้น + โต๊ะ/เมนูตัวอย่างชุดเล็กให้ลองกดได้ทันที
+- [ ] เชิญพนักงานทางอีเมล (`lib/mail.ts` ฟังก์ชันที่ 3 `sendStoreInviteMail`) → ลิงก์มี token หมดอายุ → ผู้รับสมัคร/
+      ล็อกอินแล้วถูกผูกเป็น STAFF
+- [ ] `/admin/stores` (เฉพาะ `isPlatformAdmin`): รายชื่อร้าน, ระงับ/ปลดระงับ, ดูจำนวนบิล/ยอดขายรวมต่อร้าน —
+      **อ่านอย่างเดียว ไม่ให้ผู้ดูแลแพลตฟอร์มแก้ข้อมูลในร้าน**
+- [ ] **ร้านหลายสาขา (`Brand`)** — ตัดสินใจ 2026-09-14: **1 สาขา = 1 `Store` เสมอ** (เมนู/โต๊ะ/QR/tier/รายงาน
+      แยกกันโดยธรรมชาติ สาขาเล็กจ่าย S สาขาใหญ่จ่าย L) · `Brand` เป็นแค่ชั้นบาง ๆ ครอบด้านบนเพื่อลดงานซ้ำของเจ้าของ
+      **ไม่ใช่ที่เก็บข้อมูลขาย** — ห้ามย้าย `Table`/`MenuItem`/`Sale` ขึ้นไปอยู่ระดับ Brand
+      - Schema: `Brand` (`id`, `name`, `ownerId` FK → User, `createdAt`) · `Store.brandId String?` (optional —
+        ร้านสาขาเดียวไม่ต้องมี Brand) · **เจ้าของ Brand = OWNER ของทุก Store ใต้ Brand โดยอัตโนมัติ** (บังคับที่
+        `requireStore()`: ถ้า `user.id === store.brand.ownerId` → role OWNER แม้ไม่มีแถว `StoreMember`) ·
+        พนักงานยังผูกรายสาขาผ่าน `StoreMember` เหมือนเดิม
+      - **คัดลอกเมนูข้ามสาขา** (`copyMenuFromStore(sourceStoreId)` — ต้องเป็น OWNER ทั้งสองร้าน): คัดลอก `MenuItem` +
+        `ModifierGroup`/`ModifierOption` + `Category` เป็น**สำเนาอิสระ** แล้วแต่ละสาขาแก้ราคา/ซ่อนรายการ/เพิ่มเมนูเฉพาะ
+        สาขาได้เอง · **ไม่ทำ "เมนูกลาง sync อัตโนมัติ" ในเฟสนี้** — ต้องมี override ราคา/ความพร้อมขายต่อสาขาซึ่งซับซ้อน
+        รอร้านจริงร้องขอ · ตอนสร้างสาขาใหม่ใต้ Brand ถามว่า "คัดลอกเมนูจากสาขาไหน" ทันที
+      - **รายงานรวมแบรนด์** `/brand/reports` (เจ้าของ Brand): ยอดขาย/จำนวนบิลรายสาขาเทียบกัน + ยอดรวม — **อ่านอย่างเดียว**
+        query เดิมใน `lib/queries.ts` เรียกซ้ำต่อ `storeId` แล้วรวมในโค้ด ไม่เขียน query ข้ามร้านใหม่ (กัน isolation รั่ว)
+      - **จ่ายค่าใช้งานใบเดียว**: `/brand/billing` เลือก tier + ระยะเวลาให้หลายสาขาในครั้งเดียว → สร้าง `StoreSubscription`
+        แถวละสาขา (`status = PENDING`) ผูกกัน `batchId` เดียว → QR ยอดรวมใบเดียว → ผู้ดูแลยืนยันครั้งเดียวทั้ง batch
+        (ทรานแซคชันเดียว) · แต่ละสาขาเลือก tier ต่างกันได้ในใบเดียวกัน · ไม่มีส่วนลดหลายสาขาในเฟสนี้
+      - สลับสาขาเร็ว: ตัวสลับร้านใน topbar (Phase 13) จัดกลุ่มตาม Brand
+      - **ยังไม่ทำ**: สมาชิก/แต้มร่วมข้ามสาขา (`Member` ยังผูกรายสาขาตาม §7), เมนูกลาง sync, โอนโต๊ะ/พนักงานข้ามสาขา,
+        ย้าย `Store` ระหว่าง Brand
+      - เทส: เจ้าของ Brand เข้าสาขาใต้ Brand ได้เป็น OWNER โดยไม่มี `StoreMember` · เจ้าของ Brand A เข้าสาขาของ
+        Brand B ไม่ได้ · คัดลอกเมนูแล้วแก้ราคาที่สาขาปลายทางไม่กระทบต้นทาง · ยืนยัน batch ครึ่งเดียวไม่ได้ (ทั้งหมดหรือไม่เลย)
+- [ ] **ค่าใช้งานแบบต่ออายุ (Store Subscription)** — เก็บเงินร้านเป็น "วัน" ต่ออายุล่วงหน้าได้ มีส่วนลดจูงใจ
+      ให้ซื้อนาน และ**เก็บประวัติเรตทุกครั้งที่เปลี่ยน** (ตัดสินใจ 2026-09-14)
+
+      **กติกา**
+      - หน่วยขั้นต่ำ = **1 วัน = 10 บาท** (`BASE_RATE_PER_DAY`) · แพ็กเกจมาตรฐาน 6 แบบ: 7 · 15 · 30 วัน · 3 · 6 · 12 เดือน
+        (นับเป็นวัน 90/180/365) — แพ็กเกจยาวขึ้น = ส่วนลดมากขึ้น · ราคาสุทธิเป็นบาทเต็มเสมอ
+      - **ต่ออายุแบบต่อท้าย (stack)**: `periodStart = max(now, Store.planExpiresAt)` → จ่ายล่วงหน้าไม่เสียวันที่เหลือ
+      - **หมดอายุ = อ่านได้ ขายไม่ได้**: `requireStore()` โยน `STORE_EXPIRED` ให้ทุก action ที่สร้าง/แก้ข้อมูลขาย
+        (เปิดโต๊ะ, checkout POS, รับออเดอร์ลูกค้า) · หน้า reports/history/settings ยังเข้าได้ · ฝั่งลูกค้าสแกน QR เห็น
+        "ร้านปิดรับออเดอร์ชั่วคราว" ไม่ใช่ error · ไม่มี grace period แต่**เตือนล่วงหน้า 7 / 3 / 1 วัน** (แบนเนอร์ +
+        อีเมลถึง OWNER ผ่าน `lib/mail.ts`)
+      - **ทดลองใช้ 7 วัน — ผูกกับพร้อมเพย์ของร้าน ไม่ใช่กับอีเมล** (ตัดสินใจ 2026-09-14 หลังพบว่าอีเมลสร้างใหม่ได้
+        ไม่จำกัด): สิทธิ์ทดลองเริ่มนับ**ต่อเมื่อร้านกรอกเลขพร้อมเพย์/บัญชีรับเงินแล้ว** (ต้องกรอกอยู่แล้วเพื่อรับเงินลูกค้า
+        ใน Phase 15) และ **1 เลขพร้อมเพย์ = ทดลองได้ครั้งเดียวตลอดกาล** · บันทึกที่ `TrialClaim` (`promptPayIdHash`
+        unique, `claimedAt`, `storeId`) — **ไม่ลบแม้ร้านถูกลบ** เลขเดิมโผล่อีก = ไม่ได้ทดลอง ต้องจ่าย · แถวทดลองบันทึกเป็น
+        `StoreSubscription` `kind = TRIAL`, `amount = 0`, tier S · ไม่ทำชั้นกันอื่น (จำกัดฟีเจอร์/บล็อกอีเมลชั่วคราว)
+        จนกว่าจะเห็นสถิติสมัครซ้ำจริง
+      - **ราคาคิดตามจำนวนโต๊ะ (tier) × จำนวนวัน** (ตัดสินใจ 2026-09-14 หลังพบว่าไม่จำกัดโต๊ะ = ร้านหลายสาขาแจ้งสาขาเดียว
+        แล้วเพิ่มโต๊ะไม่จำกัดได้): เราไม่ต้องรู้ว่าร้านมีกี่สาขา — **โต๊ะทุกตัวที่มีอยู่ต้องอยู่ในเพดานของ tier ที่จ่าย**
+        · เพดานบังคับที่ `createTable` (นับ `Table` ที่ยังใช้งานของร้าน ≥ `Store.tableLimit` → `ok:false`
+        "แพ็กเกจของร้านรองรับได้ N โต๊ะ อัปเกรดได้ที่หน้า ค่าใช้งาน") ภายใต้ advisory lock ต่อร้าน กันสร้างพร้อมกันทะลุเพดาน
+        · รวมโต๊ะ (merge) ไม่นับเป็นสร้าง · ลบโต๊ะแล้วสร้างใหม่ได้แต่ QR บนโต๊ะนั้นต้องพิมพ์ใหม่ (แรงเสียดทานธรรมชาติ)
+        · ร้านที่มีหลายสาขาจริง แนะนำให้ "สร้างร้านเพิ่ม" (ผู้ใช้เป็น OWNER ได้หลายร้าน — รายงาน/QR แยกกันอยู่แล้ว)
+      - **อัปเกรด tier กลางทาง**: จ่ายส่วนต่าง `(rateใหม่ − rateเดิม) × วันที่เหลือ` ไม่มีส่วนลด ปัดขึ้นเป็นบาทเต็ม
+        บันทึกเป็นแถว `kind = UPGRADE` (`periodStart = now`, `periodEnd = วันหมดอายุเดิม` ไม่ยืดวัน) →
+        `Store.tableLimit` เปลี่ยนทันทีที่ยืนยันจ่าย · **ดาวน์เกรดตอนต่ออายุ**ได้เฉพาะเมื่อโต๊ะที่ใช้อยู่ ≤ เพดานใหม่
+        ไม่งั้นปฏิเสธพร้อมบอกจำนวนโต๊ะที่ต้องลบก่อน
+      - ใครจ่ายอย่างไร: **Phase 14 = โอนเข้าพร้อมเพย์ของแพลตฟอร์ม แล้วผู้ดูแลกดยืนยัน** (แถว `PENDING → PAID`)
+        · Phase 15 ค่อยต่อ "ตรวจสลิปอัตโนมัติ" (ก+) ให้ร้านต่ออายุเองได้โดยไม่ต้องรอเรา — ใช้ตัวตรวจสลิปตัวเดียวกับ
+        ที่ร้านใช้รับเงินลูกค้า
+
+      **Schema**
+      - `SubscriptionPlan` — `id`, `code` (เช่น `S-D7`, `M-M3`, `TRIAL`, `CUSTOM`), `name`, `tier` enum `{S, M, L, XL}`,
+        `tableLimit Int`, `durationDays Int`, `ratePerDay Decimal(8,2)`, `discountPercent Decimal(5,2)`,
+        `price Decimal(10,2)` (สุทธิ ตั้งตรง ๆ ไม่คำนวณ), `isActive`, `sortOrder`, `version Int`,
+        `supersededById String?`, `createdAt`, `createdById`
+        · **append-only เหมือน `StockTransaction`**: แก้ราคา/เพดานโต๊ะ = สร้างแถว version ใหม่ + ตั้ง `supersededById`
+        และ `isActive=false` ให้แถวเก่า **ห้าม UPDATE แถวเดิม** — นี่คือ "ประวัติเรต" ที่ตรวจย้อนหลังได้ว่าวันไหนขายเรตไหน
+        · `@@unique([code, version])`
+      - `StoreSubscription` (ledger การต่ออายุ — append-only) — `id`, `storeId`, `planId` (FK ไป version ที่ใช้จริง),
+        `kind` enum `{RENEWAL, UPGRADE, TRIAL, CUSTOM}`, **snapshot ตัวเลข ณ ตอนซื้อ**: `tier`, `tableLimit`, `days`,
+        `ratePerDay`, `discountPercent`, `listPrice`, `amount`, `periodStart`, `periodEnd`, `status` enum
+        `{PENDING, PAID, VOID}`, `paymentMethod` enum `{TRANSFER, PROMPTPAY, FREE}`, `paymentReference String? @unique`
+        (กันยืนยันซ้ำ), `paidAt`, `confirmedById`, `createdById`, `note`, `createdAt`
+        · ยกเลิกรายการที่ PAID ไปแล้ว = สร้างแถว `VOID` ชดเชย ไม่ลบ
+      - `TrialClaim` — `id`, `promptPayIdHash String @unique` (SHA-256 ของเลขที่ normalize แล้ว ไม่เก็บเลขดิบ),
+        `storeId`, `claimedAt` · **ไม่มี FK cascade** — ร้านถูกลบแถวนี้ต้องอยู่
+      - `Store.planExpiresAt DateTime?` + `Store.tableLimit Int` — denormalized จากแถว `PAID` ล่าสุด ·
+        **อัปเดตในทรานแซคชันเดียวกับการยืนยันจ่ายเสมอ** (กติกาเดียวกับ `product.quantity` ↔ `StockTransaction`)
+
+      **ตารางแพ็กเกจเริ่มต้น (seed — แก้ได้ที่ `/admin/plans` แต่จะกลายเป็น version ใหม่)**
+
+      tier กำหนดเรตต่อวัน · ระยะเวลากำหนดส่วนลด · ราคาสุทธิ = ปัดเป็นเลขกลม (ตั้งตรง ๆ ในแถว ไม่คำนวณสด)
+
+      | tier | เพดานโต๊ะ | เรต/วัน | 7 วัน | 15 วัน | 30 วัน | 3 เดือน (90) | 6 เดือน (180) | 1 ปี (365) |
+      |---|---|---|---|---|---|---|---|---|
+      | **S** | ≤ 12 | 10 | **70** | **145** | **280** | **800** | **1,500** | **2,800** |
+      | **M** | ≤ 30 | 20 | **140** | **290** | **560** | **1,600** | **3,000** | **5,600** |
+      | **L** | ≤ 60 | 35 | **245** | **505** | **980** | **2,800** | **5,250** | **9,800** |
+      | **XL** | ≤ 120 | 60 | **420** | **870** | **1,680** | **4,800** | **9,000** | **16,800** |
+      | ส่วนลดตามระยะ | | | 0% | ~3% | ~7% | ~11% | ~17% | ~23% |
+      | TRIAL | ≤ 12 | 0 | 7 วัน — ครั้งเดียวต่อพร้อมเพย์ | | | | | |
+      | CUSTOM | ตาม tier ปัจจุบัน | เรตของ tier | n วัน × เรต ไม่มีส่วนลด — เฉพาะผู้ดูแลแพลตฟอร์ม (ชดเชย/ปรับวัน) | | | | | |
+
+      เกิน 120 โต๊ะ = ติดต่อเรา (ไม่มีในระบบ ผู้ดูแลใช้ CUSTOM + ตั้ง `tableLimit` เอง)
+
+      **หน้าจอ**
+      - ฝั่งร้าน `/billing` (OWNER เท่านั้น): วันหมดอายุ + นับถอยหลัง · **โต๊ะที่ใช้อยู่ / เพดาน** · เลือก tier แล้วเห็น
+        การ์ดระยะเวลา 6 ใบโชว์ราคาสุทธิ/ส่วนลด/เฉลี่ยต่อวัน · ปุ่ม "อัปเกรดตอนนี้" โชว์ส่วนต่างที่ต้องจ่ายสำหรับวันที่เหลือ ·
+        กดเลือก → ได้ QR พร้อมเพย์ของแพลตฟอร์ม + เลขอ้างอิง → สถานะ "รอผู้ดูแลยืนยัน" · ตารางประวัติทุกแถว (kind/tier/วัน/ยอด)
+      - ฝั่งแพลตฟอร์ม `/admin/stores`: คอลัมน์ "หมดอายุ", "โต๊ะ/เพดาน" + ตัวกรอง "ใกล้หมด ≤ 7 วัน / หมดแล้ว / โต๊ะเต็มเพดาน" ·
+        `/admin/stores/[id]`: ledger ต่ออายุ, ปุ่มยืนยัน `PENDING` (ใส่ `paymentReference`), เติมวัน CUSTOM, ตั้ง
+        `tableLimit` พิเศษ, ระงับร้าน · `/admin/plans`: รายการ version ทั้งหมด (active/superseded) + ฟอร์มออก version ใหม่
+      - Server actions: `requestRenewal(planCode)` / `requestUpgrade(tier)` (OWNER), `confirmRenewal(id, reference)` /
+        `voidRenewal(id, reason)` / `grantCustomDays(storeId, days, note)` / `setTableLimit(storeId, n, note)`
+        (ผู้ดูแลแพลตฟอร์ม), `publishPlanVersion(...)` (ผู้ดูแลแพลตฟอร์ม)
+
+      **เทส (แตะเงิน → ต้องมี)**
+      - stack ถูกต้อง: ต่ออายุตอนเหลือ 10 วัน ด้วย S-D30 → หมดอายุ +40 วัน ไม่ใช่ +30
+      - ร้านหมดอายุ: `openTableSession` / `checkout` / `createMobileOrder` ตอบ `ok:false` ข้อความไทย ส่วน `getReports`
+        ยังอ่านได้
+      - **เพดานโต๊ะ**: tier S มี 12 โต๊ะแล้ว `createTable` ตอบ `ok:false` · ยิง `createTable` พร้อมกัน 5 คำขอตอนมี 10 โต๊ะ
+        → ผ่านแค่ 2 · merge ไม่ติดเพดาน · ลบ 1 แล้วสร้างใหม่ได้
+      - **อัปเกรดกลางทาง**: S→M เหลือ 20 วัน → ส่วนต่าง (20−10)×20 = 200 บาท · `tableLimit` เป็น 30 ทันทีที่ยืนยัน ·
+        `planExpiresAt` ไม่เปลี่ยน · ดาวน์เกรด M→S ตอนมี 20 โต๊ะ → ปฏิเสธพร้อมบอกว่าต้องลบ 8 โต๊ะ
+      - **ทดลองครั้งเดียว**: พร้อมเพย์เดิมสร้างร้านที่ 2 → ไม่ได้ TRIAL · ลบร้านแรกแล้วสมัครใหม่ด้วยเลขเดิม → ยังไม่ได้ ·
+        เลขเดียวกันเขียนต่างรูปแบบ (`081-234-5678` / `0812345678` / `+66812345678`) ต้อง hash ตรงกัน
+      - ยืนยันซ้ำด้วย `paymentReference` เดิม → ไม่เพิ่มวันซ้ำ (unique)
+      - แก้ราคา/เพดานแพ็กเกจหลังร้านซื้อไปแล้ว → แถว `StoreSubscription` เดิมตัวเลขไม่เปลี่ยน และ plan version เก่ายังอ้างได้
+      - `voidRenewal` แถว PAID → `planExpiresAt`/`tableLimit` ถอยกลับถูกต้องและแถวเดิมยังอยู่
+      - ยืนยัน 2 คำขอพร้อมกันกับแถว PENDING เดียว → ผ่านแค่ 1 (`updateMany` + `where: { status: 'PENDING' }`
+        กติกาเดียวกับข้อ 7)
+
+### ⏭️ Phase 15 — ตั้งค่ารับเงินต่อร้าน 3 ระดับ (ก / ก+ / ข)
+> ร่างคร่าว ๆ · ตัดสินใจแล้วว่า**ไม่ใช้ payment gateway แบบโอนต่อ (marketplace)** เพราะค่าธรรมเนียม/รอบโอน
+> ไม่เหมาะกับร้านเป้าหมาย — เงินต้องเข้าบัญชีร้านโดยตรงทุกระดับ
+- [ ] `Store.paymentMode` enum `{PROMPTPAY_DIRECT, PROMPTPAY_SLIP, SCB_BILLER}` + `StorePaymentConfig`
+      (เลขพร้อมเพย์, เลขบัญชี/ชื่อบัญชีไว้เทียบผู้รับ, credential SCB ต่อร้าน**เข้ารหัส**ด้วย key ใน env)
+      — แก้ได้เฉพาะ OWNER
+- [ ] **ก — พร้อมเพย์ตรง**: ย้าย `PROMPTPAY_ID` จาก env → ต่อร้าน · พนักงานกดยืนยัน (flow เดิม) · ค่าเริ่มต้นของทุกร้าน
+- [ ] **ก+ — พร้อมเพย์ตรง + ตรวจสลิปอัตโนมัติ**: หน้า `pay/promptpay` เพิ่ม "แนบสลิป" → อ่าน QR บนสลิป**ฝั่ง
+      เบราว์เซอร์** (ไม่อัปโหลดรูป) → action `verifySlipAndSettle()` เรียก API ตรวจสลิป (เลือกผู้ให้บริการ: SlipOK /
+      EasySlip — ขอราคาเทียบก่อน) → เทียบ 4 เงื่อนไข: ผู้รับตรงบัญชีร้าน · ยอด ≥ บิล · รหัสอ้างอิงไม่เคยใช้
+      (`Sale.paymentReference` unique) · เวลาไม่เกิน N นาที → `closeSessionWithPayment()` ตัวเดิม ·
+      API ล่ม → ตกไปปิดมือแบบ ก
+- [ ] **ข — SCB Biller ID ของร้าน**: token cache ต่อร้าน, `inquireBillPayment` ใช้ credential ของร้านเจ้าของ intent,
+      webhook URL ต่อร้าน `/api/payments/webhook/scb/[storeWebhookToken]` · **ปุ่ม "ทดสอบการเชื่อมต่อ"** ออก QR
+      1 บาทให้เจ้าของจ่ายแล้วรอ callback ≤ 2 นาที — **ผ่านแล้วเท่านั้นถึงเปิดปิดบิลอัตโนมัติ** · ระหว่างนี้ติดต่อ SCB
+      เรื่อง partner program (แอปเดียวของเรา ผูกหลาย Biller ID) ถ้าได้จะตัดการถือ credential ของร้านทิ้ง
+- [ ] `lib/payment-provider/` → interface กลางเลือกตาม `Store.paymentMode` · `isScbConfigured()` เลิกอ่าน env
+- [ ] เทส: สลิปซ้ำไม่ปิดบิลซ้ำ · สลิปโอนเข้าบัญชีร้านอื่นถูกปฏิเสธ · ยอดขาดถูกส่งให้พนักงาน · webhook ร้าน A ปิดบิล
+      ร้าน B ไม่ได้
+
+### ⏭️ Phase 16 — Role-Based Permission เต็มรูปแบบ (ถ้าจำเป็น)
+> = หัวข้อ "Phase ถัดไป — Role-Based Permission" ข้างบน ปรับให้ `Role` อยู่ใต้ `Store` (ร้านกำหนดบทบาทเอง) ·
+> เริ่มเมื่อมีร้านจริงร้องขอมากกว่า OWNER/STAFF เท่านั้น
+
 
 ---
 
