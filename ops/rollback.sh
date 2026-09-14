@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=ops/lib-common.sh
 . "${SCRIPT_DIR}/lib-common.sh"
 
-IMAGE_REPO="${IMAGE_REPO:-ghcr.io/mjdgroup2026-sys/posmobileorder-claude}"
+IMAGE_REPO="${IMAGE_REPO:-ghcr.io/mjdgroup2026-sys/posqrmemberpay}"
 TARGET_TAG="${1:-previous}"
 
 require_docker

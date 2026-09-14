@@ -98,7 +98,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/mjdgroup2026-sys/posmobileorder-claude
+          images: ghcr.io/mjdgroup2026-sys/posqrmemberpay
           tags: |
             type=sha,prefix=sha-
             type=raw,value=latest
@@ -116,7 +116,7 @@ jobs:
         id: meta-migrate
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/mjdgroup2026-sys/posmobileorder-claude
+          images: ghcr.io/mjdgroup2026-sys/posqrmemberpay
           flavor: |
             suffix=-migrate
           tags: |
@@ -169,8 +169,8 @@ jobs:
             # เก็บ image ที่กำลังรันไว้เป็น :previous ก่อนดึงตัวใหม่ทับ
             # ตั้ง tag ในเครื่องอย่างเดียว ไม่ push ขึ้น registry — ops/rollback.sh
             # จึงย้อนกลับได้แม้ ghcr.io ล่ม (rollback.sh ใช้ image ในเครื่องก่อนเสมอ)
-            docker tag ghcr.io/mjdgroup2026-sys/posmobileorder-claude:latest \
-                       ghcr.io/mjdgroup2026-sys/posmobileorder-claude:previous 2>/dev/null || true
+            docker tag ghcr.io/mjdgroup2026-sys/posqrmemberpay:latest \
+                       ghcr.io/mjdgroup2026-sys/posqrmemberpay:previous 2>/dev/null || true
 
             # ⚠️ ลำดับสำคัญ: pull → migrate → **ค่อย** สลับสี
             #    ถ้าสลับก่อน migrate โค้ดใหม่จะเจอ schema เก่าในช่วงคาบเกี่ยว แล้ว 500 ใส่ลูกค้า

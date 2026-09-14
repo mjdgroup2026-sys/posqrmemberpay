@@ -29,7 +29,7 @@ x-database-url: &db-url
 x-app-base: &app-base
   # APP_TAG ทำให้ ops/rollback.sh ย้อนเวอร์ชันได้โดยไม่ต้องแก้ไฟล์นี้
   # ปกติไม่มีค่านี้ใน .env จึงใช้ latest — rollback.sh จะเขียน APP_TAG=<tag> ลง .env เอง
-  image: ghcr.io/mjdgroup2026-sys/posmobileorder-claude:${APP_TAG:-latest}
+  image: ghcr.io/mjdgroup2026-sys/posqrmemberpay:${APP_TAG:-latest}
   restart: unless-stopped
   environment:
     <<: *db-url
@@ -104,7 +104,7 @@ services:
     # ⚠️ image นี้ต้อง build จาก stage `migrator` เท่านั้น (ci.yml job build-and-push)
     # stage deps ไม่มี prisma/ กับ prisma7.config.ts จะฟ้อง "Could not find Prisma Schema"
     # แล้ว deploy "สำเร็จ" ทั้งที่ DB ไม่มีตาราง
-    image: ghcr.io/mjdgroup2026-sys/posmobileorder-claude:latest-migrate
+    image: ghcr.io/mjdgroup2026-sys/posqrmemberpay:latest-migrate
     container_name: posmobileorder-migrate
     # อยู่ใต้ profile "tools" — `docker compose up -d` เฉย ๆ จะไม่สตาร์ตตัวนี้
     # CI เรียกเองเป็นขั้นแยก: docker compose --profile tools run --rm migrate
