@@ -20,6 +20,7 @@ import {
   IconQr,
   IconStore,
   IconLock,
+  IconShield,
   IconMenu,
 } from "@/components/icons"
 import type { ResourceKey } from "@/lib/permissions"
@@ -32,6 +33,8 @@ type NavItem = {
   Icon: typeof IconDashboard
   badge?: "lowStock" | "pending"
   resource?: ResourceKey
+  /// เมนูของผู้ดูแลแพลตฟอร์ม (Phase 14a) — คนละแกนกับ resource ของร้าน เห็นเฉพาะ User.isPlatformAdmin
+  platformAdmin?: true
 }
 
 const GROUPS: { title?: string; items: NavItem[] }[] = [
@@ -72,6 +75,10 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
       { href: "/settings", label: "ตั้งค่า", Icon: IconSettings },
     ],
   },
+  {
+    title: "แพลตฟอร์ม",
+    items: [{ href: "/admin/stores", label: "ร้านค้าทั้งหมด", Icon: IconShield, platformAdmin: true }],
+  },
 ]
 
 /// href ที่มีเส้นทางลูก (เช่น /pos กับ /pos/history) ต้องเทียบแบบตรงตัว
@@ -82,17 +89,20 @@ export function Sidebar({
   lowStockCount,
   pendingNotificationCount = 0,
   viewableResources,
+  isPlatformAdmin = false,
 }: {
   lowStockCount: number
   pendingNotificationCount?: number
   /// resource ที่ผู้ใช้มีสิทธิ์ VIEW — layout คำนวณจาก DB ให้ทุกคำขอ
   viewableResources: ResourceKey[]
+  isPlatformAdmin?: boolean
 }) {
   const pathname = usePathname()
 
   // เมนูที่ไม่ผูก resource แสดงเสมอ · ที่ผูกไว้ต้องมีสิทธิ์ VIEW ถึงจะเห็น (§4)
   // ซ่อนเมนูเป็นแค่ความสะดวก ด่านจริงคือ requirePageAccess() ที่ตัวหน้า
-  const canView = (item: NavItem) => !item.resource || viewableResources.includes(item.resource)
+  const canView = (item: NavItem) =>
+    item.platformAdmin ? isPlatformAdmin : !item.resource || viewableResources.includes(item.resource)
 
   // กลุ่มที่ไม่เหลือเมนูเลยต้องหายไปทั้งกลุ่ม ไม่ใช่เหลือหัวข้อลอย ๆ
   const visibleGroups = GROUPS.map((group) => ({ group, items: group.items.filter(canView) })).filter(

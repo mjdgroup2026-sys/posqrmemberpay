@@ -425,3 +425,48 @@ export const storeMemberRoleSchema = z.object({
   userId: requiredId("ไม่พบผู้ใช้ที่ต้องการแก้ไข"),
   role: z.enum(["OWNER", "STAFF"], { message: "บทบาทในร้านไม่ถูกต้อง" }),
 })
+
+// ───────────────────── Onboarding + คำเชิญ (Phase 14a) ─────────────────────
+
+/// slug ที่ชนกับ route/ความหมายพิเศษ — ไม่ให้ร้านใช้ (default = ร้านที่ migrate มาจาก v1)
+export const RESERVED_STORE_SLUGS = ["default", "admin", "api", "order", "login", "register", "onboarding", "invite"] as const
+
+export const createStoreSchema = z.object({
+  name: z.string().trim().min(2, "ชื่อร้านต้องมีอย่างน้อย 2 ตัวอักษร").max(60, "ชื่อร้านยาวเกินไป (ไม่เกิน 60 ตัวอักษร)"),
+  slug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9-]{3,30}$/, "รหัสร้าน (slug) ต้องเป็น a-z, 0-9 หรือ - ยาว 3–30 ตัว")
+    .refine((v) => !v.startsWith("-") && !v.endsWith("-"), "รหัสร้านต้องไม่ขึ้นต้นหรือลงท้ายด้วย -")
+    .refine((v) => !(RESERVED_STORE_SLUGS as readonly string[]).includes(v), "รหัสร้านนี้สงวนไว้สำหรับระบบ กรุณาใช้ชื่ออื่น"),
+  themeColor: hexColor,
+})
+
+export const inviteMemberSchema = z.object({
+  email: z.string().trim().toLowerCase().email("รูปแบบอีเมลไม่ถูกต้อง").max(254, "อีเมลยาวเกินไป"),
+  role: z.enum(["OWNER", "STAFF"], { message: "บทบาทในร้านไม่ถูกต้อง" }),
+})
+
+export const inviteIdSchema = z.object({
+  id: requiredId("ไม่พบคำเชิญที่ต้องการยกเลิก"),
+})
+
+/// token ดิบจาก URL — 32 ไบต์ base64url = 43 ตัว · ตรวจรูปแบบก่อน hash เพื่อไม่ต้องยิง DB กับค่าขยะ
+export const inviteTokenSchema = z.object({
+  token: z.string().trim().regex(/^[A-Za-z0-9_-]{32,64}$/, "ลิงก์คำเชิญไม่ถูกต้อง"),
+})
+
+/// ตอบรับได้ 2 ทาง: token จากลิงก์ในอีเมล หรือ inviteId จากรายการคำเชิญค้างบน /no-store (ลิงก์หายระหว่างสมัคร)
+export const acceptInviteSchema = z
+  .object({
+    token: z.string().trim().optional().transform((v) => (v === "" ? undefined : v)),
+    inviteId: z.string().trim().optional().transform((v) => (v === "" ? undefined : v)),
+  })
+  .refine((v) => Boolean(v.token || v.inviteId), { message: "ไม่พบคำเชิญที่ต้องการตอบรับ" })
+  .refine((v) => !v.token || /^[A-Za-z0-9_-]{32,64}$/.test(v.token), { message: "ลิงก์คำเชิญไม่ถูกต้อง", path: ["token"] })
+
+export const storeStatusSchema = z.object({
+  storeId: requiredId("ไม่พบร้านที่ต้องการแก้ไข"),
+  status: z.enum(["ACTIVE", "SUSPENDED"], { message: "สถานะร้านไม่ถูกต้อง" }),
+})

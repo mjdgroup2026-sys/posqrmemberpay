@@ -1,9 +1,10 @@
 import Link from "next/link"
-import { listUsers, listRoleOptions } from "@/lib/queries"
+import { listUsers, listRoleOptions, listPendingInvites } from "@/lib/queries"
 import { formatDateTime } from "@/lib/format"
 import { requirePageAccess, hasPermission } from "@/lib/permissions"
 import { UserRolePicker } from "@/components/user-role-picker"
 import { StoreMemberControls } from "@/components/store-member-controls"
+import { InviteManager } from "@/components/invite-manager"
 import { IconLock } from "@/components/icons"
 
 export const metadata = { title: "ผู้ใช้งาน" }
@@ -16,7 +17,12 @@ export default async function UsersPage() {
   // ปุ่มเลื่อน/ถอดสมาชิกร้านเป็นของเจ้าของร้านเท่านั้น (Phase 13) — คนละสิทธิ์กับ USERS:EDIT
   const isOwner = permissions.storeRole === "OWNER"
 
-  const [users, roles] = await Promise.all([listUsers(storeId), listRoleOptions(storeId)])
+  const [users, roles, invites] = await Promise.all([
+    listUsers(storeId),
+    listRoleOptions(storeId),
+    // คำเชิญค้างเป็นของเจ้าของร้าน — STAFF ไม่ต้องเห็น
+    isOwner ? listPendingInvites(storeId) : Promise.resolve([]),
+  ])
   const unassigned = users.filter((u) => u.storeRole === "STAFF" && u.roleId === null).length
 
   return (
@@ -47,6 +53,8 @@ export default async function UsersPage() {
       {canEdit ? null : (
         <div className="alert-banner info">คุณมีสิทธิ์ดูอย่างเดียว — เปลี่ยนบทบาทของผู้ใช้ไม่ได้</div>
       )}
+
+      {isOwner ? <InviteManager invites={invites} /> : null}
 
       <section className="card-ui">
         <div className="panel-head">

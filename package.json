@@ -12,6 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:create-user": "tsx prisma/create-user.ts",
+    "db:set-platform-admin": "tsx prisma/set-platform-admin.ts",
     "db:studio": "prisma studio",
     "test": "vitest run",
     "test:watch": "vitest",

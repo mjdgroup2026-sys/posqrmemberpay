@@ -56,8 +56,10 @@ x-app-base: &app-base
     # ส่วนหนึ่งของ URL ปลายทาง callback — ต้องตรงกับที่ลงทะเบียนไว้ในพอร์ทัล SCB เป๊ะ ๆ
     # ไม่ตั้ง = endpoint ตอบ 503 (ปิดบิลด้วยมือยังทำได้ตามปกติ)
     SCB_WEBHOOK_SECRET: ${SCB_WEBHOOK_SECRET:-}
-    # allowlist การสมัครสมาชิกเอง (Phase 5) — ไม่ตั้งเลย = สมัครไม่ได้สักคน (fail closed)
-    # v1 ไม่มี RBAC ใครสมัครสำเร็จเป็นพนักงานเต็มตัวทันที ด่านนี้จึงห้ามหาย
+    # นโยบายการสมัครสมาชิกเอง (lib/signup-allowlist.ts) — ไม่ตั้งอะไรเลย = สมัครไม่ได้สักคน (fail closed)
+    # Phase 14a: SIGNUP_OPEN=true เปิดให้ใครก็สมัครได้ (ผู้สมัครใหม่ได้แค่ร้านเปล่าของตัวเอง ไม่เข้าหลังร้านใคร)
+    # ⚠️ compose ส่ง env ให้คอนเทนเนอร์เฉพาะที่ประกาศตรงนี้ — ตั้งใน .env อย่างเดียวไม่ถึงแอป
+    SIGNUP_OPEN: ${SIGNUP_OPEN:-}
     SIGNUP_ALLOWED_EMAILS: ${SIGNUP_ALLOWED_EMAILS:-}
     SIGNUP_ALLOWED_DOMAINS: ${SIGNUP_ALLOWED_DOMAINS:-}
   # image มี HEALTHCHECK ในตัวแล้ว (ดู Dockerfile stage runner) จึงไม่ประกาศซ้ำที่นี่

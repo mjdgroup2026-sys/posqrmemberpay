@@ -10,7 +10,9 @@ import { IconSpinner } from "@/components/icons"
 export function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/"
+  // รับเฉพาะ path ภายในเว็บ — กัน open redirect ผ่าน ?callbackUrl=https://evil
+  const rawCallback = searchParams.get("callbackUrl") ?? "/"
+  const callbackUrl = rawCallback.startsWith("/") && !rawCallback.startsWith("//") ? rawCallback : "/"
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null)
