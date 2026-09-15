@@ -1496,10 +1496,14 @@ enum ResourceKey {
 - [x] `requireStore()`: cookie ชี้ร้านที่ไม่ได้เป็นสมาชิก → ปฏิเสธ · ร้าน `SUSPENDED` → ปฏิเสธ · STAFF เรียก action
       ของ OWNER ตรง ๆ → ปฏิเสธ
 - [x] Webhook: `ref1` ของร้าน A ปิดบิลได้เฉพาะโต๊ะของร้าน A และบิลออกใต้ `storeId` ของ A
-- [ ] ตรวจสอบปิดเฟส: ✅ `pnpm test` เขียวทั้งหมด · ✅ `prisma migrate diff --exit-code` สะอาด · ✅ `grep` raw SQL ครบ
+- [x] ตรวจสอบปิดเฟส: ✅ `pnpm test` เขียวทั้งหมด · ✅ `prisma migrate diff --exit-code` สะอาด · ✅ `grep` raw SQL ครบ
       (12 จุด — อยู่ที่ `lib/queries.ts` 8, `lib/sale-number.ts` 2, `app/actions/products.ts` 1, `app/api/health` 1) ·
-      ✅ ไม่มี `prisma.` ตรง ๆ เหลือใน `app/actions/**` และ `lib/queries.ts` (ESLint บังคับ) · ✅ ซ้อม migrate บนสำเนา production ผ่าน (2026-09-15) · ✅ `pnpm build` ผ่าน · **⏳ ค้างเฉพาะ** production migrate จริง (merge)
-      แล้วร้าน `default` ใช้งานได้เหมือนเดิมทุกหน้า (smoke test ด้วยการล็อกอินกดจริง ไม่ใช่แค่ `/api/health`)
+      ✅ ไม่มี `prisma.` ตรง ๆ เหลือใน `app/actions/**` และ `lib/queries.ts` (ESLint บังคับ) · ✅ ซ้อม migrate บนสำเนา production ผ่าน · ✅ `pnpm build` ผ่าน ·
+      ✅ **production migrate จริงแล้ว 2026-09-15 (PR #1, merge `80a05cb`)** — backup ก่อน merge `posmobileorderdb-20260915-131801.dump`
+      (VPS + `D:\MJD_Backup`) · CI ผ่าน 3 job · ตรวจในฐานจริง: `add_multi_tenant` applied, `store_default` ACTIVE, admin = OWNER,
+      `storeId` ว่าง 0 แถว, 15 sale / 34 qr_code / 17 payment_intent เท่าเดิม · container `app-blue` รัน image ใหม่
+      (มี route `no-store` และโค้ด `forStore`) · log ไม่มี error · หน้า public ตอบถูก (`/login` 200, หน้า staff 307 → login,
+      `/order/<token ปลอม>/menu` แสดง "ไม่พบ QR Code นี้") · **smoke test แบบล็อกอินกดจริงเป็นของเจ้าของระบบ** (ไม่มี credential ใน CI)
 
 > ⚠️ **กับดักที่คาดไว้**
 > - **ลืม `where: { storeId }` จุดเดียว = ร้านหนึ่งเห็นบิล/ลูกค้าของอีกร้าน** — เป็นเหตุการณ์ระดับ "ต้องแจ้งลูกค้า"

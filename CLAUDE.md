@@ -24,8 +24,8 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 - **Role-Based Permission** — นอกขอบเขต v1 ดูหัวข้อ "สถานะการพัฒนา" ท้ายไฟล์นี้
   · **ข้อยกเว้น**: บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) อนุมัติแล้วเป็นส่วนหนึ่งของ Phase 13
 - **Phase 14–16 (onboarding / รับเงินต่อร้าน / RBAC เต็ม)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
-  · **Phase 13 (multi-tenant) โค้ด+เทสเสร็จแล้ว 2026-09-15 บน branch `feat/phase-13-multi-tenant`** แต่ยังไม่ merge —
-  ต้องทำตามลำดับ 13 → 14 → 15 ห้ามข้าม และก่อน migrate Phase 13 ขึ้น production ต้อง `pg_dump` + ซ้อมบนสำเนาก่อนเสมอ
+  · **Phase 13 (multi-tenant) merge + migrate production แล้ว 2026-09-15** (PR #1) — ต้องทำตามลำดับ 14 → 15 → 16
+  ห้ามข้าม และ migration ที่แตะข้อมูลจริงต้อง `pg_dump` + ซ้อมบนสำเนาก่อนเสมอเหมือนที่ทำกับ Phase 13
 
 ## 📧 ระบบอีเมล (ต่อ Resend แล้วใน Phase 5)
 
@@ -376,18 +376,20 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
 - ฐานข้อมูล: `posmobileorderdb` บน container `posmobileorder-postgres` (PostgreSQL 18, port **5437**)
   seed ไว้ 7 รายการ SKU-1001…SKU-1007 + บิลตัวอย่าง 8 บิล
 
-**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 13 multi-tenant โค้ด+เทสเสร็จแล้ว (2026-09-15) รอ merge + migrate production**
-(`Store`/`StoreMember` · `storeId` ทุก entity ราก · `requireStore()`/`requireOwner()` · `forStore()` extension ·
-ตัวสลับร้านใน topbar · `/users` = พนักงานในร้าน · เทส isolation ครอบทุก query/action) · **Phase 14–16**
+**✅ Phase 13 multi-tenant ขึ้น production แล้ว (2026-09-15, PR #1)** — `Store`/`StoreMember` · `storeId` ทุก entity ราก ·
+`requireStore()`/`requireOwner()` · `forStore()` extension · ตัวสลับร้านใน topbar · `/users` = พนักงานในร้าน ·
+เทส isolation ครอบทุก query/action · ร้านเดิมกลายเป็น `store_default` (slug `default`) admin เป็น OWNER
+
+**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 14–16**
 (ร่างแล้ว ยังไม่เริ่ม — ทิศทาง: ร้านสมัครเอง, เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
-> ✅ **production รัน schema ครบถึง `20260909140000_drop_payment_intent_last_polled` แล้ว** (POS + Mobile Order
-> ทุกอย่างอยู่บน `main` และ deploy แล้ว) · **Phase 13 เป็น migration เดียวที่ค้าง** — ซ้อมบนสำเนา dump
-> production ของ 2026-09-14 ผ่านแล้ว (2026-09-15: `migrate deploy` + `migrate diff` สะอาด, backfill ไม่มี
-> `storeId` ว่าง, จำนวนแถวเท่าเดิม) รอแค่ merge `feat/phase-13-multi-tenant` → CI รัน `migrate deploy` เอง
-> · **ห้าม merge วันที่ร้านเปิดขายอยู่** และต้องมี backup ล่าสุดใน `D:\MJD_Backup` ก่อนกด
-> · วิธีซ้อมซ้ำ: `docker cp <dump> posmobileorder-postgres:/tmp/prod.dump` → `pg_restore` ลงฐานชื่อลงท้าย `_test`
+> ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**
+> ลำดับที่ใช้จริงและควรใช้ซ้ำกับ migration ใหญ่ครั้งหน้า: ซ้อมบนสำเนา dump production ในเครื่อง →
+> `bash ops/backup-db.sh` บน VPS + `scp` ลง `D:\MJD_Backup` → merge → CI `migrate deploy` + สลับสี →
+> ตรวจ `_prisma_migrations`/backfill ในฐานจริง + ยืนยันว่า image ใน container มีโค้ดใหม่ (`ls .next/server/app/...`
+> หา route ใหม่) ไม่ใช่แค่ `/api/health` · **ห้าม merge migration ใหญ่วันที่ร้านเปิดขายอยู่**
+> · วิธีซ้อม: `docker cp <dump> posmobileorder-postgres:/tmp/prod.dump` → `pg_restore` ลงฐานชื่อลงท้าย `_test`
 > → `DATABASE_URL=<ฐานนั้น> npx prisma migrate deploy` → `migrate diff --exit-code` (ใน Git Bash ต้องตั้ง
 > `MSYS_NO_PATHCONV=1` ไม่งั้น `/tmp` ถูกแปลงเป็นพาธ Windows)
 
