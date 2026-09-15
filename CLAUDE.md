@@ -382,9 +382,14 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
 (ร่างแล้ว ยังไม่เริ่ม — ทิศทาง: ร้านสมัครเอง, เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
-> ⚠️ **production ยังรัน schema เก่า (Phase 1–2)** — branch `feat/pos-and-mobile-order` ยังไม่ merge
-> เข้า `main` ฐานบน server จึงมีแค่ 7 ตารางและตาราง `user` ว่างเปล่า · POS/Mobile Order ทั้งหมด
-> จะขึ้น production ตอน merge ครั้งแรก (CI จะรัน `migrate deploy` ให้เอง)
+> ✅ **production รัน schema ครบถึง `20260909140000_drop_payment_intent_last_polled` แล้ว** (POS + Mobile Order
+> ทุกอย่างอยู่บน `main` และ deploy แล้ว) · **Phase 13 เป็น migration เดียวที่ค้าง** — ซ้อมบนสำเนา dump
+> production ของ 2026-09-14 ผ่านแล้ว (2026-09-15: `migrate deploy` + `migrate diff` สะอาด, backfill ไม่มี
+> `storeId` ว่าง, จำนวนแถวเท่าเดิม) รอแค่ merge `feat/phase-13-multi-tenant` → CI รัน `migrate deploy` เอง
+> · **ห้าม merge วันที่ร้านเปิดขายอยู่** และต้องมี backup ล่าสุดใน `D:\MJD_Backup` ก่อนกด
+> · วิธีซ้อมซ้ำ: `docker cp <dump> posmobileorder-postgres:/tmp/prod.dump` → `pg_restore` ลงฐานชื่อลงท้าย `_test`
+> → `DATABASE_URL=<ฐานนั้น> npx prisma migrate deploy` → `migrate diff --exit-code` (ใน Git Bash ต้องตั้ง
+> `MSYS_NO_PATHCONV=1` ไม่งั้น `/tmp` ถูกแปลงเป็นพาธ Windows)
 
 **✅ deploy ขึ้น production แล้ว (2026-09-02): https://posqr.jayjayservices.com**
 CI/CD อัตโนมัติจาก `main` ทำงานจริง — push → test → build+push image ไป `ghcr.io` → scp compose +

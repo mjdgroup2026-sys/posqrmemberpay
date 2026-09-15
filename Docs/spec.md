@@ -1373,7 +1373,12 @@ enum ResourceKey {
 > ✅ **โค้ดและเทสเสร็จแล้ว (2026-09-15)** — `pnpm test` 29 ไฟล์ / 347 เทสเขียวทั้งหมด · `prisma migrate diff` สะอาด ·
 > `pnpm lint` มีกฎ `no-restricted-imports` กัน `@/lib/prisma` ใน `app/actions/**` + `lib/queries.ts` แล้ว
 > (ยกเว้น 2 จุดที่จงใจ: `profile.ts` ข้อมูลของตัวผู้ใช้ · `switchActiveStore()` ค้นข้ามร้านก่อนสลับ) ·
-> **ที่ยังค้าง**: ข้อสุดท้าย "production migrate + smoke test" — ต้อง `pg_dump` และซ้อมบนสำเนาก่อน merge ตามกติกา
+> **ที่ยังค้าง**: ข้อสุดท้าย "production migrate + smoke test" — ✅ **ซ้อมบนสำเนา production แล้ว (2026-09-15)**
+> ด้วย dump `posmobileorderdb-20260914-031701.dump` restore ลง `posmobileorderdb_rehearsal_test` → `migrate deploy`
+> ใส่ `add_multi_tenant` เป็น migration เดียวที่ค้าง · `migrate diff` สะอาด · ร้าน `store_default` ถูกสร้างจาก
+> `store_settings` · ผู้ใช้เดิม 2 คนเป็นสมาชิก (admin → OWNER พร้อม `role_admin`, system user → STAFF) ·
+> `storeId` ว่าง 0 แถวทั้ง 13 ตาราง · จำนวนแถวเท่าเดิม (15 sale / 34 qr_code / 17 payment_intent / 22 notification)
+> · **เหลือแค่ merge → CI migrate จริง + smoke test ด้วยการล็อกอินกดจริง** (`pnpm build` ผ่านแล้วเช่นกัน)
 >
 > 📝 **สิ่งที่ทำต่างจากร่าง (ตัดสินใจระหว่างทำ)**:
 > - ไม่มีหน้า `/select-store` — ผู้ใช้ที่อยู่หลายร้านตกไปใช้ร้านแรกโดยอัตโนมัติแล้วสลับผ่านตัวสลับร้านใน topbar ·
@@ -1493,7 +1498,7 @@ enum ResourceKey {
 - [x] Webhook: `ref1` ของร้าน A ปิดบิลได้เฉพาะโต๊ะของร้าน A และบิลออกใต้ `storeId` ของ A
 - [ ] ตรวจสอบปิดเฟส: ✅ `pnpm test` เขียวทั้งหมด · ✅ `prisma migrate diff --exit-code` สะอาด · ✅ `grep` raw SQL ครบ
       (12 จุด — อยู่ที่ `lib/queries.ts` 8, `lib/sale-number.ts` 2, `app/actions/products.ts` 1, `app/api/health` 1) ·
-      ✅ ไม่มี `prisma.` ตรง ๆ เหลือใน `app/actions/**` และ `lib/queries.ts` (ESLint บังคับ) · **⏳ ค้างเฉพาะ** production migrate
+      ✅ ไม่มี `prisma.` ตรง ๆ เหลือใน `app/actions/**` และ `lib/queries.ts` (ESLint บังคับ) · ✅ ซ้อม migrate บนสำเนา production ผ่าน (2026-09-15) · ✅ `pnpm build` ผ่าน · **⏳ ค้างเฉพาะ** production migrate จริง (merge)
       แล้วร้าน `default` ใช้งานได้เหมือนเดิมทุกหน้า (smoke test ด้วยการล็อกอินกดจริง ไม่ใช่แค่ `/api/health`)
 
 > ⚠️ **กับดักที่คาดไว้**
