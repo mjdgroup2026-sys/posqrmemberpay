@@ -1,7 +1,8 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { forStore } from "@/lib/db"
+import { nextSaleNumber } from "@/lib/sale-number"
 import { guardAction } from "@/lib/permissions"
 import { toNumber } from "@/lib/format"
 import { businessDateOnly, isSameBusinessDay } from "@/lib/day"
@@ -35,37 +36,13 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
-/// คีย์ของ advisory lock ที่ใช้กันเลขบิลชนกัน — ค่าคงที่ตัวเดียวทั้งระบบ
-const SALE_NUMBER_LOCK = 720_001
-
-/// เลขบิลถัดไปรูปแบบ INV-000001 (หา max +1 แบบเดียวกับ SKU auto-gen)
-///
-/// ★ ต้องจับ advisory lock ก่อนเสมอ: max+1 เฉย ๆ ทำให้ทรานแซคชันที่วิ่งพร้อมกันอ่านค่า max
-///   เดียวกันแล้วชนที่ unique constraint (พิสูจน์แล้วด้วยเทส "ขายพร้อมกัน 8 บิล" — ผ่านแค่ 5)
-///   lock นี้ปล่อยเองตอน commit/rollback จึงได้เลขเรียงต่อเนื่องไม่มีช่องว่างและไม่ต้อง retry
-/// ⚠️ raw SQL ไม่ผ่าน @@map — ต้องใช้ชื่อตารางจริงในฐาน ("sale") ไม่ใช่ชื่อ model
-type RawClient = {
-  $queryRaw: <T>(query: TemplateStringsArray, ...values: unknown[]) => Promise<T>
-}
-
-async function nextSaleNumber(tx: RawClient): Promise<string> {
-  // cast เป็น text เพราะ Prisma deserialize คอลัมน์ชนิด void ไม่ได้ (UnsupportedNativeDataType)
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(${SALE_NUMBER_LOCK}::bigint)::text AS locked`
-
-  const rows = await tx.$queryRaw<{ max: number | null }[]>`
-    SELECT MAX(CAST(SUBSTRING("saleNumber" FROM '^INV-([0-9]+)$') AS INTEGER)) AS max
-    FROM "sale"
-    WHERE "saleNumber" ~ '^INV-[0-9]+$'
-  `
-  const max = rows[0]?.max ?? 0
-  return `INV-${String(max + 1).padStart(6, "0")}`
-}
-
 export async function createSale(formData: FormData): Promise<ActionResult<ReceiptData>> {
   // ด่านชั้นที่ 2 ของ §4 — เช็คสิทธิ์ POS:ADD ก่อนแตะข้อมูลเสมอ
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
   const guard = await guardAction("POS", "ADD")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
   const user = guard.user
 
   const parsed = saleSchema.safeParse({
@@ -98,7 +75,7 @@ export async function createSale(formData: FormData): Promise<ActionResult<Recei
   // เลขบิลชนกันได้ถ้ามีคนกดชำระพร้อมกัน — เจอ P2002 แล้ว retry ทั้งทรานแซคชันใหม่
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const receipt = await prisma.$transaction(async (tx) => {
+      const receipt = await db.$transaction(async (tx) => {
         const products = await tx.product.findMany({
           where: { id: { in: lines.map((l) => l.productId) } },
           select: { id: true, sku: true, name: true, unit: true, price: true },
@@ -143,10 +120,11 @@ export async function createSale(formData: FormData): Promise<ActionResult<Recei
         const received = paymentMethod === "CASH" ? round2(amountReceived) : total
         const changeDue = paymentMethod === "CASH" ? round2(received - total) : 0
 
-        const saleNumber = await nextSaleNumber(tx)
+        const saleNumber = await nextSaleNumber(tx, storeId)
 
         const sale = await tx.sale.create({
           data: {
+            storeId,
             saleNumber,
             subtotal: subtotal.toFixed(2),
             discount: discount.toFixed(2),
@@ -190,6 +168,7 @@ export async function createSale(formData: FormData): Promise<ActionResult<Recei
 
           await tx.stockTransaction.create({
             data: {
+              storeId,
               productId: item.productId,
               type: "OUT",
               quantity: item.quantity,
@@ -238,6 +217,8 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
   const guard = await guardAction("POS_HISTORY", "DELETE")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
   const user = guard.user
 
   const parsed = voidSaleSchema.safeParse({
@@ -255,7 +236,7 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
   const { id, reason } = parsed.data
 
   try {
-    const saleNumber = await prisma.$transaction(async (tx) => {
+    const saleNumber = await db.$transaction(async (tx) => {
       const sale = await tx.sale.findUnique({
         where: { id },
         select: {
@@ -278,7 +259,8 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
       // ปิดยอดของแคชเชียร์คนนั้นในวันนั้นไปแล้ว ห้าม void ซ้ำ ไม่งั้นตัวเลขที่ปิดไปแล้วคลาดเคลื่อน
       const closed = await tx.cashierClosing.findUnique({
         where: {
-          cashierId_closingDate: {
+          storeId_cashierId_closingDate: {
+            storeId,
             cashierId: sale.cashierId,
             closingDate: businessDateOnly(sale.createdAt),
           },
@@ -312,6 +294,7 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
         })
         await tx.stockTransaction.create({
           data: {
+            storeId,
             productId: item.productId,
             type: "IN",
             quantity: item.quantity,

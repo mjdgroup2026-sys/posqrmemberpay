@@ -7,7 +7,7 @@ export const metadata = { title: "สินค้า" }
 
 export default async function ProductsPage({ searchParams }: PageProps<"/products">) {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  await requirePageAccess("PRODUCTS")
+  const { storeId } = await requirePageAccess("PRODUCTS")
 
   const params = await searchParams
   const search = typeof params.q === "string" ? params.q : ""
@@ -15,8 +15,8 @@ export default async function ProductsPage({ searchParams }: PageProps<"/product
   const onlyLow = params.filter === "low"
 
   const [allProducts, categories] = await Promise.all([
-    listProducts({ search, category }),
-    listCategoryOptions(),
+    listProducts(storeId, { search, category }),
+    listCategoryOptions(storeId),
   ])
 
   const products = onlyLow ? allProducts.filter((p) => p.isLow) : allProducts

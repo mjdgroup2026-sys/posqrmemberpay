@@ -8,9 +8,9 @@ export const metadata = { title: "รับสินค้าเข้า" }
 
 export default async function StockInPage() {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  await requirePageAccess("STOCK_IN")
+  const { storeId } = await requirePageAccess("STOCK_IN")
 
-  const [products, transactions] = await Promise.all([listProductOptions(), listTransactions(50)])
+  const [products, transactions] = await Promise.all([listProductOptions(storeId), listTransactions(storeId, 50)])
   const history = transactions.filter((t) => t.type === "IN").slice(0, 12)
 
   return (

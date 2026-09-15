@@ -1,6 +1,8 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+// โปรไฟล์เป็นข้อมูล "ของตัวผู้ใช้" ไม่ใช่ของร้าน (ตาราง user ไม่มี storeId) — ไม่ผ่าน forStore() โดยตั้งใจ
+// eslint-disable-next-line no-restricted-imports
 import { prisma } from "@/lib/prisma"
 import { requireUser } from "@/lib/session"
 import { profileSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"

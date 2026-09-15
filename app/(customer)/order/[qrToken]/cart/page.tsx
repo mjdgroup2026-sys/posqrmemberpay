@@ -17,7 +17,7 @@ export default async function CustomerCartPage({ params }: PageProps<"/order/[qr
     )
   }
 
-  const settings = await getStoreSettings()
+  const settings = await getStoreSettings(session.storeId)
 
   return (
     <CustomerShell

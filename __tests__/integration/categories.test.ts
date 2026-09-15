@@ -8,14 +8,13 @@ import {
   ensureTestUser,
   resetDb,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 const dbReady = await isTestDbReachable()
 
@@ -83,7 +82,7 @@ describe.skipIf(!dbReady)("หมวดหมู่สินค้า (F8) — �
     // arrange
     await createTestProduct({ category: "ของสด", name: "ปลาทู" })
     await createTestProduct({ category: "ของสด", name: "หมูสามชั้น" })
-    const category = await testPrisma().category.findUniqueOrThrow({ where: { name: "ของสด" } })
+    const category = await testPrisma().category.findFirstOrThrow({ where: { storeId: TEST_STORE_ID, name: "ของสด" } })
 
     // act
     const result = await deleteCategory(makeFormData({ id: category.id }))

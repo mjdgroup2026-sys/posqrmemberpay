@@ -9,14 +9,13 @@ import {
   isTestDbReachable,
   resetDb,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 const dbReady = await isTestDbReachable()
 
@@ -25,8 +24,8 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
   let mergeTables: (formData: FormData) => Promise<ActionResult>
   let acknowledgeNotification: (formData: FormData) => Promise<ActionResult>
   let acknowledgeAllNotifications: () => Promise<ActionResult>
-  let listTableOverview: () => Promise<TableCard[]>
-  let listNotifications: (limit?: number) => Promise<NotificationCard[]>
+  let listTableOverview: (storeId: string) => Promise<TableCard[]>
+  let listNotifications: (storeId: string, limit?: number) => Promise<NotificationCard[]>
 
   beforeAll(async () => {
     const tables = await import("@/app/actions/tables")
@@ -59,7 +58,7 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
   async function addItems(sessionId: string, lines: { quantity: number; unitPrice: string }[]) {
     const menuItem = await createTestMenuItem({ name: `เมนู-${Math.random().toString(36).slice(2, 8)}` })
     const order = await testPrisma().mobileOrder.create({
-      data: { tableSessionId: sessionId, orderNumber: 1 },
+      data: { storeId: TEST_STORE_ID, tableSessionId: sessionId, orderNumber: 1 },
     })
     for (const line of lines) {
       await testPrisma().mobileOrderItem.create({
@@ -84,7 +83,7 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
       ])
 
       // act
-      const cards = await listTableOverview()
+      const cards = await listTableOverview(TEST_STORE_ID)
 
       // assert
       const card = cards.find((c) => c.id === table.id)
@@ -104,7 +103,7 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
       })
 
       // act
-      const cards = await listTableOverview()
+      const cards = await listTableOverview(TEST_STORE_ID)
 
       // assert
       const card = cards.find((c) => c.id === table.id)
@@ -119,7 +118,7 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
       await mergeTables(makeFormData({ primaryTableId: primary.id, secondaryTableId: secondary.id }))
 
       // act
-      const cards = await listTableOverview()
+      const cards = await listTableOverview(TEST_STORE_ID)
 
       // assert
       const primaryCard = cards.find((c) => c.id === primary.id)
@@ -135,7 +134,7 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
       // arrange
       const { sessionId } = await openTable("35")
       const notification = await testPrisma().notification.create({
-        data: { tableSessionId: sessionId, type: "CALL_STAFF", reason: "ขอน้ำเปล่าเพิ่ม" },
+        data: { storeId: TEST_STORE_ID, tableSessionId: sessionId, type: "CALL_STAFF", reason: "ขอน้ำเปล่าเพิ่ม" },
       })
 
       // act
@@ -153,7 +152,7 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
       // arrange
       const { sessionId } = await openTable("36")
       const notification = await testPrisma().notification.create({
-        data: { tableSessionId: sessionId, type: "CHECK_BILL" },
+        data: { storeId: TEST_STORE_ID, tableSessionId: sessionId, type: "CHECK_BILL" },
       })
 
       // act
@@ -171,8 +170,8 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
       const second = await openTable("38")
       await testPrisma().notification.createMany({
         data: [
-          { tableSessionId: first.sessionId, type: "CALL_STAFF" },
-          { tableSessionId: second.sessionId, type: "CHECK_BILL" },
+          { storeId: TEST_STORE_ID, tableSessionId: first.sessionId, type: "CALL_STAFF" },
+          { storeId: TEST_STORE_ID, tableSessionId: second.sessionId, type: "CHECK_BILL" },
         ],
       })
 
@@ -189,11 +188,11 @@ describe.skipIf(!dbReady)("ผังโต๊ะและการแจ้ง�
       const { sessionId } = await openTable("39")
       await addItems(sessionId, [{ quantity: 1, unitPrice: "350.00" }])
       await testPrisma().notification.create({
-        data: { tableSessionId: sessionId, type: "CHECK_BILL" },
+        data: { storeId: TEST_STORE_ID, tableSessionId: sessionId, type: "CHECK_BILL" },
       })
 
       // act
-      const cards = await listNotifications()
+      const cards = await listNotifications(TEST_STORE_ID)
 
       // assert
       expect(cards).toHaveLength(1)

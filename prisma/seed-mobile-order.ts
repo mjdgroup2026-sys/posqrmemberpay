@@ -83,45 +83,34 @@ function qrToken(): string {
   return randomBytes(16).toString("base64url")
 }
 
-export async function seedMobileOrder(prisma: PrismaClient) {
-  // ── StoreSettings (singleton) ─────────────────────────────────────────
-  await prisma.storeSettings.upsert({
-    where: { id: "default" },
-    update: {},
-    create: {
-      id: "default",
-      storeName: "MJD Kitchen",
-      themeColor: "#E8571F",
-      hasKDS: false,
-      serviceChargePercent: "0.00",
-      crmEnabled: false,
-    },
-  })
+/// ทุกอย่างในนี้เป็นของร้าน `storeId` (Phase 13) — StoreSettings ถูกสร้างพร้อมร้านแล้วโดย provisionStore()
+export async function seedMobileOrder(prisma: PrismaClient, storeId: string) {
 
   // ── โต๊ะ 16 โต๊ะ + QR แบบ STATIC โต๊ะละ 1 ใบ ───────────────────────────
   for (let i = 1; i <= TABLE_COUNT; i++) {
     const code = String(i).padStart(2, "0")
     const table = await prisma.table.upsert({
-      where: { code },
+      where: { storeId_code: { storeId, code } },
       update: {},
-      create: { code },
+      create: { storeId, code },
     })
 
     const hasQr = await prisma.qRCode.findFirst({ where: { tableId: table.id, status: "ACTIVE" } })
     if (!hasQr) {
       await prisma.qRCode.create({
-        data: { tableId: table.id, type: "STATIC", token: qrToken() },
+        data: { storeId, tableId: table.id, type: "STATIC", token: qrToken() },
       })
     }
   }
 
   // ── เมนู + modifier ───────────────────────────────────────────────────
   for (const item of MENU_ITEMS) {
-    const existing = await prisma.menuItem.findFirst({ where: { name: item.name } })
+    const existing = await prisma.menuItem.findFirst({ where: { storeId, name: item.name } })
     if (existing) continue
 
     const created = await prisma.menuItem.create({
       data: {
+        storeId,
         name: item.name,
         description: item.description,
         price: item.price,
@@ -135,6 +124,7 @@ export async function seedMobileOrder(prisma: PrismaClient) {
       groupOrder += 1
       const createdGroup = await prisma.modifierGroup.create({
         data: {
+          storeId,
           menuItemId: created.id,
           name: group.name,
           selectionType: group.selectionType,
@@ -159,9 +149,9 @@ export async function seedMobileOrder(prisma: PrismaClient) {
   }
 
   const [tables, menuItems, featured] = await Promise.all([
-    prisma.table.count(),
-    prisma.menuItem.count(),
-    prisma.menuItem.count({ where: { isFeatured: true } }),
+    prisma.table.count({ where: { storeId } }),
+    prisma.menuItem.count({ where: { storeId } }),
+    prisma.menuItem.count({ where: { storeId, isFeatured: true } }),
   ])
 
   console.info(

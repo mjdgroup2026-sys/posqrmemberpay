@@ -6,9 +6,9 @@ export const metadata = { title: "หมวดหมู่สินค้า" }
 
 export default async function CategoriesPage() {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  await requirePageAccess("CATEGORIES")
+  const { storeId } = await requirePageAccess("CATEGORIES")
 
-  const categories = await listCategoriesWithCount()
+  const categories = await listCategoriesWithCount(storeId)
 
   return <CategoryManager categories={categories} />
 }

@@ -1,8 +1,8 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
-import { requireUser } from "@/lib/session"
+import { forStore } from "@/lib/db"
+import { requireOwner, requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import {
   storeSettingsSchema,
   featuredMenuSchema,
@@ -12,7 +12,6 @@ import {
 } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
-const AUTH_ERROR = "กรุณาเข้าสู่ระบบก่อนทำรายการ"
 
 function revalidateSettingsPages() {
   revalidatePath("/mobile-order/settings")
@@ -22,14 +21,17 @@ function revalidateSettingsPages() {
   revalidatePath("/order", "layout")
 }
 
-/// ตั้งค่าแบรนด์/ธีม/ค่าบริการของร้าน (F21)
+/// ตั้งค่าแบรนด์/ธีม/ค่าบริการของร้าน (F21) — เฉพาะเจ้าของร้าน (Phase 13)
 export async function updateStoreSettings(formData: FormData): Promise<ActionResult> {
-  let user
+  let ctx: StoreContext
   try {
-    user = await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireOwner()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const user = ctx.user
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = storeSettingsSchema.safeParse({
     storeName: formData.get("storeName") ?? "",
@@ -51,9 +53,9 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
   const data = parsed.data
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const current = await tx.storeSettings.findUnique({
-        where: { id: "default" },
+        where: { storeId },
         select: { hasKDS: true },
       })
 
@@ -72,7 +74,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
       }
 
       await tx.storeSettings.upsert({
-        where: { id: "default" },
+        where: { storeId },
         update: {
           storeName: data.storeName,
           themeColor: data.themeColor,
@@ -84,7 +86,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
           updatedById: user.id,
         },
         create: {
-          id: "default",
+          storeId,
           storeName: data.storeName,
           themeColor: data.themeColor,
           logoUrl: data.logoUrl,
@@ -107,11 +109,14 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
 
 /// ปักหมุด/จัดลำดับเมนูแนะนำ — ลำดับใน `menuItemIds` คือลำดับที่ลูกค้าเห็น (F21)
 export async function setFeaturedMenu(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const raw = formData.get("menuItemIds")
   const ids = typeof raw === "string" && raw.trim() ? raw.split(",").map((v) => v.trim()).filter(Boolean) : []
@@ -124,7 +129,7 @@ export async function setFeaturedMenu(formData: FormData): Promise<ActionResult>
   const chosen = parsed.data.menuItemIds
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const found = await tx.menuItem.count({ where: { id: { in: chosen } } })
       if (found !== chosen.length) throw new SettingsAbort("มีเมนูที่เลือกไว้ถูกลบไปแล้ว กรุณารีเฟรชหน้า")
 

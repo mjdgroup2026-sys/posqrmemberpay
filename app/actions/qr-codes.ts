@@ -2,12 +2,11 @@
 
 import { randomBytes } from "node:crypto"
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
-import { requireUser } from "@/lib/session"
+import { forStore } from "@/lib/db"
+import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { generateQrSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
-const AUTH_ERROR = "กรุณาเข้าสู่ระบบก่อนทำรายการ"
 
 function revalidateQrPages() {
   revalidatePath("/mobile-order/qr-codes")
@@ -22,11 +21,14 @@ function newToken(): string {
 /// สร้าง QR ใบใหม่ให้โต๊ะ — โต๊ะหนึ่งมี QR ที่ใช้งานได้พร้อมกันแค่ใบเดียว
 /// ใบเก่าจึงถูก invalidate ในทรานแซคชันเดียวกันเสมอ (§2 ความสัมพันธ์ Table 1—* QRCode)
 export async function generateQRCode(formData: FormData): Promise<ActionResult<{ token: string }>> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = generateQrSchema.safeParse({
     tableId: formData.get("tableId") ?? "",
@@ -41,7 +43,7 @@ export async function generateQRCode(formData: FormData): Promise<ActionResult<{
   }
 
   try {
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await db.$transaction(async (tx) => {
       const table = await tx.table.findUnique({
         where: { id: parsed.data.tableId },
         select: { id: true, code: true },
@@ -54,7 +56,7 @@ export async function generateQRCode(formData: FormData): Promise<ActionResult<{
       })
 
       const qr = await tx.qRCode.create({
-        data: { tableId: table.id, type: parsed.data.type, token: newToken() },
+        data: { storeId, tableId: table.id, type: parsed.data.type, token: newToken() },
         select: { token: true },
       })
 
@@ -76,17 +78,20 @@ export async function generateQRCode(formData: FormData): Promise<ActionResult<{
 
 /// ยกเลิกการใช้งาน QR — ใช้ตอนใบถูกถ่ายรูปหลุดออกไปหรือปิดโต๊ะแบบ DYNAMIC
 export async function invalidateQRCode(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   try {
-    const updated = await prisma.qRCode.updateMany({
+    const updated = await db.qRCode.updateMany({
       where: { id: parsed.data.id, status: "ACTIVE" },
       data: { status: "INVALIDATED", invalidatedAt: new Date() },
     })
@@ -101,17 +106,20 @@ export async function invalidateQRCode(formData: FormData): Promise<ActionResult
 
 /// บันทึกว่าพิมพ์ใบเดิมซ้ำ — token เดิมยังใช้ได้ (ต่างจาก generate ที่ออก token ใหม่)
 export async function reprintQRCode(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   try {
-    const updated = await prisma.qRCode.updateMany({
+    const updated = await db.qRCode.updateMany({
       where: { id: parsed.data.id, status: "ACTIVE" },
       data: { issuedAt: new Date() },
     })
@@ -126,24 +134,27 @@ export async function reprintQRCode(formData: FormData): Promise<ActionResult> {
 
 /// สร้าง QR ให้ทุกโต๊ะที่ยังไม่มีใบที่ใช้งานได้ (bulk) — ไม่แตะโต๊ะที่มี QR อยู่แล้ว
 export async function generateMissingQRCodes(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const rawType = formData.get("type")
   const type = rawType === "DYNAMIC" ? "DYNAMIC" : "STATIC"
 
   try {
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await db.$transaction(async (tx) => {
       const tables = await tx.table.findMany({
         where: { qrCodes: { none: { status: "ACTIVE" } } },
         select: { id: true },
       })
 
       for (const table of tables) {
-        await tx.qRCode.create({ data: { tableId: table.id, type, token: newToken() } })
+        await tx.qRCode.create({ data: { storeId, tableId: table.id, type, token: newToken() } })
       }
 
       return tables.length

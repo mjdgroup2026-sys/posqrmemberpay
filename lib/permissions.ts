@@ -2,7 +2,8 @@ import "server-only"
 import { cache } from "react"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
-import { getSession } from "@/lib/session"
+import { resolveStoreContext, type StoreContext } from "@/lib/session"
+import type { StoreRole } from "@/generated/prisma/client"
 import type { PermissionAction, ResourceKey } from "@/generated/prisma/client"
 
 export type { PermissionAction, ResourceKey }
@@ -70,44 +71,61 @@ export type CurrentUserPermissions = {
   id: string
   name: string
   email: string
+  /// ร้านที่กำลังทำงานอยู่ (Phase 13) — ทุก query ต้องกรองด้วยค่านี้
+  storeId: string
+  storeRole: StoreRole
   roleId: string | null
   roleName: string | null
   /// resource → action ที่ทำได้ · ไม่มีคีย์ = ไม่มีสิทธิ์เลยกับ resource นั้น
   granted: Partial<Record<ResourceKey, PermissionAction[]>>
 }
 
-/// อ่านสิทธิ์ของผู้ใช้ปัจจุบันจาก DB — `cache()` ทำให้เรียกกี่ครั้งในคำขอเดียวก็ยิง query ครั้งเดียว
-/// แต่ **ไม่ข้ามคำขอ** ตาม §4 ("เปลี่ยน Role แล้วมีผลทันทีในคำขอถัดไป")
-export const getCurrentPermissions = cache(async (): Promise<CurrentUserPermissions | null> => {
-  const session = await getSession()
-  if (!session?.user) return null
+/// OWNER ของร้านได้ทุก action ของทุก resource โดยไม่ต้องมี Role (Phase 13)
+function fullGrant(): Partial<Record<ResourceKey, PermissionAction[]>> {
+  const granted: Partial<Record<ResourceKey, PermissionAction[]>> = {}
+  for (const [resource, actions] of Object.entries(RESOURCE_ACTIONS)) {
+    granted[resource as ResourceKey] = [...actions]
+  }
+  return granted
+}
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      roleId: true,
-      role: { select: { name: true, permissions: { select: { resource: true, actions: true } } } },
-    },
+/// อ่านสิทธิ์ของผู้ใช้ปัจจุบัน "ในร้านที่ทำงานอยู่" จาก DB — `cache()` ทำให้เรียกกี่ครั้งในคำขอเดียว
+/// ก็ยิง query ครั้งเดียว แต่ **ไม่ข้ามคำขอ** ตาม §4 ("เปลี่ยน Role แล้วมีผลทันทีในคำขอถัดไป")
+/// คืน null เมื่อยังไม่ล็อกอิน / ไม่ได้อยู่ในร้านใด / ร้านถูกระงับ — ผู้เรียกที่ต้องแยกสาเหตุให้ใช้ resolveStoreContext()
+export const getCurrentPermissions = cache(async (): Promise<CurrentUserPermissions | null> => {
+  const result = await resolveStoreContext()
+  if (!result.ok) return null
+  return permissionsFromContext(result.context)
+})
+
+async function permissionsFromContext(context: StoreContext): Promise<CurrentUserPermissions> {
+  const base = {
+    id: context.user.id,
+    name: context.user.name,
+    email: context.user.email,
+    storeId: context.storeId,
+    storeRole: context.role,
+  }
+
+  if (context.role === "OWNER") {
+    return { ...base, roleId: null, roleName: "เจ้าของร้าน", granted: fullGrant() }
+  }
+
+  if (!context.permissionRoleId) return { ...base, roleId: null, roleName: null, granted: {} }
+
+  // บทบาทเป็นของร้าน — กรอง storeId ด้วยเสมอ กัน roleId ของร้านอื่นหลุดมา
+  const role = await prisma.role.findFirst({
+    where: { id: context.permissionRoleId, storeId: context.storeId },
+    select: { id: true, name: true, permissions: { select: { resource: true, actions: true } } },
   })
-  if (!user) return null
+  if (!role) return { ...base, roleId: null, roleName: null, granted: {} }
 
   const granted: Partial<Record<ResourceKey, PermissionAction[]>> = {}
-  for (const row of user.role?.permissions ?? []) {
+  for (const row of role.permissions) {
     if (row.actions.length > 0) granted[row.resource] = row.actions
   }
-
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    roleId: user.roleId,
-    roleName: user.role?.name ?? null,
-    granted,
-  }
-})
+  return { ...base, roleId: role.id, roleName: role.name, granted }
+}
 
 export async function hasPermission(resource: ResourceKey, action: PermissionAction): Promise<boolean> {
   const permissions = await getCurrentPermissions()
@@ -164,10 +182,25 @@ export async function guardAction(
 /// ด่านของหน้า — เรียกเป็นบรรทัดแรกของทุก page ที่คุมสิทธิ์
 /// ไม่ผ่าน → เด้งไป /access-denied (ไม่ใช่ 404 เพื่อให้ผู้ใช้รู้ว่าหน้ามีอยู่แต่สิทธิ์ไม่ถึง)
 export async function requirePageAccess(resource: ResourceKey): Promise<CurrentUserPermissions> {
-  const permissions = await getCurrentPermissions()
-  if (!permissions) redirect("/login")
+  const result = await resolveStoreContext()
+  if (!result.ok) redirectForMissingStore(result.reason)
+  const permissions = await permissionsFromContext(result.context)
   if (!permissions.granted[resource]?.includes("VIEW")) {
     redirect(`/access-denied?resource=${resource}`)
   }
   return permissions
+}
+
+/// หน้าที่ต้อง "อยู่ในร้าน" แต่ไม่ได้อยู่ใน matrix สิทธิ์ (MJD Mobile Order F11–F22) — เรียกที่ต้นหน้า
+/// ได้ storeId กลับไปใช้กับ query · ไม่มีร้าน/ร้านถูกระงับ → เด้งไปหน้าอธิบาย ไม่ใช่ error 500
+export async function requireStorePage(): Promise<StoreContext> {
+  const result = await resolveStoreContext()
+  if (!result.ok) redirectForMissingStore(result.reason)
+  return result.context
+}
+
+/// ยังไม่ล็อกอิน → /login · ล็อกอินแล้วแต่ไม่มีร้าน หรือร้านถูกระงับ → /no-store พร้อมเหตุผล
+export function redirectForMissingStore(reason: "UNAUTHENTICATED" | "NO_STORE" | "STORE_SUSPENDED"): never {
+  if (reason === "UNAUTHENTICATED") redirect("/login")
+  redirect(`/no-store?reason=${reason}`)
 }

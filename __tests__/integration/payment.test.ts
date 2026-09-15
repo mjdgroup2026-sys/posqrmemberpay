@@ -12,14 +12,13 @@ import {
   resetDb,
   setStoreSettings,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 const dbReady = await isTestDbReachable()
 
@@ -175,11 +174,13 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
     const { sessionId } = await seedTableWithOrder()
 
     const first = await closeSessionWithPayment({
+      storeId: TEST_STORE_ID,
       sessionId,
       paymentMethod: "PROMPTPAY",
       paymentReference: "BANK-REF-777",
     })
     const second = await closeSessionWithPayment({
+      storeId: TEST_STORE_ID,
       sessionId,
       paymentMethod: "PROMPTPAY",
       paymentReference: "BANK-REF-777",
@@ -201,6 +202,7 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
     const results = await Promise.all(
       Array.from({ length: 5 }, () =>
         closeSessionWithPayment({
+          storeId: TEST_STORE_ID,
           sessionId,
           paymentMethod: "PROMPTPAY",
           paymentReference: "BANK-REF-RACE",
@@ -217,8 +219,13 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
     const { sessionId } = await seedTableWithOrder()
 
     const results = await Promise.all([
-      closeSessionWithPayment({ sessionId, paymentMethod: "CARD", cashierId: "test-user" }),
-      closeSessionWithPayment({ sessionId, paymentMethod: "PROMPTPAY", paymentReference: "BANK-REF-DUP" }),
+      closeSessionWithPayment({ storeId: TEST_STORE_ID, sessionId, paymentMethod: "CARD", cashierId: "test-user" }),
+      closeSessionWithPayment({
+        storeId: TEST_STORE_ID,
+        sessionId,
+        paymentMethod: "PROMPTPAY",
+        paymentReference: "BANK-REF-DUP",
+      }),
     ])
 
     expect(results.filter((r) => r.ok)).toHaveLength(1)
@@ -242,14 +249,14 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
 
     await confirmMobilePayment(makeFormData({ sessionId, paymentMethod: "CARD", reference: "EDC-9" }))
 
-    const sales = await listSales({})
+    const sales = await listSales(TEST_STORE_ID, {})
     expect(sales).toHaveLength(1)
     expect(sales[0]?.channel).toBe("MOBILE_ORDER")
     expect(sales[0]?.total).toBe(260)
     // ชื่อรายการเป็น snapshot ในแถวเอง — ไม่มี Product ให้ join
     expect(sales[0]?.items.map((item) => item.name).sort()).toEqual(["ข้าวกะเพราหมู", "ต้มยำกุ้ง"])
 
-    const summary = await getTodaySalesSummary("test-user")
+    const summary = await getTodaySalesSummary(TEST_STORE_ID, "test-user")
     expect(summary.billCount).toBe(1)
     expect(summary.totalSales).toBe(260)
     expect(summary.totalCard).toBe(260)
@@ -354,18 +361,18 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
 
     await confirmMobilePayment(makeFormData({ sessionId, paymentMethod: "PROMPTPAY" }))
 
-    const stats = await getDashboardStats()
+    const stats = await getDashboardStats(TEST_STORE_ID)
     expect(stats.todayBillCount).toBe(1)
     expect(stats.todaySalesTotal).toBe(260)
 
-    const report = await getSalesReport()
+    const report = await getSalesReport(TEST_STORE_ID)
     expect(report.reduce((sum, day) => sum + day.total, 0)).toBe(260)
 
-    const payments = await getPaymentBreakdown()
+    const payments = await getPaymentBreakdown(TEST_STORE_ID)
     expect(payments).toEqual([{ paymentMethod: "PROMPTPAY", total: 260, bills: 1 }])
 
     // เมนูอาหารต้องโผล่ในรายการขายดีด้วย ไม่ใช่หายไปเพราะไม่มี Product ให้ join
-    const top = await getTopSellingProducts(5)
+    const top = await getTopSellingProducts(TEST_STORE_ID, 5)
     expect(top.map((row) => row.name).sort()).toEqual(["ข้าวกะเพราหมู", "ต้มยำกุ้ง"])
     expect(top.find((row) => row.name === "ข้าวกะเพราหมู")?.quantity).toBe(2)
   })
@@ -376,7 +383,7 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
     await setStoreSettings({ serviceChargePercent: "7.50" })
     const { table, sessionId } = await seedTableWithOrder()
 
-    const view = await getBillingView(table.id)
+    const view = await getBillingView(TEST_STORE_ID, table.id)
     expect(view?.itemsTotal).toBe(260)
     expect(view?.serviceCharge).toBe(19.5)
     expect(view?.total).toBe(279.5)

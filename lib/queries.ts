@@ -1,5 +1,6 @@
 import "server-only"
-import { prisma } from "@/lib/prisma"
+import { forStore } from "@/lib/db"
+import { findStoreByQrToken } from "@/lib/store-resolve"
 import { toNumber } from "@/lib/format"
 import { businessDayRange, businessDateOnly } from "@/lib/day"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
@@ -23,11 +24,12 @@ export type ProductListItem = {
   isLow: boolean
 }
 
-export async function listProducts(params: { search?: string; category?: string } = {}) {
+export async function listProducts(storeId: string, params: { search?: string; category?: string } = {}) {
+  const db = forStore(storeId)
   const search = params.search?.trim()
   const category = params.category?.trim()
 
-  const rows = await prisma.product.findMany({
+  const rows = await db.product.findMany({
     where: {
       ...(category && category !== "all" ? { categoryId: category } : {}),
       ...(search
@@ -68,8 +70,9 @@ export type ProductOption = {
   category: string
 }
 
-export async function listProductOptions(): Promise<ProductOption[]> {
-  const rows = await prisma.product.findMany({
+export async function listProductOptions(storeId: string): Promise<ProductOption[]> {
+  const db = forStore(storeId)
+  const rows = await db.product.findMany({
     orderBy: { name: "asc" },
     select: {
       id: true,
@@ -95,16 +98,18 @@ export async function listProductOptions(): Promise<ProductOption[]> {
 }
 
 /// หมวดหมู่ทั้งหมด (master data) — ใช้เป็นตัวเลือกใน dropdown ทุกหน้า
-export async function listCategoryOptions() {
-  return prisma.category.findMany({
+export async function listCategoryOptions(storeId: string) {
+  const db = forStore(storeId)
+  return db.category.findMany({
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   })
 }
 
 /// หมวดหมู่พร้อมจำนวนสินค้าที่ผูกอยู่ — หน้า /categories ใช้ตัดสินใจว่าลบได้ไหม
-export async function listCategoriesWithCount() {
-  const rows = await prisma.category.findMany({
+export async function listCategoriesWithCount(storeId: string) {
+  const db = forStore(storeId)
+  const rows = await db.category.findMany({
     orderBy: { name: "asc" },
     select: {
       id: true,
@@ -121,36 +126,40 @@ export async function listCategoriesWithCount() {
   }))
 }
 
-export async function getLowStockCount() {
-  const rows = await prisma.$queryRaw<{ count: bigint }[]>`
-    SELECT COUNT(*)::bigint AS count FROM "product" WHERE "quantity" <= "reorderPoint"
+export async function getLowStockCount(storeId: string) {
+  const db = forStore(storeId)
+  const rows = await db.$queryRaw<{ count: bigint }[]>`
+    SELECT COUNT(*)::bigint AS count FROM "product"
+    WHERE "storeId" = ${storeId} AND "quantity" <= "reorderPoint"
   `
   return Number(rows[0]?.count ?? 0)
 }
 
-export async function getLowStockProducts(limit = 50) {
-  const rows = await prisma.$queryRaw<
+export async function getLowStockProducts(storeId: string, limit = 50) {
+  const db = forStore(storeId)
+  const rows = await db.$queryRaw<
     { id: string; sku: string; name: string; unit: string; quantity: number; reorderPoint: number }[]
   >`
     SELECT "id", "sku", "name", "unit", "quantity", "reorderPoint"
     FROM "product"
-    WHERE "quantity" <= "reorderPoint"
+    WHERE "storeId" = ${storeId} AND "quantity" <= "reorderPoint"
     ORDER BY ("quantity" - "reorderPoint") ASC, "name" ASC
     LIMIT ${limit}
   `
   return rows
 }
 
-export async function getDashboardStats() {
+export async function getDashboardStats(storeId: string) {
+  const db = forStore(storeId)
   const { start, end } = businessDayRange()
 
   const [productCount, agg, lowStockCount, todaySales] = await Promise.all([
-    prisma.product.count(),
-    prisma.$queryRaw<{ total: string | null }[]>`
-      SELECT COALESCE(SUM("quantity" * "price"), 0)::text AS total FROM "product"
+    db.product.count(),
+    db.$queryRaw<{ total: string | null }[]>`
+      SELECT COALESCE(SUM("quantity" * "price"), 0)::text AS total FROM "product" WHERE "storeId" = ${storeId}
     `,
-    getLowStockCount(),
-    prisma.sale.aggregate({
+    getLowStockCount(storeId),
+    db.sale.aggregate({
       where: { status: "COMPLETED", createdAt: { gte: start, lt: end } },
       _sum: { total: true },
       _count: { _all: true },
@@ -166,8 +175,9 @@ export async function getDashboardStats() {
   }
 }
 
-export async function getRecentTransactions(limit = 8) {
-  const rows = await prisma.stockTransaction.findMany({
+export async function getRecentTransactions(storeId: string, limit = 8) {
+  const db = forStore(storeId)
+  const rows = await db.stockTransaction.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
     include: { product: { select: { name: true, sku: true, unit: true } } },
@@ -184,8 +194,9 @@ export async function getRecentTransactions(limit = 8) {
   }))
 }
 
-export async function listTransactions(limit = 100) {
-  const rows = await prisma.stockTransaction.findMany({
+export async function listTransactions(storeId: string, limit = 100) {
+  const db = forStore(storeId)
+  const rows = await db.stockTransaction.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
     include: { product: { select: { name: true, sku: true, unit: true } } },
@@ -203,11 +214,12 @@ export async function listTransactions(limit = 100) {
 }
 
 /// สรุปการเคลื่อนไหว 30 วันย้อนหลัง สำหรับหน้า /reports
-export async function getMovementReport() {
-  const rows = await prisma.$queryRaw<{ day: Date; type: string; total: bigint }[]>`
+export async function getMovementReport(storeId: string) {
+  const db = forStore(storeId)
+  const rows = await db.$queryRaw<{ day: Date; type: string; total: bigint }[]>`
     SELECT date_trunc('day', "createdAt") AS day, "type", SUM("quantity")::bigint AS total
     FROM "stock_transaction"
-    WHERE "createdAt" >= now() - interval '30 days'
+    WHERE "storeId" = ${storeId} AND "createdAt" >= now() - interval '30 days'
     GROUP BY 1, 2
     ORDER BY 1 ASC
   `
@@ -224,12 +236,13 @@ export async function getMovementReport() {
   return Array.from(byDay.values())
 }
 
-export async function getTopMovedProducts(limit = 5) {
-  const rows = await prisma.$queryRaw<{ name: string; sku: string; total: bigint }[]>`
+export async function getTopMovedProducts(storeId: string, limit = 5) {
+  const db = forStore(storeId)
+  const rows = await db.$queryRaw<{ name: string; sku: string; total: bigint }[]>`
     SELECT p."name", p."sku", SUM(t."quantity")::bigint AS total
     FROM "stock_transaction" t
     JOIN "product" p ON p."id" = t."productId"
-    WHERE t."type" = 'OUT' AND t."createdAt" >= now() - interval '30 days'
+    WHERE t."storeId" = ${storeId} AND t."type" = 'OUT' AND t."createdAt" >= now() - interval '30 days'
     GROUP BY p."name", p."sku"
     ORDER BY total DESC
     LIMIT ${limit}
@@ -237,20 +250,32 @@ export async function getTopMovedProducts(limit = 5) {
   return rows.map((r) => ({ name: r.name, sku: r.sku, total: Number(r.total) }))
 }
 
-export async function listUsers() {
-  const rows = await prisma.user.findMany({
-    orderBy: { createdAt: "desc" },
+/// พนักงานในร้าน (Phase 13) — อ่านจาก StoreMember ของร้านที่ทำงานอยู่ ไม่ใช่ตาราง user ทั้งระบบ
+export async function listUsers(storeId: string) {
+  const db = forStore(storeId)
+  const rows = await db.storeMember.findMany({
+    orderBy: { createdAt: "asc" },
     select: {
       id: true,
-      name: true,
-      email: true,
-      emailVerified: true,
-      createdAt: true,
+      role: true,
       roleId: true,
-      role: { select: { name: true, isSystem: true } },
+      createdAt: true,
+      user: { select: { id: true, name: true, email: true, emailVerified: true, createdAt: true } },
+      permissionRole: { select: { name: true, isSystem: true } },
     },
   })
-  return rows
+  return rows.map((m) => ({
+    id: m.user.id,
+    membershipId: m.id,
+    name: m.user.name,
+    email: m.user.email,
+    emailVerified: m.user.emailVerified,
+    createdAt: m.user.createdAt,
+    joinedAt: m.createdAt,
+    storeRole: m.role,
+    roleId: m.roleId,
+    role: m.permissionRole,
+  }))
 }
 
 // ───────────────────────────── POS (Phase 2.5) ─────────────────────────────
@@ -288,16 +313,15 @@ export type SaleListItem = {
 }
 
 /// บิลขายพร้อมรายการสินค้า — หน้า /pos/history ใช้ทั้งตารางและ dialog รายละเอียด
-export async function listSales(
-  params: { from?: string; to?: string; status?: string; search?: string; limit?: number } = {},
-): Promise<SaleListItem[]> {
+export async function listSales(storeId: string, params: { from?: string; to?: string; status?: string; search?: string; limit?: number } = {},): Promise<SaleListItem[]> {
+  const db = forStore(storeId)
   const status = params.status === "COMPLETED" || params.status === "VOIDED" ? params.status : undefined
   const from = params.from ? new Date(`${params.from}T00:00:00.000+07:00`) : undefined
   // to เป็นวันที่แบบ inclusive — บวกอีกวันแล้วใช้ lt เพื่อกินทั้งวันสุดท้าย
   const to = params.to ? new Date(new Date(`${params.to}T00:00:00.000+07:00`).getTime() + 86_400_000) : undefined
   const search = params.search?.trim()
 
-  const rows = await prisma.sale.findMany({
+  const rows = await db.sale.findMany({
     where: {
       ...(status ? { status } : {}),
       ...(from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } } : {}),
@@ -315,7 +339,7 @@ export async function listSales(
 
   const { start, end } = businessDayRange()
   // ปิดยอดของแคชเชียร์คนไหนไปแล้วบ้างในวันนี้ — บิลของคนนั้นกด void ไม่ได้อีก (F9)
-  const closings = await prisma.cashierClosing.findMany({
+  const closings = await db.cashierClosing.findMany({
     where: { closingDate: businessDateOnly() },
     select: { cashierId: true },
   })
@@ -357,15 +381,17 @@ export async function listSales(
   }))
 }
 
-export async function getSaleById(id: string): Promise<SaleListItem | null> {
-  const sale = await prisma.sale.findUnique({ where: { id }, select: { saleNumber: true } })
+export async function getSaleById(storeId: string, id: string): Promise<SaleListItem | null> {
+  const db = forStore(storeId)
+  const sale = await db.sale.findUnique({ where: { id }, select: { saleNumber: true } })
   if (!sale) return null
-  const rows = await listSales({ search: sale.saleNumber, limit: 1 })
+  const rows = await listSales(storeId, { search: sale.saleNumber, limit: 1 })
   return rows[0] ?? null
 }
 
-export async function getRecentSales(limit = 6) {
-  const rows = await prisma.sale.findMany({
+export async function getRecentSales(storeId: string, limit = 6) {
+  const db = forStore(storeId)
+  const rows = await db.sale.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
     include: { cashier: { select: { name: true } }, _count: { select: { items: true } } },
@@ -383,13 +409,14 @@ export async function getRecentSales(limit = 6) {
 }
 
 /// ยอดขายรายวันย้อนหลัง 30 วัน (นับเฉพาะบิล COMPLETED)
-export async function getSalesReport() {
-  const rows = await prisma.$queryRaw<{ day: Date; total: string; bills: bigint }[]>`
+export async function getSalesReport(storeId: string) {
+  const db = forStore(storeId)
+  const rows = await db.$queryRaw<{ day: Date; total: string; bills: bigint }[]>`
     SELECT date_trunc('day', "createdAt") AS day,
            COALESCE(SUM("total"), 0)::text AS total,
            COUNT(*)::bigint AS bills
     FROM "sale"
-    WHERE "status" = 'COMPLETED' AND "createdAt" >= now() - interval '30 days'
+    WHERE "storeId" = ${storeId} AND "status" = 'COMPLETED' AND "createdAt" >= now() - interval '30 days'
     GROUP BY 1
     ORDER BY 1 ASC
   `
@@ -402,8 +429,9 @@ export async function getSalesReport() {
 
 /// รายการขายดี 30 วัน — นับทั้งสินค้าหน้าร้านและเมนูของ MJD Mobile Order ในลิสต์เดียวกัน
 /// (ยอดขายทั้งสองช่องทางลง Sale ชุดเดียวกันตามกติกาข้อ 8 รายงานจึงต้องเห็นครบทั้งคู่)
-export async function getTopSellingProducts(limit = 5) {
-  const rows = await prisma.$queryRaw<{ name: string; sku: string; qty: bigint; revenue: string }[]>`
+export async function getTopSellingProducts(storeId: string, limit = 5) {
+  const db = forStore(storeId)
+  const rows = await db.$queryRaw<{ name: string; sku: string; qty: bigint; revenue: string }[]>`
     SELECT i."name" AS name,
            COALESCE(MAX(p."sku"), '') AS sku,
            SUM(i."quantity")::bigint AS qty,
@@ -411,7 +439,7 @@ export async function getTopSellingProducts(limit = 5) {
     FROM "sale_item" i
     JOIN "sale" s ON s."id" = i."saleId"
     LEFT JOIN "product" p ON p."id" = i."productId"
-    WHERE s."status" = 'COMPLETED' AND s."createdAt" >= now() - interval '30 days'
+    WHERE s."storeId" = ${storeId} AND s."status" = 'COMPLETED' AND s."createdAt" >= now() - interval '30 days'
     GROUP BY i."name"
     ORDER BY qty DESC
     LIMIT ${limit}
@@ -424,8 +452,9 @@ export async function getTopSellingProducts(limit = 5) {
   }))
 }
 
-export async function getPaymentBreakdown() {
-  const rows = await prisma.sale.groupBy({
+export async function getPaymentBreakdown(storeId: string) {
+  const db = forStore(storeId)
+  const rows = await db.sale.groupBy({
     by: ["paymentMethod"],
     where: { status: "COMPLETED", createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
     _sum: { total: true },
@@ -450,17 +479,18 @@ export type ClosingSummary = {
 }
 
 /// สรุปยอดวันนี้ของแคชเชียร์คนหนึ่ง — คำนวณสดจาก Sale จริงเสมอ ไม่มีการกรอกเอง
-export async function getTodaySalesSummary(cashierId: string): Promise<ClosingSummary> {
+export async function getTodaySalesSummary(storeId: string, cashierId: string): Promise<ClosingSummary> {
+  const db = forStore(storeId)
   const { start, end } = businessDayRange()
 
   const [byMethod, voidedCount] = await Promise.all([
-    prisma.sale.groupBy({
+    db.sale.groupBy({
       by: ["paymentMethod"],
       where: { cashierId, status: "COMPLETED", createdAt: { gte: start, lt: end } },
       _sum: { total: true },
       _count: { _all: true },
     }),
-    prisma.sale.count({ where: { cashierId, status: "VOIDED", voidedAt: { gte: start, lt: end } } }),
+    db.sale.count({ where: { cashierId, status: "VOIDED", voidedAt: { gte: start, lt: end } } }),
   ])
 
   const summary: ClosingSummary = {
@@ -486,9 +516,10 @@ export async function getTodaySalesSummary(cashierId: string): Promise<ClosingSu
   return summary
 }
 
-export async function getTodayClosing(cashierId: string) {
-  const row = await prisma.cashierClosing.findUnique({
-    where: { cashierId_closingDate: { cashierId, closingDate: businessDateOnly() } },
+export async function getTodayClosing(storeId: string, cashierId: string) {
+  const db = forStore(storeId)
+  const row = await db.cashierClosing.findUnique({
+    where: { storeId_cashierId_closingDate: { storeId, cashierId, closingDate: businessDateOnly() } },
   })
   if (!row) return null
   return {
@@ -508,8 +539,9 @@ export async function getTodayClosing(cashierId: string) {
   }
 }
 
-export async function listClosings(params: { cashierId?: string; limit?: number } = {}) {
-  const rows = await prisma.cashierClosing.findMany({
+export async function listClosings(storeId: string, params: { cashierId?: string; limit?: number } = {}) {
+  const db = forStore(storeId)
+  const rows = await db.cashierClosing.findMany({
     where: params.cashierId ? { cashierId: params.cashierId } : {},
     orderBy: [{ closingDate: "desc" }, { closedAt: "desc" }],
     take: params.limit ?? 60,
@@ -559,30 +591,31 @@ export type TableCard = {
 
 /// ยอดสดต่อ session (ไม่รวมรายการที่ยกเลิก) — ใช้ raw SQL เพราะ Prisma groupBy ข้ามความสัมพันธ์ไม่ได้
 /// ⚠️ raw SQL ไม่ผ่าน @@map — ชื่อตารางต้องเป็นชื่อจริงในฐาน (table_session, mobile_order, …)
-async function liveSessionTotals() {
-  const rows = await prisma.$queryRaw<{ sessionId: string; total: string; items: bigint }[]>`
+async function liveSessionTotals(storeId: string) {
+  const rows = await forStore(storeId).$queryRaw<{ sessionId: string; total: string; items: bigint }[]>`
     SELECT s."id" AS "sessionId",
            COALESCE(SUM(i."unitPrice" * i."quantity"), 0)::text AS total,
            COUNT(i."id")::bigint AS items
     FROM "table_session" s
     LEFT JOIN "mobile_order" o ON o."tableSessionId" = s."id"
     LEFT JOIN "mobile_order_item" i ON i."mobileOrderId" = o."id" AND i."status" <> 'CANCELLED'
-    WHERE s."status" IN ('OPEN', 'AWAITING_BILL')
+    WHERE s."storeId" = ${storeId} AND s."status" IN ('OPEN', 'AWAITING_BILL')
     GROUP BY s."id"
   `
   return new Map(rows.map((r) => [r.sessionId, { total: toNumber(r.total), items: Number(r.items) }]))
 }
 
-export async function listTableOverview(): Promise<TableCard[]> {
+export async function listTableOverview(storeId: string): Promise<TableCard[]> {
+  const db = forStore(storeId)
   const [tables, sessions, totals, notifications] = await Promise.all([
-    prisma.table.findMany({ orderBy: { code: "asc" } }),
-    prisma.tableSession.findMany({
+    db.table.findMany({ orderBy: { code: "asc" } }),
+    db.tableSession.findMany({
       where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
       orderBy: { openedAt: "desc" },
       select: { id: true, tableId: true, openedAt: true, status: true },
     }),
-    liveSessionTotals(),
-    prisma.notification.findMany({
+    liveSessionTotals(storeId),
+    db.notification.findMany({
       where: { status: "PENDING" },
       orderBy: { createdAt: "asc" },
       select: { id: true, type: true, reason: true, tableSessionId: true },
@@ -639,9 +672,10 @@ export type NotificationCard = {
   sessionTotal: number
 }
 
-export async function listNotifications(limit = 60): Promise<NotificationCard[]> {
+export async function listNotifications(storeId: string, limit = 60): Promise<NotificationCard[]> {
+  const db = forStore(storeId)
   const [rows, totals] = await Promise.all([
-    prisma.notification.findMany({
+    db.notification.findMany({
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
       take: limit,
       include: {
@@ -655,7 +689,7 @@ export async function listNotifications(limit = 60): Promise<NotificationCard[]>
         },
       },
     }),
-    liveSessionTotals(),
+    liveSessionTotals(storeId),
   ])
 
   return rows.map((n) => ({
@@ -673,10 +707,11 @@ export async function listNotifications(limit = 60): Promise<NotificationCard[]>
   }))
 }
 
-export async function getPendingNotificationCount() {
+export async function getPendingNotificationCount(storeId: string) {
+  const db = forStore(storeId)
   const [notifications, awaitingCallback] = await Promise.all([
-    prisma.notification.count({ where: { status: "PENDING" } }),
-    countPaymentsAwaitingCallback(),
+    db.notification.count({ where: { status: "PENDING" } }),
+    countPaymentsAwaitingCallback(storeId),
   ])
   // รวมเข้า badge เดียวกัน — ถ้าไม่รวม พนักงานจะไม่มีวันรู้ว่ามีเรื่องต้องดู จนกว่าจะบังเอิญเปิดหน้านี้
   return notifications + awaitingCallback
@@ -722,8 +757,9 @@ export type PaymentAwaitingCallback = {
 ///
 /// ⚠️ **แค่เตือน ห้ามปิดบิลและห้ามยิงถามธนาคาร** — ตามการตัดสินใจ 2026-09-09 ว่าเงินเข้าต้อง
 /// ยืนยันด้วย callback ของธนาคารเท่านั้น คนที่ตัดสินใจว่าเงินเข้าจริงหรือไม่คือพนักงาน
-export async function listPaymentsAwaitingCallback(): Promise<PaymentAwaitingCallback[]> {
-  const rows = await prisma.paymentIntent.findMany({
+export async function listPaymentsAwaitingCallback(storeId: string): Promise<PaymentAwaitingCallback[]> {
+  const db = forStore(storeId)
+  const rows = await db.paymentIntent.findMany({
     where: awaitingCallbackWhere(),
     orderBy: { createdAt: "asc" },
     select: {
@@ -745,8 +781,9 @@ export async function listPaymentsAwaitingCallback(): Promise<PaymentAwaitingCal
   }))
 }
 
-export async function countPaymentsAwaitingCallback(): Promise<number> {
-  return prisma.paymentIntent.count({ where: awaitingCallbackWhere() })
+export async function countPaymentsAwaitingCallback(storeId: string): Promise<number> {
+  const db = forStore(storeId)
+  return db.paymentIntent.count({ where: awaitingCallbackWhere() })
 }
 
 /// นานแค่ไหนที่ยังขึ้นป้าย "ชำระเงินแล้ว" ให้พนักงานเห็นบนหน้าจอ
@@ -777,7 +814,7 @@ export type CustomerPaidBill = {
 /// หายไปเฉย ๆ ไม่มีอะไรบอกว่าลูกค้าจ่ายครบแล้วหรือแค่ลุกไป
 /// ป้ายนี้ตอบให้ชัดว่า "โต๊ะไหน จ่ายเมื่อกี่โมง ยอดเท่าไร บิลเลขอะไร ใครเป็นคนปิด"
 ///
-/// **คำนวณสดเหมือน `listPaymentsAwaitingCallback()`** ไม่เขียนแถวลงตาราง `Notification` —
+/// **คำนวณสดเหมือน `listPaymentsAwaitingCallback(storeId)`** ไม่เขียนแถวลงตาราง `Notification` —
 /// ป้ายนี้ไม่มีอะไรให้พนักงานต้องกดรับทราบ มันหายเองเมื่อพ้นช่วงเวลา
 ///
 /// ⚠️ **เดิมกรองเฉพาะบิลที่ระบบปิดเอง (`cashierId = SYSTEM_USER_ID`) ด้วยเหตุผลว่า "บิลที่พนักงาน
@@ -785,8 +822,9 @@ export type CustomerPaidBill = {
 /// จ่ายช้ามักจบด้วยพนักงานกดปิดเอง (เห็นเตือน "รอธนาคารยืนยัน" → เช็กแอปธนาคาร → กดปิด)
 /// จอเลยไม่ขึ้นอะไรเลยทั้งที่ลูกค้าจ่ายแล้ว · และคนที่กดปิดกับคนที่เฝ้าจอมักเป็นคนละคน
 /// จึงต้องขึ้นทุกบิล แล้วบอกให้ชัดแทนว่าใครเป็นคนปิด
-export async function listCustomerPaidBills(limit = 12): Promise<CustomerPaidBill[]> {
-  const rows = await prisma.sale.findMany({
+export async function listCustomerPaidBills(storeId: string, limit = 12): Promise<CustomerPaidBill[]> {
+  const db = forStore(storeId)
+  const rows = await db.sale.findMany({
     where: {
       channel: "MOBILE_ORDER",
       status: "COMPLETED",
@@ -873,8 +911,9 @@ function parseOptions(raw: unknown): { groupName: string; optionName: string; pr
   })
 }
 
-export async function getTableDetail(tableId: string): Promise<TableDetail | null> {
-  const table = await prisma.table.findUnique({
+export async function getTableDetail(storeId: string, tableId: string): Promise<TableDetail | null> {
+  const db = forStore(storeId)
+  const table = await db.table.findUnique({
     where: { id: tableId },
     select: { id: true, code: true, status: true, primaryTableId: true },
   })
@@ -884,7 +923,7 @@ export async function getTableDetail(tableId: string): Promise<TableDetail | nul
   const targetId = table.primaryTableId ?? table.id
 
   const [session, settings, merged] = await Promise.all([
-    prisma.tableSession.findFirst({
+    db.tableSession.findFirst({
       where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] } },
       orderBy: { openedAt: "desc" },
       include: {
@@ -906,8 +945,8 @@ export async function getTableDetail(tableId: string): Promise<TableDetail | nul
         },
       },
     }),
-    prisma.storeSettings.findUnique({ where: { id: "default" }, select: { hasKDS: true } }),
-    prisma.table.findMany({ where: { primaryTableId: targetId }, select: { code: true } }),
+    db.storeSettings.findUnique({ where: { storeId }, select: { hasKDS: true } }),
+    db.table.findMany({ where: { primaryTableId: targetId }, select: { code: true } }),
   ])
 
   if (!session) return null
@@ -961,8 +1000,9 @@ export type KitchenTicket = {
 }
 
 /// ทิกเก็ตครัว — รวมเฉพาะรายการที่ยังไม่จบ (ยกเลิก/เสิร์ฟแล้วไม่ต้องแสดงบน KDS)
-export async function listKitchenTickets(): Promise<KitchenTicket[]> {
-  const orders = await prisma.mobileOrder.findMany({
+export async function listKitchenTickets(storeId: string): Promise<KitchenTicket[]> {
+  const db = forStore(storeId)
+  const orders = await db.mobileOrder.findMany({
     where: {
       session: { status: { in: ["OPEN", "AWAITING_BILL"] } },
       items: { some: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY"] } } },
@@ -998,8 +1038,9 @@ export async function listKitchenTickets(): Promise<KitchenTicket[]> {
   }))
 }
 
-export async function getStoreSettings() {
-  const settings = await prisma.storeSettings.findUnique({ where: { id: "default" } })
+export async function getStoreSettings(storeId: string) {
+  const db = forStore(storeId)
+  const settings = await db.storeSettings.findUnique({ where: { storeId } })
   if (!settings) return null
   return {
     id: settings.id,
@@ -1016,13 +1057,28 @@ export async function getStoreSettings() {
 // ───────────────────── ฝั่งลูกค้า (Phase 9) ─────────────────────
 
 export type CustomerSession =
-  | { ok: true; sessionId: string; tableId: string; tableCode: string; openedAt: Date; awaitingBill: boolean }
-  | { ok: false; reason: "QR_NOT_FOUND" | "QR_INVALIDATED" | "NO_SESSION" }
+  | {
+      ok: true
+      /// ร้านเจ้าของ QR (Phase 13) — หน้าลูกค้าใช้ค่านี้เรียก query อื่นต่อ
+      storeId: string
+      sessionId: string
+      tableId: string
+      tableCode: string
+      openedAt: Date
+      awaitingBill: boolean
+    }
+  | { ok: false; reason: "QR_NOT_FOUND" | "QR_INVALIDATED" | "NO_SESSION" | "STORE_SUSPENDED" }
 
 /// แปลง QR token เป็น session ที่ใช้งานอยู่ — ทุกหน้าฝั่งลูกค้าเรียกตัวนี้ก่อนเสมอ
 /// ไม่สร้าง session ใหม่ที่นี่ (การสร้างอยู่ที่ server action `openTableSession` เท่านั้น)
+/// ไม่รับ storeId เพราะฝั่งลูกค้ายังไม่รู้ร้าน — token คือตัวบอกร้าน (lib/store-resolve.ts)
 export async function resolveCustomerSession(qrToken: string): Promise<CustomerSession> {
-  const qr = await prisma.qRCode.findUnique({
+  const store = await findStoreByQrToken(qrToken)
+  if (!store) return { ok: false, reason: "QR_NOT_FOUND" }
+  if (store.status === "SUSPENDED") return { ok: false, reason: "STORE_SUSPENDED" }
+  const storeId = store.storeId
+  const db = forStore(storeId)
+  const qr = await db.qRCode.findUnique({
     where: { token: qrToken },
     select: { id: true, status: true, tableId: true, table: { select: { primaryTableId: true } } },
   })
@@ -1031,7 +1087,7 @@ export async function resolveCustomerSession(qrToken: string): Promise<CustomerS
 
   const targetTableId = qr.table.primaryTableId ?? qr.tableId
 
-  const session = await prisma.tableSession.findFirst({
+  const session = await db.tableSession.findFirst({
     where: { tableId: targetTableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
     orderBy: { openedAt: "desc" },
     select: { id: true, openedAt: true, status: true, table: { select: { id: true, code: true } } },
@@ -1040,6 +1096,7 @@ export async function resolveCustomerSession(qrToken: string): Promise<CustomerS
 
   return {
     ok: true,
+    storeId,
     sessionId: session.id,
     tableId: session.table.id,
     tableCode: session.table.code,
@@ -1109,8 +1166,9 @@ const MENU_INCLUDE = {
   },
 }
 
-export async function listMenu(): Promise<{ featured: MenuItemCard[]; all: MenuItemCard[] }> {
-  const items = await prisma.menuItem.findMany({
+export async function listMenu(storeId: string): Promise<{ featured: MenuItemCard[]; all: MenuItemCard[] }> {
+  const db = forStore(storeId)
+  const items = await db.menuItem.findMany({
     where: { isActive: true },
     orderBy: [{ isFeatured: "desc" }, { featuredSortOrder: "asc" }, { name: "asc" }],
     include: MENU_INCLUDE,
@@ -1123,8 +1181,9 @@ export async function listMenu(): Promise<{ featured: MenuItemCard[]; all: MenuI
   }
 }
 
-export async function getMenuItem(id: string): Promise<MenuItemCard | null> {
-  const item = await prisma.menuItem.findFirst({
+export async function getMenuItem(storeId: string, id: string): Promise<MenuItemCard | null> {
+  const db = forStore(storeId)
+  const item = await db.menuItem.findFirst({
     where: { id, isActive: true },
     include: MENU_INCLUDE,
   })
@@ -1145,8 +1204,9 @@ export type CustomerOrderView = {
 }
 
 /// สถานะออร์เดอร์ที่ลูกค้าเห็น — หน้า /order/[qrToken]/status โพลตัวนี้เป็นรอบ ๆ
-export async function getCustomerOrderView(sessionId: string): Promise<CustomerOrderView | null> {
-  const session = await prisma.tableSession.findUnique({
+export async function getCustomerOrderView(storeId: string, sessionId: string): Promise<CustomerOrderView | null> {
+  const db = forStore(storeId)
+  const session = await db.tableSession.findUnique({
     where: { id: sessionId },
     select: {
       id: true,
@@ -1205,8 +1265,9 @@ export type QrCodeRow = {
 }
 
 /// รายการ QR ต่อโต๊ะ — ใช้ได้พร้อมกันแค่ 1 ใบต่อโต๊ะ (ใบเก่าต้องถูก invalidate ก่อน)
-export async function listQrCodes(): Promise<QrCodeRow[]> {
-  const tables = await prisma.table.findMany({
+export async function listQrCodes(storeId: string): Promise<QrCodeRow[]> {
+  const db = forStore(storeId)
+  const tables = await db.table.findMany({
     orderBy: { code: "asc" },
     include: {
       qrCodes: { orderBy: { issuedAt: "desc" } },
@@ -1256,8 +1317,9 @@ export type BillingView = {
 
 /// ใบเสร็จของโต๊ะสำหรับหน้าปิดบิลฝั่งพนักงาน (F17) — ยอดคิดจาก `computeBillTotals` ตัวเดียวกับที่ปิดบิลจริง
 /// รายการที่ถูกยกเลิกไม่เข้าบิล และรายการซ้ำ (ชื่อ+ตัวเลือก+ราคาเดียวกัน) ถูกยุบเป็นบรรทัดเดียว
-export async function getBillingView(tableId: string): Promise<BillingView | null> {
-  const table = await prisma.table.findUnique({
+export async function getBillingView(storeId: string, tableId: string): Promise<BillingView | null> {
+  const db = forStore(storeId)
+  const table = await db.table.findUnique({
     where: { id: tableId },
     select: { id: true, primaryTableId: true },
   })
@@ -1267,7 +1329,7 @@ export async function getBillingView(tableId: string): Promise<BillingView | nul
   const targetId = table.primaryTableId ?? table.id
 
   const [session, settings, merged] = await Promise.all([
-    prisma.tableSession.findFirst({
+    db.tableSession.findFirst({
       where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] } },
       orderBy: { openedAt: "desc" },
       select: {
@@ -1293,11 +1355,11 @@ export async function getBillingView(tableId: string): Promise<BillingView | nul
         },
       },
     }),
-    prisma.storeSettings.findUnique({
-      where: { id: "default" },
+    db.storeSettings.findUnique({
+      where: { storeId },
       select: { storeName: true, serviceChargePercent: true },
     }),
-    prisma.table.findMany({ where: { primaryTableId: targetId }, select: { code: true } }),
+    db.table.findMany({ where: { primaryTableId: targetId }, select: { code: true } }),
   ])
 
   if (!session) return null
@@ -1349,6 +1411,7 @@ export async function getBillingView(tableId: string): Promise<BillingView | nul
 export type CustomerPaymentStatus =
   | {
       state: "UNPAID"
+      storeId: string
       sessionId: string
       tableCode: string
       itemsTotal: number
@@ -1365,7 +1428,11 @@ export type CustomerPaymentStatus =
 /// ต่างจาก `resolveCustomerSession` ตรงที่ **ต้องตอบได้แม้ QR ถูก invalidate ไปแล้ว** — เพราะการปิดบิล
 /// สำเร็จคือสิ่งที่ทำให้ DYNAMIC QR ใช้ไม่ได้ ถ้าใช้ resolver ตัวเดิม ลูกค้าจะเห็นหน้า error แทนหน้า "จ่ายสำเร็จ"
 export async function getCustomerPaymentStatus(qrToken: string): Promise<CustomerPaymentStatus> {
-  const qr = await prisma.qRCode.findUnique({
+  const store = await findStoreByQrToken(qrToken)
+  if (!store) return { state: "UNKNOWN" }
+  const storeId = store.storeId
+  const db = forStore(storeId)
+  const qr = await db.qRCode.findUnique({
     where: { token: qrToken },
     select: { tableId: true, table: { select: { primaryTableId: true } } },
   })
@@ -1373,7 +1440,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
 
   const targetTableId = qr.table.primaryTableId ?? qr.tableId
 
-  const session = await prisma.tableSession.findFirst({
+  const session = await db.tableSession.findFirst({
     where: { tableId: targetTableId },
     orderBy: { openedAt: "desc" },
     select: {
@@ -1405,8 +1472,8 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
 
   if (session.status === "CLOSED" || session.status === "CANCELLED") return { state: "UNKNOWN" }
 
-  const settings = await prisma.storeSettings.findUnique({
-    where: { id: "default" },
+  const settings = await db.storeSettings.findUnique({
+    where: { storeId },
     select: { serviceChargePercent: true },
   })
   const servicePercent = toNumber(settings?.serviceChargePercent ?? 0)
@@ -1419,6 +1486,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
 
   return {
     state: "UNPAID",
+    storeId,
     sessionId: session.id,
     tableCode: session.table.code,
     itemsTotal: totals.itemsTotal,
@@ -1444,8 +1512,9 @@ export type KitchenTicketDoc = {
 
 /// ทิกเก็ตของออร์เดอร์เดียวสำหรับหน้าพิมพ์/บันทึกเป็น PDF
 /// รายการที่ถูกยกเลิกไม่ขึ้นทิกเก็ต — ครัวต้องไม่เห็นของที่ไม่ต้องทำ
-export async function getKitchenTicket(orderId: string): Promise<KitchenTicketDoc | null> {
-  const order = await prisma.mobileOrder.findUnique({
+export async function getKitchenTicket(storeId: string, orderId: string): Promise<KitchenTicketDoc | null> {
+  const db = forStore(storeId)
+  const order = await db.mobileOrder.findUnique({
     where: { id: orderId },
     select: {
       id: true,
@@ -1469,8 +1538,8 @@ export async function getKitchenTicket(orderId: string): Promise<KitchenTicketDo
   if (!order) return null
 
   const [settings, merged] = await Promise.all([
-    prisma.storeSettings.findUnique({ where: { id: "default" }, select: { storeName: true } }),
-    prisma.table.findMany({ where: { primaryTableId: order.session.tableId }, select: { code: true } }),
+    db.storeSettings.findUnique({ where: { storeId }, select: { storeName: true } }),
+    db.table.findMany({ where: { primaryTableId: order.session.tableId }, select: { code: true } }),
   ])
 
   return {
@@ -1503,8 +1572,9 @@ export type FeaturableMenuItem = {
 }
 
 /// เมนูทั้งหมดสำหรับหน้าตั้งค่า — รวมเมนูที่ปิดใช้งานไว้ด้วย เพื่อให้เห็นว่าอะไรถูกซ่อนอยู่
-export async function listMenuForSettings(): Promise<FeaturableMenuItem[]> {
-  const items = await prisma.menuItem.findMany({
+export async function listMenuForSettings(storeId: string): Promise<FeaturableMenuItem[]> {
+  const db = forStore(storeId)
+  const items = await db.menuItem.findMany({
     orderBy: [{ isFeatured: "desc" }, { featuredSortOrder: "asc" }, { name: "asc" }],
     select: {
       id: true,
@@ -1527,8 +1597,9 @@ export async function listMenuForSettings(): Promise<FeaturableMenuItem[]> {
 
 /// จำนวนโต๊ะที่ยังเปิดอยู่ — หน้าตั้งค่าใช้บอกล่วงหน้าว่าสลับโหมดครัวได้หรือยัง
 /// (ด่านจริงอยู่ใน `updateStoreSettings` ที่เช็คซ้ำในทรานแซคชันเดียวกับการเขียน)
-export async function getOpenSessionCount(): Promise<number> {
-  return prisma.tableSession.count({ where: { status: { in: ["OPEN", "AWAITING_BILL"] } } })
+export async function getOpenSessionCount(storeId: string): Promise<number> {
+  const db = forStore(storeId)
+  return db.tableSession.count({ where: { status: { in: ["OPEN", "AWAITING_BILL"] } } })
 }
 
 // ───────────────────── บทบาทและสิทธิ์ (§4) ─────────────────────
@@ -1542,15 +1613,16 @@ export type RoleRow = {
   permissions: Partial<Record<ResourceKey, PermissionActionValue[]>>
 }
 
-export async function listRoles(): Promise<RoleRow[]> {
-  const roles = await prisma.role.findMany({
+export async function listRoles(storeId: string): Promise<RoleRow[]> {
+  const db = forStore(storeId)
+  const roles = await db.role.findMany({
     orderBy: [{ isSystem: "desc" }, { name: "asc" }],
     select: {
       id: true,
       name: true,
       description: true,
       isSystem: true,
-      _count: { select: { users: true } },
+      _count: { select: { members: true } },
       permissions: { select: { resource: true, actions: true } },
     },
   })
@@ -1563,14 +1635,15 @@ export async function listRoles(): Promise<RoleRow[]> {
       name: role.name,
       description: role.description,
       isSystem: role.isSystem,
-      userCount: role._count.users,
+      userCount: role._count.members,
       permissions,
     }
   })
 }
 
-export async function listRoleOptions() {
-  return prisma.role.findMany({
+export async function listRoleOptions(storeId: string) {
+  const db = forStore(storeId)
+  return db.role.findMany({
     orderBy: [{ isSystem: "desc" }, { name: "asc" }],
     select: { id: true, name: true, isSystem: true },
   })
@@ -1589,8 +1662,9 @@ export type ManagedTable = {
 }
 
 /// โต๊ะทั้งหมดพร้อมข้อมูลที่ใช้ตัดสินว่าแก้/ลบได้ไหม — หน้า /mobile-order/tables/manage
-export async function listTablesForManage(): Promise<ManagedTable[]> {
-  const tables = await prisma.table.findMany({
+export async function listTablesForManage(storeId: string): Promise<ManagedTable[]> {
+  const db = forStore(storeId)
+  const tables = await db.table.findMany({
     orderBy: { code: "asc" },
     select: {
       id: true,
@@ -1631,8 +1705,9 @@ export type ManagedMenuItem = {
 }
 
 /// เมนูทั้งหมดพร้อมตัวเลือกเสริม — หน้า /mobile-order/menu
-export async function listMenuForManage(): Promise<ManagedMenuItem[]> {
-  const items = await prisma.menuItem.findMany({
+export async function listMenuForManage(storeId: string): Promise<ManagedMenuItem[]> {
+  const db = forStore(storeId)
+  const items = await db.menuItem.findMany({
     orderBy: [{ isActive: "desc" }, { name: "asc" }],
     select: {
       id: true,

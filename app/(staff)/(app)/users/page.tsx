@@ -3,26 +3,30 @@ import { listUsers, listRoleOptions } from "@/lib/queries"
 import { formatDateTime } from "@/lib/format"
 import { requirePageAccess, hasPermission } from "@/lib/permissions"
 import { UserRolePicker } from "@/components/user-role-picker"
+import { StoreMemberControls } from "@/components/store-member-controls"
 import { IconLock } from "@/components/icons"
 
 export const metadata = { title: "ผู้ใช้งาน" }
 
 export default async function UsersPage() {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  await requirePageAccess("USERS")
+  const permissions = await requirePageAccess("USERS")
+  const { storeId } = permissions
   const canEdit = await hasPermission("USERS", "EDIT")
+  // ปุ่มเลื่อน/ถอดสมาชิกร้านเป็นของเจ้าของร้านเท่านั้น (Phase 13) — คนละสิทธิ์กับ USERS:EDIT
+  const isOwner = permissions.storeRole === "OWNER"
 
-  const [users, roles] = await Promise.all([listUsers(), listRoleOptions()])
-  const unassigned = users.filter((u) => u.roleId === null).length
+  const [users, roles] = await Promise.all([listUsers(storeId), listRoleOptions(storeId)])
+  const unassigned = users.filter((u) => u.storeRole === "STAFF" && u.roleId === null).length
 
   return (
     <>
       <div className="page-head">
         <div>
           <p className="t-eyebrow">ระบบ</p>
-          <h1 className="t-h1">ผู้ใช้งาน</h1>
+          <h1 className="t-h1">พนักงานในร้าน</h1>
           <p className="t-body" style={{ marginTop: 4 }}>
-            รายชื่อผู้ใช้ทั้งหมดและบทบาทที่สังกัด — เปลี่ยนบทบาทแล้วมีผลทันทีในคำขอถัดไป
+            รายชื่อพนักงานของร้านนี้และบทบาทที่สังกัด — เปลี่ยนบทบาทแล้วมีผลทันทีในคำขอถัดไป
           </p>
         </div>
         {canEdit ? (
@@ -35,7 +39,7 @@ export default async function UsersPage() {
 
       {unassigned > 0 ? (
         <div className="alert-banner warning">
-          มีผู้ใช้ <span className="num">{unassigned}</span> คนที่ยังไม่ได้กำหนดบทบาท —
+          มีพนักงาน <span className="num">{unassigned}</span> คนที่ยังไม่ได้กำหนดบทบาท —
           เข้าได้เฉพาะหน้าตั้งค่าโปรไฟล์จนกว่าจะกำหนดให้
         </div>
       ) : null}
@@ -57,7 +61,8 @@ export default async function UsersPage() {
                 <th style={{ padding: "10px 24px", fontWeight: 500 }}>ชื่อ</th>
                 <th style={{ padding: "10px 12px", fontWeight: 500 }}>อีเมล</th>
                 <th style={{ padding: "10px 12px", fontWeight: 500, minWidth: 200 }}>บทบาท</th>
-                <th style={{ padding: "10px 24px", fontWeight: 500, textAlign: "right" }}>สมัครเมื่อ</th>
+                <th style={{ padding: "10px 24px", fontWeight: 500, textAlign: "right" }}>เข้าร้านเมื่อ</th>
+                {isOwner ? <th style={{ padding: "10px 24px", fontWeight: 500, textAlign: "right" }}>จัดการ</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -69,7 +74,12 @@ export default async function UsersPage() {
                   </td>
                   <td style={{ padding: "12px" }}>{u.email}</td>
                   <td style={{ padding: "12px" }}>
-                    {canEdit ? (
+                    {u.storeRole === "OWNER" ? (
+                      <span className="chip chip-brand">
+                        <span className="dot" />
+                        เจ้าของร้าน · สิทธิ์เต็ม
+                      </span>
+                    ) : canEdit ? (
                       <UserRolePicker userId={u.id} currentRoleId={u.roleId} roles={roles} />
                     ) : u.role ? (
                       <span className="chip chip-brand">
@@ -84,8 +94,13 @@ export default async function UsersPage() {
                     )}
                   </td>
                   <td className="num t-caption" style={{ padding: "12px 24px", textAlign: "right" }}>
-                    {formatDateTime(u.createdAt)}
+                    {formatDateTime(u.joinedAt)}
                   </td>
+                  {isOwner ? (
+                    <td style={{ padding: "12px 24px" }}>
+                      <StoreMemberControls userId={u.id} storeRole={u.storeRole} isSelf={u.id === permissions.id} />
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

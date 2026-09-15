@@ -1,8 +1,9 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
-import { requireUser } from "@/lib/session"
+import { forStore } from "@/lib/db"
+import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { findStoreByQrToken } from "@/lib/store-resolve"
 import { closeSessionWithPayment, computeBillTotals } from "@/lib/close-session"
 import { toNumber } from "@/lib/format"
 import {
@@ -13,7 +14,6 @@ import {
 } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
-const AUTH_ERROR = "กรุณาเข้าสู่ระบบก่อนทำรายการ"
 
 class PaymentAbort extends Error {
   constructor(readonly reason: string) {
@@ -36,12 +36,14 @@ function revalidatePaymentPages() {
 /// ทางนี้เป็น "เส้นทางมือ" ที่ต้องมีเสมอ ไม่ว่าจะต่อ payment provider หรือยัง — ร้านต้องปิดบิลได้
 /// แม้ webhook ไม่มา (เน็ตล่ม/provider ล่ม) ส่วนเส้นทางอัตโนมัติอยู่ที่ /api/payments/webhook
 export async function confirmMobilePayment(formData: FormData): Promise<ActionResult<{ saleNumber: string }>> {
-  let user
+  let ctx: StoreContext
   try {
-    user = await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const user = ctx.user
+  const storeId = ctx.storeId
 
   const parsed = confirmPaymentSchema.safeParse({
     sessionId: formData.get("sessionId") ?? "",
@@ -58,6 +60,7 @@ export async function confirmMobilePayment(formData: FormData): Promise<ActionRe
   }
 
   const result = await closeSessionWithPayment({
+    storeId,
     sessionId: parsed.data.sessionId,
     paymentMethod: parsed.data.paymentMethod,
     cashierId: user.id,
@@ -100,7 +103,13 @@ export async function startCustomerPayment(
   const { qrToken, method } = parsed.data
 
   try {
-    const total = await prisma.$transaction(async (tx) => {
+    // ร้านของลูกค้า = ร้านเจ้าของ qrToken (Phase 13)
+    const store = await findStoreByQrToken(qrToken)
+    if (!store) throw new PaymentAbort("ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน")
+    if (store.status === "SUSPENDED") throw new PaymentAbort("ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน")
+    const storeId = store.storeId
+
+    const total = await forStore(storeId).$transaction(async (tx) => {
       const qr = await tx.qRCode.findUnique({
         where: { token: qrToken },
         select: { status: true, tableId: true, table: { select: { primaryTableId: true } } },
@@ -125,7 +134,7 @@ export async function startCustomerPayment(
       if (items.length === 0) throw new PaymentAbort("โต๊ะนี้ยังไม่มีรายการที่ต้องชำระ")
 
       const settings = await tx.storeSettings.findUnique({
-        where: { id: "default" },
+        where: { storeId },
         select: { serviceChargePercent: true },
       })
       const totals = computeBillTotals(
@@ -149,7 +158,7 @@ export async function startCustomerPayment(
         await tx.notification.update({ where: { id: pending.id }, data: { reason } })
       } else {
         await tx.notification.create({
-          data: { tableSessionId: session.id, type: "CHECK_BILL", reason },
+          data: { storeId, tableSessionId: session.id, type: "CHECK_BILL", reason },
         })
       }
 

@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getCustomerPaymentStatus, getStoreSettings } from "@/lib/queries"
+import { findStoreByQrToken } from "@/lib/store-resolve"
 import { formatBaht, formatDateTime } from "@/lib/format"
 import { CustomerShell, CustomerNotice } from "@/components/customer/customer-shell"
 import { MemberJoin } from "@/components/customer/member-join"
@@ -9,7 +10,8 @@ export const metadata = { title: "ชำระเงินสำเร็จ" }
 
 export default async function PaySuccessPage({ params }: PageProps<"/order/[qrToken]/pay/success">) {
   const { qrToken } = await params
-  const [status, settings] = await Promise.all([getCustomerPaymentStatus(qrToken), getStoreSettings()])
+  const [status, store] = await Promise.all([getCustomerPaymentStatus(qrToken), findStoreByQrToken(qrToken)])
+  const settings = store ? await getStoreSettings(store.storeId) : null
 
   if (status.state === "UNPAID") redirect(`/order/${qrToken}/pay`)
 

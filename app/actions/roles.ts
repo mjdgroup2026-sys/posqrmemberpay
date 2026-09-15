@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { forStore, type StoreTx } from "@/lib/db"
 import { guardAction, RESOURCE_ACTIONS } from "@/lib/permissions"
 import { roleSchema, assignRoleSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
@@ -54,7 +54,7 @@ function parsePermissions(raw: FormDataEntryValue | null): { resource: ResourceK
 }
 
 async function writePermissions(
-  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  tx: StoreTx,
   roleId: string,
   rows: { resource: ResourceKey; actions: PermissionAction[] }[],
 ) {
@@ -69,6 +69,8 @@ async function writePermissions(
 export async function createRole(formData: FormData): Promise<ActionResult> {
   const guard = await guardAction("USERS", "EDIT")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const parsed = roleSchema.safeParse({
     name: formData.get("name"),
@@ -80,9 +82,9 @@ export async function createRole(formData: FormData): Promise<ActionResult> {
 
   try {
     const rows = parsePermissions(formData.get("permissions"))
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const role = await tx.role.create({
-        data: { name: parsed.data.name, description: parsed.data.description },
+        data: { storeId, name: parsed.data.name, description: parsed.data.description },
         select: { id: true },
       })
       await writePermissions(tx, role.id, rows)
@@ -100,6 +102,8 @@ export async function createRole(formData: FormData): Promise<ActionResult> {
 export async function updateRole(formData: FormData): Promise<ActionResult> {
   const guard = await guardAction("USERS", "EDIT")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const parsed = roleSchema.safeParse({
     id: formData.get("id"),
@@ -114,7 +118,7 @@ export async function updateRole(formData: FormData): Promise<ActionResult> {
 
   try {
     const rows = parsePermissions(formData.get("permissions"))
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const role = await tx.role.findUnique({ where: { id }, select: { isSystem: true, name: true } })
       if (!role) throw new RoleAbort("ไม่พบบทบาทที่ต้องการแก้ไข")
 
@@ -147,21 +151,23 @@ export async function updateRole(formData: FormData): Promise<ActionResult> {
 export async function deleteRole(formData: FormData): Promise<ActionResult> {
   const guard = await guardAction("USERS", "EDIT")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const role = await tx.role.findUnique({
         where: { id: parsed.data.id },
-        select: { isSystem: true, name: true, _count: { select: { users: true } } },
+        select: { isSystem: true, name: true, _count: { select: { members: true } } },
       })
       if (!role) throw new RoleAbort("ไม่พบบทบาทที่ต้องการลบ")
       if (role.isSystem) throw new RoleAbort(SYSTEM_ROLE_ERROR)
-      if (role._count.users > 0) {
+      if (role._count.members > 0) {
         throw new RoleAbort(
-          `ลบไม่ได้ — ยังมีผู้ใช้ ${role._count.users} คนใช้บทบาทนี้อยู่ กรุณาย้ายผู้ใช้ไปบทบาทอื่นก่อน`,
+          `ลบไม่ได้ — ยังมีพนักงาน ${role._count.members} คนใช้บทบาทนี้อยู่ กรุณาย้ายไปบทบาทอื่นก่อน`,
         )
       }
       await tx.role.delete({ where: { id: parsed.data.id } })
@@ -175,10 +181,15 @@ export async function deleteRole(formData: FormData): Promise<ActionResult> {
   return { ok: true, message: "ลบบทบาทเรียบร้อยแล้ว" }
 }
 
-/// กำหนดบทบาทให้ผู้ใช้ — ส่ง roleId ว่างเพื่อถอดบทบาทออก (ผู้ใช้จะเข้าได้เฉพาะ /settings)
+/// กำหนดบทบาท (matrix สิทธิ์) ให้พนักงานในร้าน — ส่ง roleId ว่างเพื่อถอดออก (จะเข้าได้เฉพาะ /settings)
+/// Phase 13: เขียนที่ StoreMember ของร้านนี้ ไม่ใช่ตาราง user · OWNER ไม่ใช้ค่านี้ (ได้เต็มเสมอ)
+/// จึงไม่ต้องมีกติกา "ห้ามถอดผู้ดูแลระบบคนสุดท้าย" อีก — คนที่กำหนดสิทธิ์ได้เสมอคือ OWNER
+/// ซึ่งถูกกันไว้ว่าต้องมีอย่างน้อย 1 คนที่ app/actions/store-members.ts
 export async function assignUserRole(formData: FormData): Promise<ActionResult> {
   const guard = await guardAction("USERS", "EDIT")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const parsed = assignRoleSchema.safeParse({
     userId: formData.get("userId"),
@@ -190,32 +201,17 @@ export async function assignUserRole(formData: FormData): Promise<ActionResult> 
   const { userId, roleId } = parsed.data
 
   try {
-    await prisma.$transaction(async (tx) => {
-      const target = await tx.user.findUnique({
-        where: { id: userId },
-        select: { name: true, role: { select: { id: true, isSystem: true } } },
-      })
-      if (!target) throw new RoleAbort("ไม่พบผู้ใช้ที่ต้องการแก้ไข")
+    await db.$transaction(async (tx) => {
+      // StoreMember ถูกกรอง storeId โดย forStore() — userId ของร้านอื่นจึงได้ "ไม่พบ" ไม่ใช่แก้ข้ามร้าน
+      const target = await tx.storeMember.findFirst({ where: { userId }, select: { id: true } })
+      if (!target) throw new RoleAbort("ไม่พบพนักงานคนนี้ในร้าน")
 
       if (roleId) {
         const role = await tx.role.findUnique({ where: { id: roleId }, select: { id: true } })
         if (!role) throw new RoleAbort("ไม่พบบทบาทที่เลือก")
       }
 
-      // ★ ห้ามถอดผู้ดูแลระบบคนสุดท้ายออก — ไม่งั้นจะไม่เหลือใครกำหนดสิทธิ์ได้อีกเลย
-      //   นับในทรานแซคชันเดียวกับการเขียน ไม่ใช่เช็คก่อนแล้วค่อยเขียน
-      const wasSystemAdmin = target.role?.isSystem === true
-      const staysSystemAdmin = roleId === target.role?.id
-      if (wasSystemAdmin && !staysSystemAdmin) {
-        const remaining = await tx.user.count({
-          where: { role: { isSystem: true }, id: { not: userId } },
-        })
-        if (remaining === 0) {
-          throw new RoleAbort("เปลี่ยนไม่ได้ — นี่คือผู้ดูแลระบบคนสุดท้าย ต้องมีผู้ดูแลระบบอย่างน้อย 1 คนเสมอ")
-        }
-      }
-
-      await tx.user.update({ where: { id: userId }, data: { roleId: roleId ?? null } })
+      await tx.storeMember.update({ where: { id: target.id }, data: { roleId: roleId ?? null } })
     })
   } catch (error) {
     if (error instanceof RoleAbort) return { ok: false, error: error.reason }

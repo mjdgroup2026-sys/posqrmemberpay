@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { getKitchenTicket } from "@/lib/queries"
-import { requireUser } from "@/lib/session"
+import { requireStorePage } from "@/lib/permissions"
 import { KitchenTicket } from "@/components/kitchen-ticket"
 
 export const metadata = { title: "ทิกเก็ตครัว" }
@@ -11,11 +11,11 @@ export default async function KitchenTicketPage({
   params,
   searchParams,
 }: PageProps<"/tickets/[orderId]">) {
-  await requireUser()
+  const { storeId } = await requireStorePage()
 
   const { orderId } = await params
   const query = await searchParams
-  const ticket = await getKitchenTicket(orderId)
+  const ticket = await getKitchenTicket(storeId, orderId)
 
   if (!ticket) {
     return (

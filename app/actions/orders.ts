@@ -1,14 +1,13 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
-import { requireUser } from "@/lib/session"
+import { forStore } from "@/lib/db"
+import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { idSchema, cancelOrderItemSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { OrderItemStatus } from "@/generated/prisma/client"
 import { isPrinterConfigured, printKitchenTicket } from "@/lib/kitchen-printer"
 import type { ActionResult } from "@/lib/types"
 
-const AUTH_ERROR = "กรุณาเข้าสู่ระบบก่อนทำรายการ"
 
 /// ดึงชื่อ modifier ออกจาก JSON snapshot สำหรับพิมพ์ทิกเก็ต
 function parseOptionNames(raw: unknown): string[] {
@@ -34,9 +33,9 @@ function revalidateOrderPages() {
   revalidatePath("/mobile-order/notifications")
 }
 
-async function hasKDS(): Promise<boolean> {
-  const settings = await prisma.storeSettings.findUnique({
-    where: { id: "default" },
+async function hasKDS(storeId: string): Promise<boolean> {
+  const settings = await forStore(storeId).storeSettings.findUnique({
+    where: { storeId },
     select: { hasKDS: true },
   })
   return settings?.hasKDS ?? false
@@ -46,26 +45,30 @@ async function hasKDS(): Promise<boolean> {
 ///
 /// ★ ทุกการเปลี่ยนสถานะต้องระบุสถานะต้นทางใน `where` เสมอ ห้าม read-then-write —
 ///   ป้องกัน race ระหว่างครัวกด "เริ่มทำ" กับพนักงานกด "ยกเลิกรายการ" พร้อมกัน
+/// ⚠️ MobileOrderItem ไม่มี storeId (เป็นตารางลูก) — forStore() กรองให้ไม่ได้ ต้องกรองผ่าน `order.storeId` เอง
+///   ไม่งั้นพนักงานร้าน A ส่ง id ของรายการร้าน B มาเปลี่ยนสถานะได้
 async function transition(
+  storeId: string,
   itemId: string,
   from: OrderItemStatus[],
   to: OrderItemStatus,
   extra: Record<string, unknown> = {},
 ): Promise<ActionResult> {
-  const item = await prisma.mobileOrderItem.findUnique({
-    where: { id: itemId },
+  const db = forStore(storeId)
+  const item = await db.mobileOrderItem.findFirst({
+    where: { id: itemId, order: { storeId } },
     select: { id: true, status: true, menuItem: { select: { name: true } } },
   })
   if (!item) return { ok: false, error: "ไม่พบรายการอาหารนี้" }
 
-  const updated = await prisma.mobileOrderItem.updateMany({
-    where: { id: itemId, status: { in: from } },
+  const updated = await db.mobileOrderItem.updateMany({
+    where: { id: itemId, order: { storeId }, status: { in: from } },
     data: { status: to, ...extra },
   })
 
   if (updated.count === 0) {
-    const current = await prisma.mobileOrderItem.findUnique({
-      where: { id: itemId },
+    const current = await db.mobileOrderItem.findFirst({
+      where: { id: itemId, order: { storeId } },
       select: { status: true },
     })
     return {
@@ -80,62 +83,70 @@ async function transition(
 
 /// ครัวกด "เริ่มปรุง" บน KDS
 export async function startCookingItem(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  if (!(await hasKDS())) {
+  if (!(await hasKDS(storeId))) {
     return { ok: false, error: "ร้านนี้ปิดการใช้งาน KDS อยู่ — ให้พนักงานกด “เสิร์ฟอาหารแล้ว” ที่หน้าโต๊ะแทน" }
   }
 
-  return transition(parsed.data.id, ["AWAITING_KITCHEN"], "COOKING")
+  return transition(storeId, parsed.data.id, ["AWAITING_KITCHEN"], "COOKING")
 }
 
 /// ครัวกด "ทำเสร็จแล้ว" บน KDS
 export async function markItemReady(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  return transition(parsed.data.id, ["COOKING"], "READY")
+  return transition(storeId, parsed.data.id, ["COOKING"], "READY")
 }
 
 /// "เสิร์ฟอาหารแล้ว" — ร้านที่มี KDS กดจาก READY, ร้านที่ไม่มี KDS ข้ามจาก AWAITING_KITCHEN ตรงมา SERVED
 export async function markItemServed(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  const from: OrderItemStatus[] = (await hasKDS())
+  const from: OrderItemStatus[] = (await hasKDS(storeId))
     ? ["READY"]
     : ["AWAITING_KITCHEN", "COOKING", "READY"]
 
-  return transition(parsed.data.id, from, "SERVED")
+  return transition(storeId, parsed.data.id, from, "SERVED")
 }
 
 /// ยกเลิกรายการอาหารทีละรายการ — อนุญาตเฉพาะตอนยังเป็น AWAITING_KITCHEN เท่านั้น (กติกาข้อ 7)
 export async function cancelOrderItem(formData: FormData): Promise<ActionResult> {
-  let user
+  let ctx: StoreContext
   try {
-    user = await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const user = ctx.user
+  const storeId = ctx.storeId
 
   const parsed = cancelOrderItemSchema.safeParse({
     id: formData.get("id") ?? "",
@@ -149,7 +160,7 @@ export async function cancelOrderItem(formData: FormData): Promise<ActionResult>
     }
   }
 
-  return transition(parsed.data.id, ["AWAITING_KITCHEN"], "CANCELLED", {
+  return transition(storeId, parsed.data.id, ["AWAITING_KITCHEN"], "CANCELLED", {
     cancelledAt: new Date(),
     cancelledById: user.id,
     cancelReason: parsed.data.reason,
@@ -159,12 +170,13 @@ export async function cancelOrderItem(formData: FormData): Promise<ActionResult>
 /// เปลี่ยนสถานะทั้งทิกเก็ตในครั้งเดียว (ปุ่มบน KDS เป็นระดับใบสั่ง ไม่ใช่รายรายการ)
 /// ยังเป็น conditional update เหมือนเดิม — รายการที่สถานะเปลี่ยนไปแล้วจะไม่ถูกแตะ
 async function transitionOrder(
+  storeId: string,
   orderId: string,
   from: OrderItemStatus[],
   to: OrderItemStatus,
 ): Promise<ActionResult> {
-  const updated = await prisma.mobileOrderItem.updateMany({
-    where: { mobileOrderId: orderId, status: { in: from } },
+  const updated = await forStore(storeId).mobileOrderItem.updateMany({
+    where: { mobileOrderId: orderId, order: { storeId }, status: { in: from } },
     data: { status: to },
   })
 
@@ -177,65 +189,74 @@ async function transitionOrder(
 }
 
 export async function startCookingOrder(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  if (!(await hasKDS())) {
+  if (!(await hasKDS(storeId))) {
     return { ok: false, error: "ร้านนี้ปิดการใช้งาน KDS อยู่ — ให้พนักงานกด “เสิร์ฟอาหารแล้ว” ที่หน้าโต๊ะแทน" }
   }
 
-  return transitionOrder(parsed.data.id, ["AWAITING_KITCHEN"], "COOKING")
+  return transitionOrder(storeId, parsed.data.id, ["AWAITING_KITCHEN"], "COOKING")
 }
 
 export async function markOrderReady(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  return transitionOrder(parsed.data.id, ["COOKING"], "READY")
+  return transitionOrder(storeId, parsed.data.id, ["COOKING"], "READY")
 }
 
 export async function markOrderServed(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  const from: OrderItemStatus[] = (await hasKDS())
+  const from: OrderItemStatus[] = (await hasKDS(storeId))
     ? ["READY"]
     : ["AWAITING_KITCHEN", "COOKING", "READY"]
 
-  return transitionOrder(parsed.data.id, from, "SERVED")
+  return transitionOrder(storeId, parsed.data.id, from, "SERVED")
 }
 
 /// พิมพ์ทิกเก็ตครัวซ้ำ — ใช้ตอนกระดาษหมด/เครื่องพิมพ์หลุด แล้วทิกเก็ตรอบแรกไม่ออก
 /// การพิมพ์อยู่นอกทรานแซคชันโดยตั้งใจ: พิมพ์ไม่ผ่านต้องไม่ทำให้ข้อมูลออร์เดอร์เสียหาย
 export async function reprintKitchenTicket(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  const order = await prisma.mobileOrder.findUnique({
+  const order = await db.mobileOrder.findUnique({
     where: { id: parsed.data.id },
     include: {
       session: { select: { table: { select: { code: true } } } },
@@ -270,7 +291,7 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
     return { ok: false, error: "ส่งงานพิมพ์ไม่สำเร็จ — ตรวจว่าเครื่องพิมพ์เปิดอยู่และอยู่ในเครือข่ายเดียวกัน" }
   }
 
-  await prisma.mobileOrder.update({
+  await db.mobileOrder.update({
     where: { id: order.id },
     data: { printedAt: new Date() },
   })
@@ -284,17 +305,24 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
 /// แยกจาก `reprintKitchenTicket` เพราะเส้นทาง PDF ไม่ได้ส่งงานไปเครื่องพิมพ์เอง
 /// เบราว์เซอร์เป็นคนพิมพ์ ฝั่ง server จึงมีหน้าที่แค่ประทับเวลาไว้ให้ผังโต๊ะ/KDS เห็นตรงกัน
 export async function markTicketPrinted(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
+  // ออร์เดอร์ต้องเป็นของร้านนี้ — forStore() กรองให้ id ของร้านอื่นได้ null (ไม่ใช่ "เคยพิมพ์ไปแล้ว")
+  const order = await db.mobileOrder.findUnique({ where: { id: parsed.data.id }, select: { id: true } })
+  if (!order) return { ok: false, error: "ไม่พบออร์เดอร์นี้" }
+
   // ประทับเฉพาะครั้งแรก — เปิดหน้าเดิมซ้ำไม่ควรเลื่อนเวลา "พิมพ์ครั้งแรก" ให้ใหม่เรื่อย ๆ
-  const stamped = await prisma.mobileOrder.updateMany({
+  const stamped = await db.mobileOrder.updateMany({
     where: { id: parsed.data.id, printedAt: null },
     data: { printedAt: new Date() },
   })

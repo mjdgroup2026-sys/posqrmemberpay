@@ -1,10 +1,10 @@
-import { resolveCustomerSession, listMenu, getStoreSettings } from "@/lib/queries"
+import { resolveCustomerSession, listMenu, getStoreSettings, type CustomerSession } from "@/lib/queries"
 import { CustomerShell, CustomerNotice } from "@/components/customer/customer-shell"
 import { MenuView } from "@/components/customer/menu-view"
 
 export const metadata = { title: "เมนูอาหาร" }
 
-const NOTICE = {
+const NOTICE: Record<Exclude<CustomerSession, { ok: true }>["reason"], { title: string; description: string }> = {
   QR_NOT_FOUND: {
     title: "ไม่พบ QR Code นี้",
     description: "กรุณาแจ้งพนักงานเพื่อขอ QR Code ใหม่",
@@ -17,6 +17,10 @@ const NOTICE = {
     title: "โต๊ะนี้ยังไม่ได้เปิด",
     description: "กรุณาสแกน QR Code อีกครั้ง หรือแจ้งพนักงานให้เปิดโต๊ะให้",
   },
+  STORE_SUSPENDED: {
+    title: "ร้านนี้ปิดรับออเดอร์ชั่วคราว",
+    description: "กรุณาสั่งกับพนักงานโดยตรง",
+  },
 }
 
 export default async function CustomerMenuPage({ params }: PageProps<"/order/[qrToken]/menu">) {
@@ -25,7 +29,7 @@ export default async function CustomerMenuPage({ params }: PageProps<"/order/[qr
 
   if (!session.ok) return <CustomerNotice {...NOTICE[session.reason]} />
 
-  const [menu, settings] = await Promise.all([listMenu(), getStoreSettings()])
+  const [menu, settings] = await Promise.all([listMenu(session.storeId), getStoreSettings(session.storeId)])
 
   return (
     <CustomerShell storeName={settings?.storeName ?? "MJD Mobile Order"} tableCode={session.tableCode}>

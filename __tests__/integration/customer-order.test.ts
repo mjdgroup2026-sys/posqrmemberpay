@@ -10,14 +10,13 @@ import {
   resetDb,
   setStoreSettings,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 const dbReady = await isTestDbReachable()
 
@@ -55,11 +54,13 @@ describe.skipIf(!dbReady)("ลูกค้าสั่งอาหารผ่�
   async function seedMenu() {
     const menuItem = await testPrisma().menuItem.create({
       data: {
+        storeId: TEST_STORE_ID,
         name: "ข้าวกะเพราทดสอบ",
         price: "100.00",
         modifierGroups: {
           create: [
             {
+              storeId: TEST_STORE_ID,
               name: "ระดับความเผ็ด",
               selectionType: "SINGLE",
               required: true,
@@ -67,6 +68,7 @@ describe.skipIf(!dbReady)("ลูกค้าสั่งอาหารผ่�
               options: { create: [{ name: "เผ็ดน้อย", priceDelta: "0.00", sortOrder: 1 }] },
             },
             {
+              storeId: TEST_STORE_ID,
               name: "ท็อปปิ้งเพิ่ม",
               selectionType: "MULTIPLE",
               required: false,

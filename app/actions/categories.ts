@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { forStore } from "@/lib/db"
 import { guardAction } from "@/lib/permissions"
 import { categorySchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
@@ -18,6 +18,8 @@ export async function createCategory(formData: FormData): Promise<ActionResult> 
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
   const guard = await guardAction("CATEGORIES", "ADD")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const parsed = categorySchema.safeParse({ name: formData.get("name") })
   if (!parsed.success) {
@@ -29,7 +31,7 @@ export async function createCategory(formData: FormData): Promise<ActionResult> 
   }
 
   try {
-    await prisma.category.create({ data: { name: parsed.data.name } })
+    await db.category.create({ data: { storeId, name: parsed.data.name } })
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
       return {
@@ -50,6 +52,8 @@ export async function updateCategory(formData: FormData): Promise<ActionResult> 
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
   const guard = await guardAction("CATEGORIES", "EDIT")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const identity = idSchema.safeParse({ id: formData.get("id") })
   if (!identity.success) return { ok: false, error: firstIssueMessage(identity.error) }
@@ -64,7 +68,7 @@ export async function updateCategory(formData: FormData): Promise<ActionResult> 
   }
 
   try {
-    await prisma.category.update({
+    await db.category.update({
       where: { id: identity.data.id },
       data: { name: parsed.data.name },
     })
@@ -90,13 +94,15 @@ export async function deleteCategory(formData: FormData): Promise<ActionResult> 
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
   const guard = await guardAction("CATEGORIES", "DELETE")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const identity = idSchema.safeParse({ id: formData.get("id") })
   if (!identity.success) return { ok: false, error: firstIssueMessage(identity.error) }
 
   try {
     // นับสินค้าที่ผูกอยู่ก่อน เพื่อบอกจำนวนให้ผู้ใช้ได้ชัด ๆ — FK ที่ฐานเป็นด่านจริงอีกชั้น
-    const linked = await prisma.product.count({ where: { categoryId: identity.data.id } })
+    const linked = await db.product.count({ where: { categoryId: identity.data.id } })
     if (linked > 0) {
       return {
         ok: false,
@@ -104,7 +110,7 @@ export async function deleteCategory(formData: FormData): Promise<ActionResult> 
       }
     }
 
-    await prisma.category.delete({ where: { id: identity.data.id } })
+    await db.category.delete({ where: { id: identity.data.id } })
   } catch (error) {
     const code = (error as { code?: string }).code
     if (code === "P2025") return { ok: false, error: "ไม่พบหมวดหมู่ที่ต้องการลบ" }

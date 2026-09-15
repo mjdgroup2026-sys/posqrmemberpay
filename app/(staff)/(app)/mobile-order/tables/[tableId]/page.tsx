@@ -1,12 +1,14 @@
 import Link from "next/link"
 import { getTableDetail } from "@/lib/queries"
+import { requireStorePage } from "@/lib/permissions"
 import { TableDetail } from "@/components/table-detail"
 
 export const metadata = { title: "รายละเอียดออร์เดอร์" }
 
 export default async function TableDetailPage({ params }: PageProps<"/mobile-order/tables/[tableId]">) {
+  const { storeId } = await requireStorePage()
   const { tableId } = await params
-  const detail = await getTableDetail(tableId)
+  const detail = await getTableDetail(storeId, tableId)
 
   if (!detail) {
     return (

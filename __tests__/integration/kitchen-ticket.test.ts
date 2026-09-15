@@ -11,14 +11,14 @@ import {
   resetDb,
   setStoreSettings,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
+import { setTestUser } from "../helpers/session-mock"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 const dbReady = await isTestDbReachable()
 
@@ -71,11 +71,11 @@ describe.skipIf(!dbReady)("ทิกเก็ตครัวแบบพิม�
   it("ทิกเก็ตมีข้อมูลครบและไม่รวมรายการที่ถูกยกเลิก", async () => {
     const { table, order } = await seedOrder()
 
-    const ticket = await getKitchenTicket(order.id)
+    const ticket = await getKitchenTicket(TEST_STORE_ID, order.id)
     expect(ticket).not.toBeNull()
     expect(ticket?.tableCode).toBe(table.code)
     expect(ticket?.orderNumber).toBe(1)
-    expect(ticket?.storeName).toBe("ร้านทดสอบ")
+    expect(ticket?.storeName).toBe("ร้านทดสอบ test-a")
     expect(ticket?.printedAt).toBeNull()
     // ครัวต้องไม่เห็นของที่ไม่ต้องทำ
     expect(ticket?.items).toHaveLength(1)
@@ -83,7 +83,7 @@ describe.skipIf(!dbReady)("ทิกเก็ตครัวแบบพิม�
   })
 
   it("ออร์เดอร์ที่ไม่มีอยู่จริงต้องคืน null ไม่ใช่ throw", async () => {
-    expect(await getKitchenTicket("ไม่มีอยู่จริง")).toBeNull()
+    expect(await getKitchenTicket(TEST_STORE_ID, "ไม่มีอยู่จริง")).toBeNull()
   })
 
   it("กดพิมพ์แล้วประทับ printedAt และกดซ้ำไม่เลื่อนเวลาเดิม", async () => {
@@ -105,11 +105,11 @@ describe.skipIf(!dbReady)("ทิกเก็ตครัวแบบพิม�
 
   it("ยังไม่ล็อกอินสั่งประทับไม่ได้", async () => {
     const { order } = await seedOrder()
-    const session = await import("@/lib/session")
-    vi.mocked(session.requireUser).mockRejectedValueOnce(new Error("no session"))
+    setTestUser(null)
 
     const result = await markTicketPrinted(makeFormData({ id: order.id }))
     expect(result.ok).toBe(false)
+    setTestUser("test-user")
     expect((await testPrisma().mobileOrder.findUnique({ where: { id: order.id } }))?.printedAt).toBeNull()
   })
 

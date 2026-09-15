@@ -1,12 +1,14 @@
 import Link from "next/link"
 import { getBillingView } from "@/lib/queries"
+import { requireStorePage } from "@/lib/permissions"
 import { BillingForm } from "@/components/billing-form"
 
 export const metadata = { title: "ปิดบิล" }
 
 export default async function BillingPage({ params }: PageProps<"/mobile-order/tables/[tableId]/billing">) {
+  const { storeId } = await requireStorePage()
   const { tableId } = await params
-  const bill = await getBillingView(tableId)
+  const bill = await getBillingView(storeId, tableId)
 
   if (!bill) {
     return (

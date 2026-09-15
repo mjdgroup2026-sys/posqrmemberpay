@@ -1,8 +1,8 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
-import { requireUser } from "@/lib/session"
+import { forStore, type StoreTx } from "@/lib/db"
+import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { menuItemSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -10,7 +10,6 @@ import type { ActionResult } from "@/lib/types"
 ///
 /// เดิมเมนูมาจาก `prisma/seed-mobile-order.ts` ทางเดียว — ร้านจริงต้องเพิ่ม/แก้/ปิดใช้งานเองได้
 
-const AUTH_ERROR = "กรุณาเข้าสู่ระบบก่อนทำรายการ"
 
 class MenuAbort extends Error {
   constructor(readonly reason: string) {
@@ -79,7 +78,8 @@ function parseGroups(raw: FormDataEntryValue | null): GroupInput[] {
 }
 
 async function writeGroups(
-  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  tx: StoreTx,
+  storeId: string,
   menuItemId: string,
   groups: GroupInput[],
 ) {
@@ -88,6 +88,7 @@ async function writeGroups(
   for (const [index, group] of groups.entries()) {
     await tx.modifierGroup.create({
       data: {
+        storeId,
         menuItemId,
         name: group.name,
         selectionType: group.selectionType,
@@ -106,11 +107,14 @@ async function writeGroups(
 }
 
 export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = menuItemSchema.safeParse({
     id: formData.get("id") ?? undefined,
@@ -129,7 +133,7 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
   try {
     const groups = parseGroups(formData.get("modifierGroups"))
 
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const menuItemId = data.id
         ? (
             await tx.menuItem.update({
@@ -147,6 +151,7 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
         : (
             await tx.menuItem.create({
               data: {
+                storeId,
                 name: data.name,
                 description: data.description ?? null,
                 price: data.price.toFixed(2),
@@ -157,7 +162,7 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
             })
           ).id
 
-      await writeGroups(tx, menuItemId, groups)
+      await writeGroups(tx, storeId, menuItemId, groups)
     })
   } catch (error) {
     if (error instanceof MenuAbort) return { ok: false, error: error.reason }
@@ -170,17 +175,20 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
 }
 
 export async function deleteMenuItem(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const item = await tx.menuItem.findUnique({
         where: { id: parsed.data.id },
         select: { name: true, _count: { select: { orderItems: true, saleItems: true } } },
@@ -209,24 +217,27 @@ export async function deleteMenuItem(formData: FormData): Promise<ActionResult> 
 
 /// สลับเปิด/ปิดการขายอย่างเร็วจากหน้ารายการ โดยไม่ต้องเปิด dialog
 export async function toggleMenuItemActive(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   let next: boolean
   try {
-    const item = await prisma.menuItem.findUnique({
+    const item = await db.menuItem.findUnique({
       where: { id: parsed.data.id },
       select: { isActive: true },
     })
     if (!item) return { ok: false, error: "ไม่พบเมนูนี้" }
     next = !item.isActive
-    await prisma.menuItem.update({ where: { id: parsed.data.id }, data: { isActive: next } })
+    await db.menuItem.update({ where: { id: parsed.data.id }, data: { isActive: next } })
   } catch {
     return { ok: false, error: "เปลี่ยนสถานะเมนูไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
