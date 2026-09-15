@@ -2,6 +2,12 @@ import "dotenv/config"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { PrismaClient } from "../generated/prisma/client"
 import { seedMobileOrder } from "./seed-mobile-order"
+import { provisionStore } from "../lib/store-provision"
+
+/// ร้านแรก — id คงที่ตรงกับ migration add_multi_tenant (ข้อมูล v1 ทั้งหมดถูก backfill มาที่ร้านนี้)
+const DEFAULT_STORE = { id: "store_default", slug: "default", name: "MJD Kitchen" }
+/// ร้านที่สอง (ว่าง) — ไว้ลองสลับร้านและให้เทส/เดโมเห็นว่าข้อมูลแยกกันจริง
+const SECOND_STORE = { id: "store_demo_2", slug: "demo-2", name: "ร้านสาขาสอง (ตัวอย่าง)" }
 
 const connectionString = process.env.DATABASE_URL
 if (!connectionString) throw new Error("ไม่พบ DATABASE_URL — ตรวจไฟล์ .env ก่อนรัน seed")
@@ -36,17 +42,24 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
-async function seedProducts() {
+async function seedProducts(storeId: string) {
   for (const name of CATEGORIES) {
-    await prisma.category.upsert({ where: { name }, update: {}, create: { name } })
+    await prisma.category.upsert({
+      where: { storeId_name: { storeId, name } },
+      update: {},
+      create: { storeId, name },
+    })
   }
 
   for (const product of PRODUCTS) {
-    const category = await prisma.category.findUniqueOrThrow({ where: { name: product.category } })
+    const category = await prisma.category.findUniqueOrThrow({
+      where: { storeId_name: { storeId, name: product.category } },
+    })
     await prisma.product.upsert({
-      where: { sku: product.sku },
+      where: { storeId_sku: { storeId, sku: product.sku } },
       update: {},
       create: {
+        storeId,
         sku: product.sku,
         name: product.name,
         categoryId: category.id,
@@ -59,11 +72,12 @@ async function seedProducts() {
   }
 
   // ledger ตั้งต้นให้ยอดคงเหลือมีที่มา — สร้างเฉพาะตอนยังไม่มีรายการใด ๆ
-  const existing = await prisma.stockTransaction.count()
+  const existing = await prisma.stockTransaction.count({ where: { storeId } })
   if (existing === 0) {
-    const created = await prisma.product.findMany({ select: { id: true, quantity: true } })
+    const created = await prisma.product.findMany({ where: { storeId }, select: { id: true, quantity: true } })
     await prisma.stockTransaction.createMany({
       data: created.map((p) => ({
+        storeId,
         productId: p.id,
         type: "IN" as const,
         quantity: p.quantity,
@@ -74,8 +88,8 @@ async function seedProducts() {
 }
 
 /// บิลขายตัวอย่าง — ทำเฉพาะตอนยังไม่มีบิลใด ๆ และต้องมีผู้ใช้ในระบบก่อน (Sale.cashierId เป็น FK → user)
-async function seedSales() {
-  const existing = await prisma.sale.count()
+async function seedSales(storeId: string) {
+  const existing = await prisma.sale.count({ where: { storeId } })
   if (existing > 0) {
     console.info("มีบิลขายอยู่แล้ว — ข้ามการ seed บิลตัวอย่าง")
     return
@@ -96,7 +110,7 @@ async function seedSales() {
     await prisma.$transaction(async (tx) => {
       const items = []
       for (const line of sample.lines) {
-        const product = await tx.product.findUniqueOrThrow({ where: { sku: line.sku } })
+        const product = await tx.product.findUniqueOrThrow({ where: { storeId_sku: { storeId, sku: line.sku } } })
         const unitPrice = Number(product.price)
         items.push({
           productId: product.id,
@@ -114,6 +128,7 @@ async function seedSales() {
 
       const sale = await tx.sale.create({
         data: {
+          storeId,
           saleNumber,
           status: sample.voided ? "VOIDED" : "COMPLETED",
           subtotal: subtotal.toFixed(2),
@@ -143,6 +158,7 @@ async function seedSales() {
         })
         await tx.stockTransaction.create({
           data: {
+            storeId,
             productId: item.productId,
             type: "OUT",
             quantity: item.quantity,
@@ -160,6 +176,7 @@ async function seedSales() {
         if (sample.voided) {
           await tx.stockTransaction.create({
             data: {
+              storeId,
               productId: item.productId,
               type: "IN",
               quantity: item.quantity,
@@ -183,16 +200,31 @@ async function seedSales() {
 async function main() {
   console.info("กำลัง seed ข้อมูลตัวอย่าง…")
 
-  await seedProducts()
-  await seedSales()
-  await seedMobileOrder(prisma)
+  // ร้าน + settings + บทบาทระบบ ก่อนทุกอย่าง (Phase 13) — ผู้ใช้ทุกคนที่มีอยู่เป็น OWNER ของร้านแรก
+  const { storeId } = await provisionStore(prisma, DEFAULT_STORE)
+  await provisionStore(prisma, SECOND_STORE)
+  const users = await prisma.user.findMany({ where: { id: { not: "system" } }, select: { id: true } })
+  for (const user of users) {
+    await prisma.storeMember.upsert({
+      where: { userId_storeId: { userId: user.id, storeId } },
+      update: {},
+      create: { userId: user.id, storeId, role: "OWNER" },
+    })
+  }
+
+  await seedProducts(storeId)
+  await seedSales(storeId)
+  await seedMobileOrder(prisma, storeId)
 
   const [products, categories, sales] = await Promise.all([
-    prisma.product.count(),
-    prisma.category.count(),
-    prisma.sale.count(),
+    prisma.product.count({ where: { storeId } }),
+    prisma.category.count({ where: { storeId } }),
+    prisma.sale.count({ where: { storeId } }),
   ])
-  console.info(`seed เรียบร้อย — สินค้า ${products} รายการ, หมวดหมู่ ${categories} หมวด, บิลขาย ${sales} บิล`)
+  console.info(
+    `seed เรียบร้อย — ร้าน ${DEFAULT_STORE.name}: สินค้า ${products} รายการ, หมวดหมู่ ${categories} หมวด, บิลขาย ${sales} บิล ` +
+      `(+ ร้านว่าง ${SECOND_STORE.name})`,
+  )
 }
 
 main()

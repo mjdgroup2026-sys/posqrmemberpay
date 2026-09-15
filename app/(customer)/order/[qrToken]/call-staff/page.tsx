@@ -17,7 +17,7 @@ export default async function CallStaffPage({ params }: PageProps<"/order/[qrTok
     )
   }
 
-  const settings = await getStoreSettings()
+  const settings = await getStoreSettings(session.storeId)
 
   return (
     <CustomerShell

@@ -12,14 +12,13 @@ import {
   resetDb,
   setStoreSettings,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 /// mock เฉพาะการยิงออกไปหาธนาคาร — ตรรกะที่เหลือใน scb.ts (เช่น confirmationResponse) ใช้ของจริง
 const inquireMock = vi.fn()
@@ -72,7 +71,7 @@ describe.skipIf(!dbReady)("payment confirmation ของ SCB (Phase 10)", () =>
     await createTestOrderItem(order.id, menuA.id, { quantity: 2, unitPrice: "80.00" })
     await createTestOrderItem(order.id, menuB.id, { quantity: 1, unitPrice: "100.00" })
 
-    const intent = await issuePaymentIntent(sessionId, 260)
+    const intent = await issuePaymentIntent(TEST_STORE_ID, sessionId, 260)
     return { table, sessionId, intent }
   }
 
@@ -243,7 +242,7 @@ describe.skipIf(!dbReady)("payment confirmation ของ SCB (Phase 10)", () =>
       const db = testPrisma()
       const { sessionId, intent } = await seedSessionWithIntent()
 
-      const again = await issuePaymentIntent(sessionId, 260)
+      const again = await issuePaymentIntent(TEST_STORE_ID, sessionId, 260)
       expect(again.ref1).toBe(intent.ref1)
 
       const all = await db.paymentIntent.findMany({ where: { tableSessionId: sessionId } })
@@ -254,7 +253,7 @@ describe.skipIf(!dbReady)("payment confirmation ของ SCB (Phase 10)", () =>
       const db = testPrisma()
       const { sessionId, intent } = await seedSessionWithIntent()
 
-      const updated = await issuePaymentIntent(sessionId, 340)
+      const updated = await issuePaymentIntent(TEST_STORE_ID, sessionId, 340)
       expect(updated.ref1).not.toBe(intent.ref1)
 
       const old = await db.paymentIntent.findUnique({ where: { id: intent.id } })
@@ -317,7 +316,7 @@ describe.skipIf(!dbReady)("payment confirmation ของ SCB (Phase 10)", () =>
 
       // ★ ฝั่งพนักงานต้องเห็นป้าย "ลูกค้าชำระเงินแล้ว" ในกรอบของโต๊ะนี้ด้วย — บิลที่มาจากใบ QR
       //   ที่หมดอายุไปแล้วก็ยังเป็นบิลที่ระบบปิดเอง ต้องไม่ตกหล่นจากป้าย
-      const paidBills = await queries.listCustomerPaidBills()
+      const paidBills = await queries.listCustomerPaidBills(TEST_STORE_ID)
       expect(paidBills.map((bill) => bill.tableId)).toContain(table.id)
       expect(paidBills[0]?.saleNumber).toBe(sale?.saleNumber)
     })

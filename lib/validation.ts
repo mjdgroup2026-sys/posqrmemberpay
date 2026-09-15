@@ -410,3 +410,18 @@ export const scbPaymentConfirmationSchema = z.object({
   billPaymentRef3: z.string().trim().max(20).optional(),
   currencyCode: z.string().trim().max(10).optional(),
 })
+
+// ───────────────────── สมาชิกร้าน (Phase 13) ─────────────────────
+
+export const storeSwitchSchema = z.object({
+  storeId: requiredId("ไม่พบร้านที่ต้องการสลับไป"),
+})
+
+export const userIdSchema = z.object({
+  userId: requiredId("ไม่พบผู้ใช้ที่ต้องการแก้ไข"),
+})
+
+export const storeMemberRoleSchema = z.object({
+  userId: requiredId("ไม่พบผู้ใช้ที่ต้องการแก้ไข"),
+  role: z.enum(["OWNER", "STAFF"], { message: "บทบาทในร้านไม่ถูกต้อง" }),
+})

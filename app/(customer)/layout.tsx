@@ -1,6 +1,5 @@
 import type { Metadata } from "next"
 import { Prompt, Sarabun } from "next/font/google"
-import { getStoreSettings } from "@/lib/queries"
 import { Toaster } from "@/components/ui/sonner"
 import "../globals.css"
 
@@ -24,18 +23,12 @@ export const metadata: Metadata = {
   description: "สั่งอาหารผ่าน QR Code",
 }
 
-export default async function CustomerRootLayout({ children }: { children: React.ReactNode }) {
-  const settings = await getStoreSettings()
-
+export default function CustomerRootLayout({ children }: { children: React.ReactNode }) {
+  // สีของร้านอยู่ที่ order/[qrToken]/layout.tsx (Phase 13) — root layout ไม่รู้ว่าเป็นร้านไหน
+  // เพราะ qrToken เป็น segment ลูก ค่าธีมของแต่ละร้านจึงถูกใส่บน wrapper ที่นั่นแทน body
   return (
     <html lang="th" data-theme="customer" className={`${prompt.variable} ${sarabun.variable}`}>
-      {/* สีของร้าน override ตอน runtime — inline style ชนะ selector [data-theme] เสมอ
-          จึงไม่ต้อง generate CSS ใหม่ต่อร้าน (ดูกติกาธีมข้อ 4 ใน CLAUDE.md)
-          ค่านี้ผ่าน zod ที่บังคับ hex 6 หลักมาแล้ว จึงยัดลง style ได้โดยไม่เปิดช่องให้เขียน CSS เอง */}
-      <body
-        className="antialiased"
-        style={settings?.themeColor ? ({ "--brand": settings.themeColor } as React.CSSProperties) : undefined}
-      >
+      <body className="antialiased">
         {children}
         <Toaster position="top-center" richColors />
       </body>

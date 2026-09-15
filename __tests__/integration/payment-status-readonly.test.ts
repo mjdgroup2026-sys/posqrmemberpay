@@ -12,14 +12,13 @@ import {
   resetDb,
   setStoreSettings,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 /// ดักการยิงออกไปหาธนาคาร — เทสชุดนี้พิสูจน์ว่า endpoint สถานะ **ไม่เคยเรียกมันเลย**
 const inquireMock = vi.fn()
@@ -74,7 +73,7 @@ describe.skipIf(!dbReady)("endpoint สถานะการชำระเง�
     await createTestOrderItem(order.id, menuA.id, { quantity: 2, unitPrice: "80.00" })
     await createTestOrderItem(order.id, menuB.id, { quantity: 1, unitPrice: "100.00" })
 
-    const intent = await issuePaymentIntent(sessionId, 260)
+    const intent = await issuePaymentIntent(TEST_STORE_ID, sessionId, 260)
     return { table, qr, sessionId, intent }
   }
 
@@ -128,6 +127,7 @@ describe.skipIf(!dbReady)("endpoint สถานะการชำระเง�
 
     const closeSession = await import("@/lib/close-session")
     const closed = await closeSession.closeSessionWithPayment({
+      storeId: TEST_STORE_ID,
       sessionId,
       paymentMethod: "PROMPTPAY",
       paymentReference: "SCBTX-ALREADY",

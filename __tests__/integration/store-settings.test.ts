@@ -12,14 +12,13 @@ import {
   resetDb,
   setStoreSettings,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 const dbReady = await isTestDbReachable()
 
@@ -70,7 +69,7 @@ describe.skipIf(!dbReady)("ตั้งค่าร้านและสมา�
       )
       expect(result.ok).toBe(true)
 
-      const saved = await testPrisma().storeSettings.findUnique({ where: { id: "default" } })
+      const saved = await testPrisma().storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } })
       expect(saved?.storeName).toBe("ครัวคุณแม่")
       expect(saved?.themeColor).toBe("#123ABC")
       expect(Number(saved?.serviceChargePercent)).toBe(7.5)
@@ -89,7 +88,7 @@ describe.skipIf(!dbReady)("ตั้งค่าร้านและสมา�
 
       const good = await updateStoreSettings(settingsForm({ logoUrl: "/logo.png" }))
       expect(good.ok).toBe(true)
-      expect((await testPrisma().storeSettings.findUnique({ where: { id: "default" } }))?.logoUrl).toBe("/logo.png")
+      expect((await testPrisma().storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } }))?.logoUrl).toBe("/logo.png")
     })
 
     it("สลับ hasKDS ขณะมีโต๊ะเปิดอยู่ต้องถูกปฏิเสธ", async () => {
@@ -101,13 +100,13 @@ describe.skipIf(!dbReady)("ตั้งค่าร้านและสมา�
       if (!result.ok) expect(result.error).toContain("ยังมีโต๊ะเปิดอยู่")
 
       // ค่าเดิมต้องไม่ถูกแตะเลย
-      expect((await testPrisma().storeSettings.findUnique({ where: { id: "default" } }))?.hasKDS).toBe(false)
+      expect((await testPrisma().storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } }))?.hasKDS).toBe(false)
     })
 
     it("สลับ hasKDS ได้เมื่อไม่มีโต๊ะเปิดอยู่ และแก้ค่าอื่นตอนมีโต๊ะเปิดยังทำได้", async () => {
       const ok = await updateStoreSettings(settingsForm({ hasKDS: "true" }))
       expect(ok.ok).toBe(true)
-      expect((await testPrisma().storeSettings.findUnique({ where: { id: "default" } }))?.hasKDS).toBe(true)
+      expect((await testPrisma().storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } }))?.hasKDS).toBe(true)
 
       const table = await createTestTable()
       await openTableSession(makeFormData({ tableId: table.id }))
@@ -188,7 +187,7 @@ describe.skipIf(!dbReady)("ตั้งค่าร้านและสมา�
       if (result.ok) expect(result.data).toMatchObject({ earnedPoints: 10, pointBalance: 10 })
 
       // เบอร์ถูก normalize เป็นตัวเลขล้วน ไม่งั้น unique กันซ้ำไม่ได้จริง
-      const member = await testPrisma().member.findUnique({ where: { phone: "0812345678" } })
+      const member = await testPrisma().member.findUnique({ where: { storeId_phone: { storeId: TEST_STORE_ID, phone: "0812345678" } } })
       expect(member?.pointBalance).toBe(10)
     })
 

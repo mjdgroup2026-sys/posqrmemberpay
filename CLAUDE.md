@@ -23,9 +23,9 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 
 - **Role-Based Permission** — นอกขอบเขต v1 ดูหัวข้อ "สถานะการพัฒนา" ท้ายไฟล์นี้
   · **ข้อยกเว้น**: บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) อนุมัติแล้วเป็นส่วนหนึ่งของ Phase 13
-- **Phase 13–16 (multi-tenant / onboarding / รับเงินต่อร้าน)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
-  แต่**ยังไม่ได้เริ่มลงมือ** · ต้องทำตามลำดับ 13 → 14 → 15 ห้ามข้าม และก่อน migration ของ Phase 13 ต้อง
-  `pg_dump` production + ซ้อมบนสำเนาก่อนเสมอ
+- **Phase 14–16 (onboarding / รับเงินต่อร้าน / RBAC เต็ม)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
+  · **Phase 13 (multi-tenant) โค้ด+เทสเสร็จแล้ว 2026-09-15 บน branch `feat/phase-13-multi-tenant`** แต่ยังไม่ merge —
+  ต้องทำตามลำดับ 13 → 14 → 15 ห้ามข้าม และก่อน migrate Phase 13 ขึ้น production ต้อง `pg_dump` + ซ้อมบนสำเนาก่อนเสมอ
 
 ## 📧 ระบบอีเมล (ต่อ Resend แล้วใน Phase 5)
 
@@ -57,8 +57,13 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 4. **กันเบิก/ขายเกินสต็อกด้วย `updateMany` + `where: { quantity: { gte: n } }`** ไม่ใช่แค่ `if` ก่อนหน้า —
    เป็นด่านเดียวที่กัน race condition ได้จริงตอนมีคำขอพร้อมกัน · ต้องมีเทส concurrent พิสูจน์ (เช่น ยิงพร้อมกัน
    10 คำขอจากสต็อก 8 → ต้องผ่านแค่ 4 และยอดต้องไม่ติดลบ)
-5. **ทุก Server Action ที่แตะข้อมูลต้องเรียก `requireUser()` เป็นบรรทัดแรก** — ห้ามพึ่ง UI ที่ซ่อนปุ่มอย่างเดียว
-   เพราะ Server Action ถูกเรียกตรงได้
+5. **ทุก Server Action ที่แตะข้อมูลต้องเรียก `requireStore()` เป็นบรรทัดแรก** (Phase 13 — เดิม `requireUser()`
+   ซึ่งเหลือใช้เฉพาะข้อมูลของตัวผู้ใช้ เช่น โปรไฟล์) — ห้ามพึ่ง UI ที่ซ่อนปุ่มอย่างเดียว เพราะ Server Action ถูกเรียกตรงได้
+   · แล้วทุก query ต้องผ่าน `forStore(storeId)` จาก `lib/db.ts` ไม่ใช่ `prisma` ตรง ๆ (ESLint บังคับใน
+   `app/actions/**` และ `lib/queries.ts`) · **raw SQL ต้องเติม `WHERE "storeId" = ${storeId}` เอง** เพราะ
+   extension ช่วยไม่ได้ · `findUnique` ด้วย id จากผู้ใช้ปลอดภัยเพราะ extension ยัด storeId เข้า where ให้ —
+   แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId`) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
+   · เพิ่ม query/action ใหม่ต้องเพิ่มในตารางของ `__tests__/integration/tenant-isolation.test.ts` ไม่งั้นเทสแดง
 6. **ข้อความที่ผู้ใช้เห็นเป็นภาษาไทยทั้งหมด** รวมถึงข้อความ validation และ error
 7. **(Phase 6+, MJD Mobile Order) เปลี่ยน `MobileOrderItem.status` ต้องเป็น conditional update**
    (`updateMany` + `where: { status: 'AWAITING_KITCHEN' }`) เหมือนกติกากันขายเกินสต็อกในข้อ 4 — ป้องกัน race
@@ -237,8 +242,9 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   ```bash
   grep -rn '\$queryRaw\|\$executeRaw' --include='*.ts' . --exclude-dir=node_modules --exclude-dir=generated
   ```
-  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (7 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`)
-  และ `app/actions/sales.ts` (2 จุด — advisory lock + `nextSaleNumber()`)
+  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (8 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`)
+  และ `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
+  · ทุกจุดต้องมี `WHERE "storeId" = ${storeId}` (Phase 13)
 - **Client Component ที่ใช้ `useSearchParams()` ต้องมี `<Suspense>` ครอบ** ถ้าหน้านั้นถูก prerender แบบ static
   (หน้า auth ทั้งหมดเข้าข่าย) ไม่งั้น `pnpm build` จะพัง
 - **Next.js 16** `params`/`searchParams`/`cookies()`/`headers()` เป็น Promise ต้อง `await` ทุกครั้ง
@@ -370,8 +376,10 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
 - ฐานข้อมูล: `posmobileorderdb` บน container `posmobileorder-postgres` (PostgreSQL 18, port **5437**)
   seed ไว้ 7 รายการ SKU-1001…SKU-1007 + บิลตัวอย่าง 8 บิล
 
-**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 13–16 แพลตฟอร์มหลายร้าน** (ร่างแล้ว ยังไม่เริ่ม — ทิศทาง: ร้านสมัครเอง,
-เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 13 multi-tenant โค้ด+เทสเสร็จแล้ว (2026-09-15) รอ merge + migrate production**
+(`Store`/`StoreMember` · `storeId` ทุก entity ราก · `requireStore()`/`requireOwner()` · `forStore()` extension ·
+ตัวสลับร้านใน topbar · `/users` = พนักงานในร้าน · เทส isolation ครอบทุก query/action) · **Phase 14–16**
+(ร่างแล้ว ยังไม่เริ่ม — ทิศทาง: ร้านสมัครเอง, เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ⚠️ **production ยังรัน schema เก่า (Phase 1–2)** — branch `feat/pos-and-mobile-order` ยังไม่ merge

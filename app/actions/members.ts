@@ -1,7 +1,8 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { forStore } from "@/lib/db"
+import { findStoreByQrToken } from "@/lib/store-resolve"
 import { toNumber } from "@/lib/format"
 import { registerMemberSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import { pointsFor } from "@/lib/points"
@@ -44,9 +45,14 @@ export async function registerMember(formData: FormData): Promise<ActionResult<R
   const { qrToken, phone } = parsed.data
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    // ร้านของลูกค้า = ร้านเจ้าของ qrToken (Phase 13) — สมาชิก/แต้มผูกรายร้าน ไม่รวมข้ามร้าน
+    const store = await findStoreByQrToken(qrToken)
+    if (!store) throw new MemberAbort("ไม่พบ QR Code นี้ในระบบ")
+    const storeId = store.storeId
+
+    const result = await forStore(storeId).$transaction(async (tx) => {
       const settings = await tx.storeSettings.findUnique({
-        where: { id: "default" },
+        where: { storeId },
         select: { crmEnabled: true },
       })
       if (!settings?.crmEnabled) throw new MemberAbort("ร้านนี้ยังไม่ได้เปิดระบบสมาชิก")
@@ -67,8 +73,8 @@ export async function registerMember(formData: FormData): Promise<ActionResult<R
       const sale = session?.sale
       if (!sale) throw new MemberAbort("ยังไม่มีบิลที่ชำระแล้วของโต๊ะนี้")
 
-      const existing = await tx.member.findUnique({ where: { phone }, select: { id: true } })
-      const member = existing ?? (await tx.member.create({ data: { phone }, select: { id: true } }))
+      const existing = await tx.member.findUnique({ where: { storeId_phone: { storeId, phone } }, select: { id: true } })
+      const member = existing ?? (await tx.member.create({ data: { storeId, phone }, select: { id: true } }))
 
       // saleId เป็น unique — บิลเดียวให้แต้มได้ครั้งเดียว ไม่ว่าใครจะกดสมัครซ้ำกี่รอบ
       const awarded = await tx.memberPointTransaction.findUnique({

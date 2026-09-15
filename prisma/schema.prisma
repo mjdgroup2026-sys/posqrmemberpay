@@ -34,7 +34,8 @@ enum SaleStatus {
 
 model Product {
   id           String   @id @default(cuid())
-  sku          String   @unique
+  storeId      String
+  sku          String
   name         String
   categoryId   String
   unit         String
@@ -44,10 +45,13 @@ model Product {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  store        Store              @relation(fields: [storeId], references: [id])
   category     Category           @relation(fields: [categoryId], references: [id])
   transactions StockTransaction[]
   saleItems    SaleItem[]
 
+  @@unique([storeId, sku])
+  @@index([storeId])
   @@index([name])
   @@index([categoryId])
   @@map("product")
@@ -56,6 +60,7 @@ model Product {
 /// ledger แบบ append-only — ห้ามลบ/แก้ย้อนหลัง ถ้าต้องกลับรายการให้สร้างรายการชดเชยใหม่
 model StockTransaction {
   id        String          @id @default(cuid())
+  storeId   String
   productId String
   type      TransactionType
   quantity  Int
@@ -63,9 +68,11 @@ model StockTransaction {
   saleId    String?
   createdAt DateTime        @default(now())
 
+  store   Store   @relation(fields: [storeId], references: [id])
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   sale    Sale?   @relation(fields: [saleId], references: [id], onDelete: SetNull)
 
+  @@index([storeId])
   @@index([productId])
   @@index([createdAt])
   @@index([saleId])
@@ -97,18 +104,23 @@ enum ResourceKey {
   USERS
 }
 
+/// บทบาทเป็นของร้าน (Phase 13) — แต่ละร้านมีชุดของตัวเอง ร้านใหม่ได้ 3 บทบาทระบบตอนสร้าง
 model Role {
   id          String   @id @default(cuid())
-  name        String   @unique
+  storeId     String
+  name        String
   description String?
   /// บทบาทระบบ — ห้ามแก้ชื่อและห้ามลบ (กันระบบเหลือคนจัดการสิทธิ์ 0 คน)
   isSystem    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  store       Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   permissions RolePermission[]
-  users       User[]
+  members     StoreMember[]
 
+  @@unique([storeId, name])
+  @@index([storeId])
   @@map("role")
 }
 
@@ -126,17 +138,17 @@ model RolePermission {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  name          String
-  email         String   @unique
-  emailVerified Boolean  @default(false)
-  image         String?
-  /// null = ยังไม่ถูกกำหนดบทบาท → เข้าได้เฉพาะ /settings (§4 Enforcement)
-  roleId        String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default(cuid())
+  name            String
+  email           String   @unique
+  emailVerified   Boolean  @default(false)
+  image           String?
+  /// ผู้ดูแลแพลตฟอร์ม (เรา) — คนละแกนกับ StoreMember.role และไม่ผูกกับร้านใด (Phase 13)
+  isPlatformAdmin Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  role                      Role?             @relation(fields: [roleId], references: [id])
+  storeMemberships          StoreMember[]
   sessions                  Session[]
   accounts                  Account[]
   sales                     Sale[]            @relation("SaleCashier")
@@ -147,7 +159,6 @@ model User {
   storeSettingsUpdates      StoreSettings[]   @relation("StoreSettingsUpdatedBy")
   closings                  CashierClosing[]
 
-  @@index([roleId])
   @@map("user")
 }
 
@@ -206,18 +217,24 @@ model Verification {
 
 model Category {
   id        String   @id @default(cuid())
-  name      String   @unique
+  storeId   String
+  name      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  store    Store     @relation(fields: [storeId], references: [id])
   products Product[]
 
+  @@unique([storeId, name])
+  @@index([storeId])
   @@map("category")
 }
 
 model Sale {
   id               String        @id @default(cuid())
-  saleNumber       String        @unique
+  storeId          String
+  /// เลขบิลเรียงต่อเนื่องภายในร้าน — unique ต่อร้าน (Phase 13) ทุกร้านเริ่ม INV-000001 ของตัวเอง
+  saleNumber       String
   status           SaleStatus    @default(COMPLETED)
   subtotal         Decimal       @db.Decimal(12, 2)
   discount         Decimal       @default(0) @db.Decimal(12, 2)
@@ -236,6 +253,7 @@ model Sale {
   voidReason       String?
   createdAt        DateTime      @default(now())
 
+  store        Store                   @relation(fields: [storeId], references: [id])
   cashier      User                    @relation("SaleCashier", fields: [cashierId], references: [id])
   session      TableSession?           @relation(fields: [tableSessionId], references: [id])
   pointTx      MemberPointTransaction?
@@ -243,6 +261,8 @@ model Sale {
   items        SaleItem[]
   transactions StockTransaction[]
 
+  @@unique([storeId, saleNumber])
+  @@index([storeId])
   @@index([createdAt])
   @@index([cashierId])
   @@index([status])
@@ -278,6 +298,7 @@ model SaleItem {
 /// บันทึกปิดยอดประจำวัน — immutable แก้/ลบผ่าน UI ไม่ได้
 model CashierClosing {
   id            String   @id @default(cuid())
+  storeId       String
   cashierId     String
   closingDate   DateTime @db.Date
   totalSales    Decimal  @db.Decimal(12, 2)
@@ -293,9 +314,11 @@ model CashierClosing {
   note          String?
   closedAt      DateTime @default(now())
 
-  cashier User @relation(fields: [cashierId], references: [id])
+  store   Store @relation(fields: [storeId], references: [id])
+  cashier User  @relation(fields: [cashierId], references: [id])
 
-  @@unique([cashierId, closingDate])
+  @@unique([storeId, cashierId, closingDate])
+  @@index([storeId])
   @@index([closingDate])
   @@map("cashier_closing")
 }
@@ -365,18 +388,22 @@ enum ModifierSelectionType {
 /// (เขียน raw SQL ทีไรต้องคอย quote ตลอด พลาดแล้ว tsc จับไม่ได้ ไปพังตอน runtime)
 model Table {
   id             String      @id @default(cuid())
-  code           String      @unique
+  storeId        String
+  code           String
   /// denormalized — ต้องอัปเดตใน transaction เดียวกับเหตุการณ์เสมอ (เหมือน Product.quantity คู่กับ StockTransaction)
   status         TableStatus @default(EMPTY)
   primaryTableId String?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
+  store        Store          @relation(fields: [storeId], references: [id])
   primaryTable Table?         @relation("TableMerge", fields: [primaryTableId], references: [id])
   mergedTables Table[]        @relation("TableMerge")
   sessions     TableSession[]
   qrCodes      QRCode[]
 
+  @@unique([storeId, code])
+  @@index([storeId])
   @@index([status])
   @@index([primaryTableId])
   @@map("restaurant_table")
@@ -384,6 +411,7 @@ model Table {
 
 model TableSession {
   id           String             @id @default(cuid())
+  storeId      String
   tableId      String
   qrCodeId     String?
   openedAt     DateTime           @default(now())
@@ -394,19 +422,21 @@ model TableSession {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
-  table         Table                 @relation(fields: [tableId], references: [id])
-  qrCode        QRCode?               @relation(fields: [qrCodeId], references: [id])
-  closedBy      User?                 @relation("SessionClosedBy", fields: [closedById], references: [id])
-  orders        MobileOrder[]
-  notifications Notification[]
-  lineLogs      LineNotificationLog[]
+  store          Store                 @relation(fields: [storeId], references: [id])
+  table          Table                 @relation(fields: [tableId], references: [id])
+  qrCode         QRCode?               @relation(fields: [qrCodeId], references: [id])
+  closedBy       User?                 @relation("SessionClosedBy", fields: [closedById], references: [id])
+  orders         MobileOrder[]
+  notifications  Notification[]
+  lineLogs       LineNotificationLog[]
   /// คำขอชำระเงินที่เคยออก QR ให้โต๊ะนี้ — มีได้หลายใบ เพราะลูกค้ากดชำระเงินแล้วยกเลิก
   /// กลับไปสั่งเพิ่มได้ ยอดจึงเปลี่ยน ต้องออก QR ใบใหม่ ส่วนใบเก่าค้างเป็น PENDING แล้วหมดอายุไป
   paymentIntents PaymentIntent[]
   /// บิลที่เกิดตอนปิด session — FK อยู่ฝั่ง Sale (Sale.tableSessionId) ด้านเดียว
   /// ไม่เก็บ saleId ซ้ำที่นี่ เพราะ FK ชี้กันไปมาสองทางทำให้ลำดับการเขียนในทรานแซคชันพันกัน
-  sale          Sale?
+  sale           Sale?
 
+  @@index([storeId])
   @@index([tableId])
   @@index([status])
   @@map("table_session")
@@ -414,6 +444,7 @@ model TableSession {
 
 model MenuItem {
   id                String   @id @default(cuid())
+  storeId           String
   name              String
   description       String?
   price             Decimal  @db.Decimal(12, 2)
@@ -425,10 +456,12 @@ model MenuItem {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  store          Store             @relation(fields: [storeId], references: [id])
   modifierGroups ModifierGroup[]
   orderItems     MobileOrderItem[]
   saleItems      SaleItem[]
 
+  @@index([storeId])
   @@index([isActive])
   @@index([isFeatured])
   @@map("menu_item")
@@ -436,15 +469,18 @@ model MenuItem {
 
 model ModifierGroup {
   id            String                @id @default(cuid())
+  storeId       String
   menuItemId    String
   name          String
   selectionType ModifierSelectionType @default(SINGLE)
   required      Boolean               @default(false)
   sortOrder     Int                   @default(0)
 
+  store    Store            @relation(fields: [storeId], references: [id])
   menuItem MenuItem         @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
   options  ModifierOption[]
 
+  @@index([storeId])
   @@index([menuItemId])
   @@map("modifier_group")
 }
@@ -464,6 +500,7 @@ model ModifierOption {
 
 model MobileOrder {
   id             String    @id @default(cuid())
+  storeId        String
   tableSessionId String
   /// เลขรอบสั่งภายใน session เดียวกัน (1, 2, 3, …) ใช้แยกทิกเก็ตครัว
   orderNumber    Int
@@ -471,10 +508,12 @@ model MobileOrder {
   printedAt      DateTime?
   createdAt      DateTime  @default(now())
 
+  store   Store             @relation(fields: [storeId], references: [id])
   session TableSession      @relation(fields: [tableSessionId], references: [id], onDelete: Cascade)
   items   MobileOrderItem[]
 
   @@unique([tableSessionId, orderNumber])
+  @@index([storeId])
   @@index([tableSessionId])
   @@map("mobile_order")
 }
@@ -507,6 +546,7 @@ model MobileOrderItem {
 
 model QRCode {
   id            String       @id @default(cuid())
+  storeId       String
   tableId       String
   type          QRCodeType   @default(STATIC)
   /// ค่าสุ่มที่ฝังใน URL ลูกค้า — ห้ามใช้ tableId ตรง ๆ กันเดา URL
@@ -516,9 +556,11 @@ model QRCode {
   issuedAt      DateTime     @default(now())
   createdAt     DateTime     @default(now())
 
+  store    Store          @relation(fields: [storeId], references: [id])
   table    Table          @relation(fields: [tableId], references: [id], onDelete: Cascade)
   sessions TableSession[]
 
+  @@index([storeId])
   @@index([tableId])
   @@index([status])
   @@map("qr_code")
@@ -526,6 +568,7 @@ model QRCode {
 
 model Notification {
   id               String             @id @default(cuid())
+  storeId          String
   tableSessionId   String
   type             NotificationType
   reason           String?
@@ -534,9 +577,11 @@ model Notification {
   acknowledgedById String?
   createdAt        DateTime           @default(now())
 
+  store          Store        @relation(fields: [storeId], references: [id])
   session        TableSession @relation(fields: [tableSessionId], references: [id], onDelete: Cascade)
   acknowledgedBy User?        @relation("NotificationAckBy", fields: [acknowledgedById], references: [id])
 
+  @@index([storeId])
   @@index([tableSessionId])
   @@index([status])
   @@map("notification")
@@ -557,9 +602,10 @@ model LineNotificationLog {
   @@map("line_notification_log")
 }
 
-/// singleton — มีแถวเดียวเสมอ (id = "default")
+/// 1 แถวต่อร้าน (Phase 13) — สร้างพร้อม Store ในทรานแซคชันเดียวกันเสมอ ไม่มีร้านที่ไม่มี settings
 model StoreSettings {
-  id                   String   @id @default("default")
+  id                   String   @id @default(cuid())
+  storeId              String   @unique
   storeName            String
   logoUrl              String?
   coverImageUrl        String?
@@ -571,6 +617,7 @@ model StoreSettings {
   updatedAt            DateTime @updatedAt
   updatedById          String?
 
+  store     Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
   updatedBy User? @relation("StoreSettingsUpdatedBy", fields: [updatedById], references: [id])
 
   @@map("store_settings")
@@ -578,14 +625,19 @@ model StoreSettings {
 
 model Member {
   id           String   @id @default(cuid())
-  phone        String   @unique
+  storeId      String
+  /// unique ต่อร้าน (Phase 13) — ลูกค้าคนเดียวเป็นสมาชิกได้หลายร้าน แต้มไม่รวมกัน
+  phone        String
   /// denormalized — อัปเดตคู่กับ MemberPointTransaction ใน transaction เดียวกันเสมอ
   pointBalance Int      @default(0)
   lineUserId   String?
   createdAt    DateTime @default(now())
 
+  store             Store                    @relation(fields: [storeId], references: [id])
   pointTransactions MemberPointTransaction[]
 
+  @@unique([storeId, phone])
+  @@index([storeId])
   @@map("member")
 }
 
@@ -623,7 +675,9 @@ enum PaymentIntentStatus {
 /// ห้ามจับคู่การชำระเงินด้วย "ยอดเงิน" แทน — สองโต๊ะที่มียอดเท่ากันจะทำให้ปิดบิลผิดโต๊ะ
 model PaymentIntent {
   id             String              @id @default(cuid())
+  storeId        String
   /// โค้ดที่ส่งเป็น ref1 ให้ธนาคาร — ตัวเดียวที่เดินทางไปกับเงินแล้วกลับมาใน callback
+  /// คง unique ทั้งระบบ (ไม่ใช่ต่อร้าน) เพราะ webhook ต้องหาร้านกลับได้จากค่านี้ค่าเดียว
   ref1           String              @unique
   tableSessionId String
   /// ยอด ณ ตอนสร้าง QR — ต้องเทียบกับยอดที่ธนาคารแจ้งกลับมาก่อนปิดบิลเสมอ
@@ -637,9 +691,81 @@ model PaymentIntent {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
+  store   Store        @relation(fields: [storeId], references: [id])
   session TableSession @relation(fields: [tableSessionId], references: [id])
 
+  @@index([storeId])
   @@index([tableSessionId])
   @@index([status])
   @@map("payment_intent")
+}
+
+// ───────────────────── ร้านค้าหลายร้าน (Phase 13 — multi-tenant) ─────────────────────
+
+enum StoreStatus {
+  ACTIVE
+  /// ผู้ดูแลแพลตฟอร์มระงับ — requireStore() ปฏิเสธทุกคำขอของร้านนี้
+  SUSPENDED
+}
+
+/// บทบาทระดับร้าน — คนละแกนกับ Role (matrix สิทธิ์ F1–F9)
+/// OWNER ได้สิทธิ์เต็มทุก resource อัตโนมัติ และเป็นคนเดียวที่แก้ตั้งค่าร้าน/พนักงานได้
+enum StoreRole {
+  OWNER
+  STAFF
+}
+
+/// 1 ร้าน = 1 สาขา — ทุกตารางรากของข้อมูลขายมี storeId ชี้มาที่นี่
+/// ห้ามใช้ชื่อ Member (นั่นคือลูกค้าสะสมแต้มของร้าน)
+model Store {
+  id        String      @id @default(cuid())
+  /// ใช้ใน URL/รายงาน/สคริปต์ — ร้านแรกที่ migrate มาจาก v1 คือ "default"
+  slug      String      @unique
+  name      String
+  status    StoreStatus @default(ACTIVE)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  settings          StoreSettings?
+  members           StoreMember[]
+  roles             Role[]
+  products          Product[]
+  stockTransactions StockTransaction[]
+  categories        Category[]
+  sales             Sale[]
+  cashierClosings   CashierClosing[]
+  tables            Table[]
+  tableSessions     TableSession[]
+  menuItems         MenuItem[]
+  modifierGroups    ModifierGroup[]
+  mobileOrders      MobileOrder[]
+  qrCodes           QRCode[]
+  notifications     Notification[]
+  customers         Member[]
+  paymentIntents    PaymentIntent[]
+
+  @@map("store")
+}
+
+/// ผู้ใช้ 1 คนอยู่ได้หลายร้าน — ห้ามเพิ่ม storeId ลงตาราง user ของ Better Auth
+/// ต้องมี OWNER อย่างน้อย 1 คนต่อร้านเสมอ (บังคับที่ action ไม่ใช่ DB)
+model StoreMember {
+  id        String    @id @default(cuid())
+  userId    String
+  storeId   String
+  role      StoreRole @default(STAFF)
+  /// matrix สิทธิ์ F1–F9 ของร้านนี้ (§4) — null = ยังไม่กำหนด → เข้าได้เฉพาะ /settings
+  /// OWNER ไม่ใช้ค่านี้ (ได้เต็มเสมอ)
+  roleId    String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user           User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store          Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  permissionRole Role? @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, storeId])
+  @@index([storeId])
+  @@index([roleId])
+  @@map("store_member")
 }

@@ -1,12 +1,11 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
-import { requireUser } from "@/lib/session"
+import { forStore } from "@/lib/db"
+import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { idSchema, firstIssueMessage } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
-const AUTH_ERROR = "กรุณาเข้าสู่ระบบก่อนทำรายการ"
 
 function revalidateNotificationPages() {
   revalidatePath("/mobile-order/tables")
@@ -15,19 +14,22 @@ function revalidateNotificationPages() {
 
 /// กด "รับทราบ" — ไม่เปลี่ยนสถานะฐานของโต๊ะ (ORDERED/AWAITING_BILL) เป็นแค่ badge ซ้อนทับ (§3 F12)
 export async function acknowledgeNotification(formData: FormData): Promise<ActionResult> {
-  let user
+  let ctx: StoreContext
   try {
-    user = await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const user = ctx.user
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   try {
     // ★ conditional update — กันสองคนกดรับทราบพร้อมกันแล้วชื่อผู้รับทราบทับกัน
-    const updated = await prisma.notification.updateMany({
+    const updated = await db.notification.updateMany({
       where: { id: parsed.data.id, status: "PENDING" },
       data: { status: "ACKNOWLEDGED", acknowledgedAt: new Date(), acknowledgedById: user.id },
     })
@@ -43,15 +45,18 @@ export async function acknowledgeNotification(formData: FormData): Promise<Actio
 }
 
 export async function acknowledgeAllNotifications(): Promise<ActionResult> {
-  let user
+  let ctx: StoreContext
   try {
-    user = await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const user = ctx.user
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   try {
-    const updated = await prisma.notification.updateMany({
+    const updated = await db.notification.updateMany({
       where: { status: "PENDING" },
       data: { status: "ACKNOWLEDGED", acknowledgedAt: new Date(), acknowledgedById: user.id },
     })

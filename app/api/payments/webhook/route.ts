@@ -61,28 +61,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, saleNumber: settled.saleNumber, duplicated: true })
   }
 
+  // ร้านของการชำระเงินนี้ (Phase 13): จาก qrToken หรือจาก session ที่ระบุมา — ค้นข้ามร้านได้เพราะ
+  // callback ไม่มี session/cookie · หลังจากนี้ปิดบิลใต้ร้านนั้นเท่านั้น
   let targetSessionId = sessionId
-  if (!targetSessionId && qrToken) {
+  let storeId: string | undefined
+  if (targetSessionId) {
+    const session = await prisma.tableSession.findUnique({
+      where: { id: targetSessionId },
+      select: { storeId: true },
+    })
+    storeId = session?.storeId
+  } else if (qrToken) {
     const qr = await prisma.qRCode.findUnique({
       where: { token: qrToken },
-      select: { tableId: true, table: { select: { primaryTableId: true } } },
+      select: { storeId: true, tableId: true, table: { select: { primaryTableId: true } } },
     })
     if (qr) {
       const tableId = qr.table.primaryTableId ?? qr.tableId
       const session = await prisma.tableSession.findFirst({
-        where: { tableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+        where: { storeId: qr.storeId, tableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
         orderBy: { openedAt: "desc" },
         select: { id: true },
       })
       targetSessionId = session?.id
+      storeId = qr.storeId
     }
   }
 
-  if (!targetSessionId) {
+  if (!targetSessionId || !storeId) {
     return NextResponse.json({ ok: false, error: "ไม่พบโต๊ะที่ตรงกับการชำระเงินนี้" }, { status: 404 })
   }
 
   const result = await closeSessionWithPayment({
+    storeId,
     sessionId: targetSessionId,
     paymentMethod: "PROMPTPAY",
     paymentReference: reference,

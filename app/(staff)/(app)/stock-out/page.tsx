@@ -8,9 +8,9 @@ export const metadata = { title: "เบิกจ่ายสินค้า" }
 
 export default async function StockOutPage() {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  await requirePageAccess("STOCK_OUT")
+  const { storeId } = await requirePageAccess("STOCK_OUT")
 
-  const [products, transactions] = await Promise.all([listProductOptions(), listTransactions(50)])
+  const [products, transactions] = await Promise.all([listProductOptions(storeId), listTransactions(storeId, 50)])
   const history = transactions.filter((t) => t.type === "OUT").slice(0, 12)
 
   return (

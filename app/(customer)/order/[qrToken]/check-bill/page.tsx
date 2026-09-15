@@ -18,8 +18,8 @@ export default async function CheckBillPage({ params }: PageProps<"/order/[qrTok
   }
 
   const [view, settings] = await Promise.all([
-    getCustomerOrderView(session.sessionId),
-    getStoreSettings(),
+    getCustomerOrderView(session.storeId, session.sessionId),
+    getStoreSettings(session.storeId),
   ])
 
   if (!view) {

@@ -1,5 +1,5 @@
 import "server-only"
-import { prisma } from "@/lib/prisma"
+import { forStore } from "@/lib/db"
 import { closeSessionWithPayment } from "@/lib/close-session"
 import { markIntentFailed, markIntentPaid, type IntentLookup } from "@/lib/payment-intent"
 import { inquireBillPayment } from "@/lib/payment-provider/scb"
@@ -31,9 +31,9 @@ function log(message: string, detail?: Record<string, unknown>) {
 /// สร้าง Notification เฉพาะ "ครั้งที่ปิดใบได้จริง" เท่านั้น — เคสเดียวกันถูกตรวจเจอซ้ำได้หลายรอบ
 /// เพราะธนาคาร retry callback 3 ครั้ง ห่างกัน 12 วินาที ถ้าแจ้งทุกรอบพนักงานจะได้ใบซ้ำสามใบ
 async function handOffToStaff(intent: IntentLookup, reason: string): Promise<void> {
-  if (!(await markIntentFailed(intent.id))) return
-  await prisma.notification.create({
-    data: { tableSessionId: intent.tableSessionId, type: "CHECK_BILL", reason },
+  if (!(await markIntentFailed(intent.storeId, intent.id))) return
+  await forStore(intent.storeId).notification.create({
+    data: { storeId: intent.storeId, tableSessionId: intent.tableSessionId, type: "CHECK_BILL", reason },
   })
 }
 
@@ -66,6 +66,7 @@ export async function verifyAndSettleIntent(
   // ★ ด่านที่ 3 อยู่ข้างใน closeSessionWithPayment — `verifiedAmount` ทำให้มันยกเลิกทรานแซคชัน
   //   ถ้าบิลโตขึ้นระหว่างที่ลูกค้ากำลังจ่าย (คนอื่นบนโต๊ะเดียวกันสั่งเพิ่ม)
   const closed = await closeSessionWithPayment({
+    storeId: intent.storeId,
     sessionId: intent.tableSessionId,
     paymentMethod: "PROMPTPAY",
     paymentReference: bank.transactionId,
@@ -85,7 +86,7 @@ export async function verifyAndSettleIntent(
     return { ok: false, reason: closed.error }
   }
 
-  await markIntentPaid(intent.id, bank.transactionId)
+  await markIntentPaid(intent.storeId, intent.id, bank.transactionId)
 
   log("ปิดบิลสำเร็จ", {
     saleNumber: closed.saleNumber,

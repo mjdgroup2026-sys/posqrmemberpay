@@ -6,6 +6,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
 import { IconBell, IconLogout, IconSettings, IconUser, IconWarning } from "@/components/icons"
+import { StoreSwitcher, type StoreOption } from "@/components/store-switcher"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,9 +20,12 @@ type Props = {
   user: { name: string; email: string }
   lowStockCount: number
   pendingNotificationCount?: number
+  /// ร้านที่ทำงานอยู่ (Phase 13) — null เมื่อผู้ใช้ยังไม่ได้อยู่ในร้านใด
+  activeStoreId?: string | null
+  stores?: StoreOption[]
 }
 
-export function Topbar({ user, lowStockCount, pendingNotificationCount = 0 }: Props) {
+export function Topbar({ user, lowStockCount, pendingNotificationCount = 0, activeStoreId = null, stores = [] }: Props) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
 
@@ -50,6 +54,7 @@ export function Topbar({ user, lowStockCount, pendingNotificationCount = 0 }: Pr
   return (
     <header className="topbar">
       <div className="row" style={{ gap: 10 }}>
+        {activeStoreId ? <StoreSwitcher activeStoreId={activeStoreId} stores={stores} /> : null}
         {pendingNotificationCount > 0 ? (
           <Link href="/mobile-order/notifications" className="chip chip-danger">
             <IconBell size={14} aria-hidden />

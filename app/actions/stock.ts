@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { forStore } from "@/lib/db"
 import { guardAction } from "@/lib/permissions"
 import { stockMoveSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
@@ -31,6 +31,8 @@ export async function stockIn(formData: FormData): Promise<ActionResult> {
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
   const guard = await guardAction("STOCK_IN", "ADD")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const parsed = parseMove(formData)
   if (!parsed.success) {
@@ -45,14 +47,14 @@ export async function stockIn(formData: FormData): Promise<ActionResult> {
 
   try {
     // สร้าง ledger + เพิ่มยอด ต้องอยู่ใน transaction เดียวกันเสมอ (กติกาข้อ 2)
-    const product = await prisma.$transaction(async (tx) => {
+    const product = await db.$transaction(async (tx) => {
       const updated = await tx.product.update({
         where: { id: productId },
         data: { quantity: { increment: quantity } },
         select: { name: true, unit: true, quantity: true },
       })
       await tx.stockTransaction.create({
-        data: { productId, type: "IN", quantity, note },
+        data: { storeId, productId, type: "IN", quantity, note },
       })
       return updated
     })
@@ -75,6 +77,8 @@ export async function stockOut(formData: FormData): Promise<ActionResult> {
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
   const guard = await guardAction("STOCK_OUT", "ADD")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
 
   const parsed = parseMove(formData)
   if (!parsed.success) {
@@ -88,7 +92,7 @@ export async function stockOut(formData: FormData): Promise<ActionResult> {
   const { productId, quantity, note } = parsed.data
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       // ★ ด่านกันเบิกเกิน: updateMany + where quantity gte เป็นด่านเดียวที่กัน race condition
       //   ได้จริงตอนมีคำขอพร้อมกัน — ห้ามใช้ if เช็คก่อนแล้วค่อย update (กติกาข้อ 4)
       const updated = await tx.product.updateMany({
@@ -106,7 +110,7 @@ export async function stockOut(formData: FormData): Promise<ActionResult> {
       }
 
       await tx.stockTransaction.create({
-        data: { productId, type: "OUT", quantity, note },
+        data: { storeId, productId, type: "OUT", quantity, note },
       })
 
       const product = await tx.product.findUniqueOrThrow({

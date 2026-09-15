@@ -12,6 +12,9 @@ const prismaMock = mockDeep<PrismaClient>()
 const guardActionMock = vi.fn()
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }))
+/// forStore() ของจริงเป็น Prisma extension ที่ยัด storeId เข้า where — ต่อกับ mockDeep ไม่ได้
+/// unit test นี้จึงข้ามชั้นนั้น (พิสูจน์แยกใน integration/tenant-isolation.test.ts) แล้วส่ง prismaMock ตรง ๆ
+vi.mock("@/lib/db", () => ({ forStore: () => prismaMock }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
 vi.mock("@/lib/permissions", () => ({ guardAction: guardActionMock }))
 
@@ -36,7 +39,16 @@ beforeEach(async () => {
   guardActionMock.mockReset()
   guardActionMock.mockResolvedValue({
     ok: true,
-    user: { id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com", roleId: "role_test", roleName: "เต็มสิทธิ์", granted: {} },
+    user: {
+      id: "test-user",
+      name: "ผู้ทดสอบ",
+      email: "test@example.com",
+      storeId: "store_test",
+      storeRole: "OWNER",
+      roleId: "role_test",
+      roleName: "เต็มสิทธิ์",
+      granted: {},
+    },
   })
   wireInteractiveTransaction()
 
@@ -135,7 +147,7 @@ describe("stockOut — กันเบิกเกินสต็อก (กต�
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
     expect(prismaMock.stockTransaction.create).toHaveBeenCalledTimes(1)
     expect(prismaMock.stockTransaction.create).toHaveBeenCalledWith({
-      data: { productId: PRODUCT_ID, type: "OUT", quantity: 2, note: "เบิกเข้าครัว" },
+      data: { storeId: "store_test", productId: PRODUCT_ID, type: "OUT", quantity: 2, note: "เบิกเข้าครัว" },
     })
   })
 

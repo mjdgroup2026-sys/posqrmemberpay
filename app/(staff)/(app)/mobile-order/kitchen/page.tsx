@@ -1,12 +1,14 @@
 import Link from "next/link"
 import { listKitchenTickets, getStoreSettings } from "@/lib/queries"
+import { requireStorePage } from "@/lib/permissions"
 import { KitchenDisplay } from "@/components/kitchen-display"
 import { IconKitchen } from "@/components/icons"
 
 export const metadata = { title: "Kitchen Display" }
 
 export default async function KitchenPage() {
-  const [tickets, settings] = await Promise.all([listKitchenTickets(), getStoreSettings()])
+  const { storeId } = await requireStorePage()
+  const [tickets, settings] = await Promise.all([listKitchenTickets(storeId), getStoreSettings(storeId)])
 
   // ★ ร้านที่ยังไม่เปิดโหมดจอครัวไม่ควรเห็นกระดาน 3 คอลัมน์ (F18) — ของเดิม render ให้เฉย ๆ
   //   แล้วสองคอลัมน์ขวาว่างตลอดเพราะรายการข้ามจาก "รอครัวรับ" ไป "เสิร์ฟแล้ว" เลย

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { getCustomerPaymentStatus, getStoreSettings } from "@/lib/queries"
+import { findStoreByQrToken } from "@/lib/store-resolve"
 import { isQrPaymentAvailable } from "@/lib/payment-methods"
 import { CustomerShell, CustomerNotice } from "@/components/customer/customer-shell"
 import { PayView } from "@/components/customer/pay-view"
@@ -8,7 +9,8 @@ export const metadata = { title: "ชำระเงิน" }
 
 export default async function PayPage({ params }: PageProps<"/order/[qrToken]/pay"> ) {
   const { qrToken } = await params
-  const [status, settings] = await Promise.all([getCustomerPaymentStatus(qrToken), getStoreSettings()])
+  const [status, store] = await Promise.all([getCustomerPaymentStatus(qrToken), findStoreByQrToken(qrToken)])
+  const settings = store ? await getStoreSettings(store.storeId) : null
 
   // ปิดบิลไปแล้ว (webhook หรือพนักงานกดยืนยัน) — พาไปหน้าสำเร็จแทนหน้าเลือกวิธีจ่ายที่ไม่มีความหมายแล้ว
   if (status.state === "PAID") redirect(`/order/${qrToken}/pay/success`)

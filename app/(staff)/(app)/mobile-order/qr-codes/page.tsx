@@ -1,12 +1,14 @@
 import QRCode from "qrcode"
 import { listQrCodes } from "@/lib/queries"
+import { requireStorePage } from "@/lib/permissions"
 import { publicBaseUrl } from "@/lib/urls"
 import { QrManager, type QrCard } from "@/components/qr-manager"
 
 export const metadata = { title: "จัดการ QR Code" }
 
 export default async function QrCodesPage() {
-  const rows = await listQrCodes()
+  const { storeId } = await requireStorePage()
+  const rows = await listQrCodes(storeId)
   const base = publicBaseUrl()
 
   const cards: QrCard[] = await Promise.all(

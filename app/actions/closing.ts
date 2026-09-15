@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { forStore } from "@/lib/db"
 import { guardAction } from "@/lib/permissions"
 import { businessDateOnly, businessDayRange } from "@/lib/day"
 import { closingSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
@@ -20,6 +20,8 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
   const guard = await guardAction("POS_CLOSING", "ADD")
   if (!guard.ok) return { ok: false, error: guard.error }
+  const storeId = guard.user.storeId
+  const db = forStore(storeId)
   const user = guard.user
 
   const parsed = closingSchema.safeParse({
@@ -38,7 +40,7 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
   const { start, end } = businessDayRange()
 
   try {
-    const difference = await prisma.$transaction(async (tx) => {
+    const difference = await db.$transaction(async (tx) => {
       const [completed, voidedCount] = await Promise.all([
         tx.sale.findMany({
           where: { cashierId: user.id, status: "COMPLETED", createdAt: { gte: start, lt: end } },
@@ -68,6 +70,7 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
 
       await tx.cashierClosing.create({
         data: {
+          storeId,
           cashierId: user.id,
           closingDate: businessDateOnly(),
           totalSales: round2(totalSales).toFixed(2),

@@ -1,6 +1,7 @@
 import "server-only"
 import { randomBytes } from "node:crypto"
 import { prisma } from "@/lib/prisma"
+import { forStore } from "@/lib/db"
 import { toNumber } from "@/lib/format"
 
 /// จัดการ PaymentIntent — ตัวกลางที่แมป ref1 ที่ส่งไปกับ QR กลับมาเป็นโต๊ะที่จ่ายเงิน
@@ -35,10 +36,11 @@ export type IssuedIntent = { id: string; ref1: string; amount: number }
 /// ใช้ใบเดิมได้เมื่อ **ยอดตรงกันและยังไม่หมดอายุ** เท่านั้น — ลูกค้ากดกลับไปกลับมาบนหน้าจ่ายเงิน
 /// ไม่ควรได้ QR ใบใหม่ทุกครั้ง เพราะใบเก่าที่ค้างอยู่ก็ยังจ่ายได้ จะกลายเป็นจ่ายซ้ำสองใบ
 /// แต่ถ้าลูกค้าสั่งอาหารเพิ่มจนยอดเปลี่ยน ใบเก่าต้องถูกทิ้งแล้วออกใบใหม่ตามยอดจริง
-export async function issuePaymentIntent(sessionId: string, amount: number): Promise<IssuedIntent> {
+export async function issuePaymentIntent(storeId: string, sessionId: string, amount: number): Promise<IssuedIntent> {
+  const db = forStore(storeId)
   const now = new Date()
 
-  const reusable = await prisma.paymentIntent.findFirst({
+  const reusable = await db.paymentIntent.findFirst({
     where: { tableSessionId: sessionId, status: "PENDING", expiresAt: { gt: now } },
     orderBy: { createdAt: "desc" },
     select: { id: true, ref1: true, amount: true },
@@ -49,13 +51,14 @@ export async function issuePaymentIntent(sessionId: string, amount: number): Pro
   }
 
   // ยอดเปลี่ยนแล้ว — ปิดใบเก่าที่ยังค้างทั้งหมดก่อน ไม่งั้นลูกค้าอาจสแกนใบเก่าที่ยอดไม่ตรง
-  await prisma.paymentIntent.updateMany({
+  await db.paymentIntent.updateMany({
     where: { tableSessionId: sessionId, status: "PENDING" },
     data: { status: "EXPIRED" },
   })
 
-  const created = await prisma.paymentIntent.create({
+  const created = await db.paymentIntent.create({
     data: {
+      storeId,
       ref1: generateRef1(),
       tableSessionId: sessionId,
       amount: amount.toFixed(2),
@@ -69,6 +72,8 @@ export async function issuePaymentIntent(sessionId: string, amount: number): Pro
 
 export type IntentLookup = {
   id: string
+  /// ร้านเจ้าของ intent (Phase 13) — webhook ใช้ค่านี้เข้า forStore() ต่อ เพราะ callback ไม่มี session
+  storeId: string
   /// ต้องพกกลับออกไปด้วย — `verifyAndSettleIntent()` ใช้ถาม inquiry ยืนยันกับธนาคารอีกชั้น
   /// ก่อนปิดบิล จึงเชื่อ ref1 ที่มากับ callback ตรง ๆ ไม่ได้
   ref1: string
@@ -78,11 +83,12 @@ export type IntentLookup = {
   expiresAt: Date
 }
 
-/// หา intent จาก ref1 ที่ธนาคารส่งกลับมาใน callback
+/// หา intent จาก ref1 ที่ธนาคารส่งกลับมาใน callback — จุดเดียวที่ค้นข้ามร้านได้ เพราะ ref1 unique ทั้งระบบ
+/// และเป็นตัวบอกว่าเงินก้อนนี้เป็นของร้านไหน (ดู lib/store-resolve.ts)
 export async function findIntentByRef1(ref1: string): Promise<IntentLookup | null> {
   const found = await prisma.paymentIntent.findUnique({
     where: { ref1 },
-    select: { id: true, ref1: true, tableSessionId: true, amount: true, status: true, expiresAt: true },
+    select: { id: true, storeId: true, ref1: true, tableSessionId: true, amount: true, status: true, expiresAt: true },
   })
   if (!found) return null
   return { ...found, amount: toNumber(found.amount) }
@@ -93,8 +99,8 @@ export async function findIntentByRef1(ref1: string): Promise<IntentLookup | nul
 /// รับใบที่ EXPIRED ไปแล้วด้วย เพราะ **ใบหมดอายุฝั่งเราไม่ได้แปลว่าจ่ายไม่ได้แล้วจริง ๆ** —
 /// QR ที่ค้างอยู่ในแอปธนาคารของลูกค้ายังจ่ายได้ และเงินก็เข้าจริง (ธนาคารยืนยันแล้วถึงจะมาถึงบรรทัดนี้)
 /// ถ้าไม่รับ ใบนั้นจะค้างเป็น EXPIRED ทั้งที่มีเงินเข้า แล้วไล่ที่มาของเงินย้อนหลังไม่ได้
-export async function markIntentPaid(intentId: string, transactionId: string): Promise<void> {
-  await prisma.paymentIntent.updateMany({
+export async function markIntentPaid(storeId: string, intentId: string, transactionId: string): Promise<void> {
+  await forStore(storeId).paymentIntent.updateMany({
     where: { id: intentId, status: { in: ["PENDING", "EXPIRED"] } },
     data: { status: "PAID", transactionId, paidAt: new Date() },
   })
@@ -106,8 +112,8 @@ export async function markIntentPaid(intentId: string, transactionId: string): P
 /// คืน true เฉพาะ "ครั้งที่เปลี่ยนสถานะได้จริง" — ผู้เรียกใช้ค่านี้เป็นตัวกันแจ้งเตือนซ้ำ
 /// เพราะเคสเดียวกันถูกตรวจเจอได้หลายรอบ: ธนาคาร retry callback 3 ครั้ง ห่างกัน 12 วินาที
 /// ถ้าสร้าง Notification ทุกรอบ พนักงานจะได้แจ้งเตือนเรื่องเดียวกันสามใบ
-export async function markIntentFailed(intentId: string): Promise<boolean> {
-  const failed = await prisma.paymentIntent.updateMany({
+export async function markIntentFailed(storeId: string, intentId: string): Promise<boolean> {
+  const failed = await forStore(storeId).paymentIntent.updateMany({
     where: { id: intentId, status: "PENDING" },
     data: { status: "FAILED" },
   })

@@ -1,13 +1,18 @@
+import { redirect } from "next/navigation"
 import { getStoreSettings, listMenuForSettings, getOpenSessionCount } from "@/lib/queries"
+import { requireStorePage } from "@/lib/permissions"
 import { StoreSettingsForm } from "@/components/store-settings-form"
 
 export const metadata = { title: "ตั้งค่าร้าน" }
 
 export default async function StoreSettingsPage() {
+  const { storeId, role } = await requireStorePage()
+  // ตั้งค่าร้านเป็นของเจ้าของร้านเท่านั้น (Phase 13) — action updateStoreSettings ก็กันด้วย requireOwner()
+  if (role !== "OWNER") redirect("/access-denied?resource=STORE_SETTINGS")
   const [settings, menu, openSessionCount] = await Promise.all([
-    getStoreSettings(),
-    listMenuForSettings(),
-    getOpenSessionCount(),
+    getStoreSettings(storeId),
+    listMenuForSettings(storeId),
+    getOpenSessionCount(storeId),
   ])
 
   return (

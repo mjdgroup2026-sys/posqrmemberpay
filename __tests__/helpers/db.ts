@@ -1,5 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg"
 import { PrismaClient } from "@/generated/prisma/client"
+import { provisionStore } from "@/lib/store-provision"
 
 /// ค่า DATABASE_URL ถูกโหลดจาก .env.test ใน __tests__/setup.ts (override: true)
 function databaseUrl(): string {
@@ -33,7 +34,7 @@ export async function isTestDbReachable(): Promise<boolean> {
   try {
     const db = testPrisma()
     await db.$queryRaw`SELECT 1`
-    await db.$queryRaw`SELECT 1 FROM "product" LIMIT 1`
+    await db.$queryRaw`SELECT 1 FROM "store" LIMIT 1`
     return true
   } catch {
     return false
@@ -45,6 +46,30 @@ export async function disconnectTestDb(): Promise<void> {
     await client.$disconnect()
     client = undefined
   }
+}
+
+// ───────────────────── ร้านทดสอบ (Phase 13) ─────────────────────
+
+/// ร้านเริ่มต้นของทุกเทส — helper ทุกตัวสร้างข้อมูลลงร้านนี้ถ้าไม่ระบุ storeId
+/// id คงที่ให้เทสอ้างได้โดยไม่ต้อง await (เช่นตอนประกาศ describe)
+export const TEST_STORE_ID = "store_test_a"
+export const TEST_STORE_SLUG = "test-a"
+
+/// ร้านที่สอง — ไว้ให้เทสแยกร้าน (tenant-isolation) และเทส "ร้านอื่นมองไม่เห็น"
+export const OTHER_STORE_ID = "store_test_b"
+export const OTHER_STORE_SLUG = "test-b"
+
+/// สร้างร้านให้ครบชุด (Store + StoreSettings + บทบาทระบบ) ผ่าน provisionStore() ตัวเดียวกับ production
+/// idempotent — เรียกซ้ำได้ในเทสเดียวกัน
+export async function ensureTestStore(
+  input: { id?: string; slug?: string; name?: string; status?: "ACTIVE" | "SUSPENDED" } = {},
+) {
+  const db = testPrisma()
+  const id = input.id ?? TEST_STORE_ID
+  const slug = input.slug ?? (id === OTHER_STORE_ID ? OTHER_STORE_SLUG : TEST_STORE_SLUG)
+  const { storeId } = await provisionStore(db, { id, slug, name: input.name ?? `ร้านทดสอบ ${slug}` })
+  if (input.status) await db.store.update({ where: { id: storeId }, data: { status: input.status } })
+  return storeId
 }
 
 /// ล้างข้อมูลก่อนทุกเทส — ledger เป็น append-only ในโค้ด production
@@ -62,7 +87,9 @@ export async function resetDb(): Promise<void> {
       '"qr_code", "restaurant_table", "modifier_option", "modifier_group", "menu_item",',
       '"member", "store_settings", "product", "category",',
       // ตารางสิทธิ์ (§4) — ต้องล้างด้วย ไม่งั้นบทบาทจากเทสก่อนหน้าค้างแล้วชนกับ unique ของชื่อบทบาท
-      '"role_permission", "role"',
+      '"role_permission", "role",',
+      // ร้านและสมาชิก (Phase 13) — ล้างท้ายสุดเพราะทุกตารางข้างบนอ้างมาที่นี่
+      '"store_member", "store"',
       "RESTART IDENTITY CASCADE",
     ].join(" "),
   )
@@ -71,6 +98,7 @@ export async function resetDb(): Promise<void> {
 let skuCounter = 1000
 
 type TestProductInput = {
+  storeId?: string
   sku?: string
   name?: string
   category?: string
@@ -83,14 +111,18 @@ type TestProductInput = {
 export async function createTestProduct(input: TestProductInput = {}) {
   skuCounter += 1
   const db = testPrisma()
+  const storeId = input.storeId ?? (await ensureTestStore())
+  const categoryName = input.category ?? "เครื่องปรุง"
   return db.product.create({
     data: {
+      // ใช้ relation แบบ checked ทั้งคู่ — Prisma ไม่ให้ผสม storeId ดิบกับ category.connectOrCreate
+      store: { connect: { id: storeId } },
       sku: input.sku ?? `SKU-${skuCounter}`,
       name: input.name ?? "น้ำปลาทดสอบ",
       category: {
         connectOrCreate: {
-          where: { name: input.category ?? "เครื่องปรุง" },
-          create: { name: input.category ?? "เครื่องปรุง" },
+          where: { storeId_name: { storeId, name: categoryName } },
+          create: { storeId, name: categoryName },
         },
       },
       unit: input.unit ?? "ขวด",
@@ -115,14 +147,15 @@ const FULL_PERMISSIONS = [
   { resource: "USERS", actions: ["VIEW", "ADD", "EDIT", "DELETE"] },
 ] as const
 
-/// บทบาทเต็มสิทธิ์สำหรับเทสที่สนใจ "ตรรกะธุรกิจ" ไม่ใช่ "ระบบสิทธิ์"
-/// เทสที่ทดสอบระบบสิทธิ์เองให้ส่ง `{ withFullPermissions: false }` แล้วผูกบทบาทเอง
-export async function giveFullPermissions(userId: string) {
+/// บทบาท (matrix สิทธิ์ §4) เต็มสิทธิ์ของร้าน — ผูกให้สมาชิก STAFF ที่ต้องทำได้ทุกอย่างในเทส
+/// OWNER ไม่ต้องใช้ (ได้เต็มเสมอ) · เทสที่ทดสอบระบบสิทธิ์เองให้ผูกบทบาทเอง
+export async function giveFullPermissions(userId: string, storeId = TEST_STORE_ID) {
   const db = testPrisma()
   const role = await db.role.upsert({
-    where: { name: "เต็มสิทธิ์ (เทส)" },
+    where: { storeId_name: { storeId, name: "เต็มสิทธิ์ (เทส)" } },
     update: {},
     create: {
+      storeId,
       name: "เต็มสิทธิ์ (เทส)",
       permissions: {
         create: FULL_PERMISSIONS.map((row) => ({
@@ -133,48 +166,87 @@ export async function giveFullPermissions(userId: string) {
     },
     select: { id: true },
   })
-  await db.user.update({ where: { id: userId }, data: { roleId: role.id } })
+  await db.storeMember.update({
+    where: { userId_storeId: { userId, storeId } },
+    data: { roleId: role.id },
+  })
   return role.id
 }
 
+type TestUserOptions = {
+  /// ร้านที่ผู้ใช้เป็นสมาชิก — ค่าเริ่มต้นคือร้านทดสอบหลัก · null = ไม่อยู่ในร้านใดเลย (เทส NO_STORE)
+  storeId?: string | null
+  /// OWNER (ค่าเริ่มต้น) ได้สิทธิ์เต็มทุก resource อัตโนมัติ · STAFF ต้องผูกบทบาท §4 เอง
+  role?: "OWNER" | "STAFF"
+  isPlatformAdmin?: boolean
+}
+
 /// Sale.cashierId เป็น FK ไปตาราง user — ต้องมีผู้ใช้ทดสอบอยู่จริงก่อนสร้างบิล
-export async function ensureTestUser(
-  id = "test-user",
-  name = "ผู้ทดสอบ",
-  options: { withFullPermissions?: boolean } = {},
-) {
+/// ค่าเริ่มต้น: เป็น OWNER ของร้านทดสอบหลัก จึงผ่านทั้ง requireStore()/requireOwner() และด่านสิทธิ์ §4
+/// — เทสเดิมจึงยังวัดสิ่งที่ตั้งใจวัด (ตรรกะธุรกิจ) ไม่ใช่ไปติดด่านสิทธิ์แทน
+export async function ensureTestUser(id = "test-user", name = "ผู้ทดสอบ", options: TestUserOptions = {}) {
   const db = testPrisma()
   const user = await db.user.upsert({
     where: { id },
-    update: {},
-    create: { id, name, email: `${id}@example.com`, emailVerified: true },
+    update: { ...(options.isPlatformAdmin === undefined ? {} : { isPlatformAdmin: options.isPlatformAdmin }) },
+    create: {
+      id,
+      name,
+      email: `${id}@example.com`,
+      emailVerified: true,
+      isPlatformAdmin: options.isPlatformAdmin ?? false,
+    },
   })
-  // ให้สิทธิ์เต็มโดยปริยาย — ก่อนมี §4 ผู้ใช้ทุกคนทำได้ทุกอย่างอยู่แล้ว
-  // เทสเดิมจึงยังวัดสิ่งที่ตั้งใจวัด (ตรรกะธุรกิจ) ไม่ใช่ไปติดด่านสิทธิ์แทน
-  if (options.withFullPermissions ?? true) await giveFullPermissions(id)
+  if (options.storeId !== null) {
+    // ร้านที่ระบุมาต้องมีอยู่จริง — provision ให้เลย (idempotent) จะได้ไม่ต้องเรียก ensureTestStore() แยกก่อน
+    const storeId = await ensureTestStore(options.storeId ? { id: options.storeId } : {})
+    await addTestMember(id, storeId, options.role ?? "OWNER")
+  }
   return user
 }
 
-export async function createTestCategory(name = "หมวดทดสอบ") {
+/// เพิ่มผู้ใช้เข้าร้าน (idempotent) — ใช้กับเทสที่ผู้ใช้อยู่หลายร้าน
+export async function addTestMember(userId: string, storeId: string, role: "OWNER" | "STAFF" = "STAFF") {
   const db = testPrisma()
-  return db.category.upsert({ where: { name }, update: {}, create: { name } })
+  return db.storeMember.upsert({
+    where: { userId_storeId: { userId, storeId } },
+    update: { role },
+    create: { userId, storeId, role },
+  })
+}
+
+export async function createTestCategory(name = "หมวดทดสอบ", storeId?: string) {
+  const db = testPrisma()
+  const sid = storeId ?? (await ensureTestStore())
+  return db.category.upsert({
+    where: { storeId_name: { storeId: sid, name } },
+    update: {},
+    create: { storeId: sid, name },
+  })
 }
 
 let tableCounter = 0
 
-export async function createTestTable(code?: string) {
+export async function createTestTable(code?: string, storeId?: string) {
   tableCounter += 1
   const db = testPrisma()
-  return db.table.create({ data: { code: code ?? `T${String(tableCounter).padStart(2, "0")}` } })
+  const sid = storeId ?? (await ensureTestStore())
+  return db.table.create({
+    data: { storeId: sid, code: code ?? `T${String(tableCounter).padStart(2, "0")}` },
+  })
 }
 
 export async function createTestQrCode(
   tableId: string,
-  input: { token?: string; type?: "STATIC" | "DYNAMIC"; status?: "ACTIVE" | "INVALIDATED" } = {},
+  input: { token?: string; type?: "STATIC" | "DYNAMIC"; status?: "ACTIVE" | "INVALIDATED"; storeId?: string } = {},
 ) {
   const db = testPrisma()
+  // QR ต้องอยู่ร้านเดียวกับโต๊ะเสมอ — อ่านจากโต๊ะถ้าไม่ระบุ
+  const storeId =
+    input.storeId ?? (await db.table.findUniqueOrThrow({ where: { id: tableId }, select: { storeId: true } })).storeId
   return db.qRCode.create({
     data: {
+      storeId,
       tableId,
       token: input.token ?? `qr-${Math.random().toString(36).slice(2, 12)}`,
       type: input.type ?? "STATIC",
@@ -183,37 +255,60 @@ export async function createTestQrCode(
   })
 }
 
-export async function createTestMenuItem(input: { name?: string; price?: string } = {}) {
+export async function createTestMenuItem(input: { name?: string; price?: string; storeId?: string } = {}) {
   const db = testPrisma()
+  const storeId = input.storeId ?? (await ensureTestStore())
   return db.menuItem.create({
-    data: { name: input.name ?? "ข้าวกะเพราทดสอบ", price: input.price ?? "80.00" },
+    data: { storeId, name: input.name ?? "ข้าวกะเพราทดสอบ", price: input.price ?? "80.00" },
   })
 }
 
-/// StoreSettings เป็น singleton — เทสที่แตะเส้นทางครัวต้องตั้งค่า hasKDS ก่อนเสมอ
-export async function setStoreSettings(input: { hasKDS?: boolean; serviceChargePercent?: string } = {}) {
+/// StoreSettings มี 1 แถวต่อร้าน (สร้างมาพร้อมร้านแล้ว) — เทสที่แตะเส้นทางครัวต้องตั้งค่า hasKDS ก่อนเสมอ
+export async function setStoreSettings(
+  input: { hasKDS?: boolean; serviceChargePercent?: string; crmEnabled?: boolean; storeId?: string } = {},
+) {
   const db = testPrisma()
+  const storeId = input.storeId ?? (await ensureTestStore())
+  const patch = {
+    ...(input.hasKDS === undefined ? {} : { hasKDS: input.hasKDS }),
+    ...(input.serviceChargePercent === undefined ? {} : { serviceChargePercent: input.serviceChargePercent }),
+    ...(input.crmEnabled === undefined ? {} : { crmEnabled: input.crmEnabled }),
+  }
   return db.storeSettings.upsert({
-    where: { id: "default" },
-    update: {
-      ...(input.hasKDS === undefined ? {} : { hasKDS: input.hasKDS }),
-      ...(input.serviceChargePercent === undefined
-        ? {}
-        : { serviceChargePercent: input.serviceChargePercent }),
-    },
+    where: { storeId },
+    update: patch,
     create: {
-      id: "default",
+      storeId,
       storeName: "ร้านทดสอบ",
       themeColor: "#E8571F",
       hasKDS: input.hasKDS ?? false,
       serviceChargePercent: input.serviceChargePercent ?? "0.00",
+      crmEnabled: input.crmEnabled ?? false,
+    },
+  })
+}
+
+/// TableSession ต้องอยู่ร้านเดียวกับโต๊ะ — helper กลางที่เทสส่วนใหญ่ใช้เปิดโต๊ะตรง ๆ
+export async function createTestSession(
+  tableId: string,
+  input: { status?: "OPEN" | "AWAITING_BILL" | "CLOSED" | "CANCELLED"; qrCodeId?: string } = {},
+) {
+  const db = testPrisma()
+  const table = await db.table.findUniqueOrThrow({ where: { id: tableId }, select: { storeId: true } })
+  return db.tableSession.create({
+    data: {
+      storeId: table.storeId,
+      tableId,
+      status: input.status ?? "OPEN",
+      ...(input.qrCodeId ? { qrCodeId: input.qrCodeId } : {}),
     },
   })
 }
 
 export async function createTestOrder(sessionId: string, orderNumber = 1) {
   const db = testPrisma()
-  return db.mobileOrder.create({ data: { tableSessionId: sessionId, orderNumber } })
+  const session = await db.tableSession.findUniqueOrThrow({ where: { id: sessionId }, select: { storeId: true } })
+  return db.mobileOrder.create({ data: { storeId: session.storeId, tableSessionId: sessionId, orderNumber } })
 }
 
 export async function createTestOrderItem(
@@ -229,6 +324,23 @@ export async function createTestOrderItem(
       quantity: input.quantity ?? 1,
       unitPrice: input.unitPrice ?? "80.00",
       status: input.status ?? "AWAITING_KITCHEN",
+    },
+  })
+}
+
+export async function createTestNotification(
+  sessionId: string,
+  input: { type?: "CALL_STAFF" | "CHECK_BILL"; reason?: string; status?: "PENDING" | "ACKNOWLEDGED" } = {},
+) {
+  const db = testPrisma()
+  const session = await db.tableSession.findUniqueOrThrow({ where: { id: sessionId }, select: { storeId: true } })
+  return db.notification.create({
+    data: {
+      storeId: session.storeId,
+      tableSessionId: sessionId,
+      type: input.type ?? "CALL_STAFF",
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+      ...(input.status === undefined ? {} : { status: input.status }),
     },
   })
 }

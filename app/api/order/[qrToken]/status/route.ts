@@ -11,7 +11,7 @@ export async function GET(_request: Request, context: RouteContext<"/api/order/[
     return NextResponse.json({ ok: false, reason: session.reason }, { status: 404 })
   }
 
-  const view = await getCustomerOrderView(session.sessionId)
+  const view = await getCustomerOrderView(session.storeId, session.sessionId)
   if (!view) {
     return NextResponse.json({ ok: false, reason: "NO_SESSION" }, { status: 404 })
   }

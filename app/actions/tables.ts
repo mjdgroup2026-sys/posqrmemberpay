@@ -1,8 +1,9 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
-import { requireUser } from "@/lib/session"
+import { forStore, type StoreTx } from "@/lib/db"
+import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { findStoreByQrToken } from "@/lib/store-resolve"
 import {
   openTableSchema,
   mergeTablesSchema,
@@ -18,7 +19,6 @@ import {
 import type { TableSessionStatus } from "@/generated/prisma/client"
 import type { ActionResult, FieldErrors } from "@/lib/types"
 
-const AUTH_ERROR = "กรุณาเข้าสู่ระบบก่อนทำรายการ"
 
 /// สถานะ session ที่ยังถือว่า "โต๊ะเปิดอยู่"
 const LIVE_SESSION_STATUS: TableSessionStatus[] = ["OPEN", "AWAITING_BILL"]
@@ -60,16 +60,24 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
 
   const { tableId, qrToken } = parsed.data
 
-  if (!qrToken) {
+  // ร้านมาจากคนละที่ตามทางเข้า (Phase 13): ลูกค้า → qrToken ชี้ร้าน · พนักงาน → ร้านที่ทำงานอยู่
+  let storeId: string
+  if (qrToken) {
+    const store = await findStoreByQrToken(qrToken)
+    if (!store) return { ok: false, error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" }
+    if (store.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว" }
+    storeId = store.storeId
+  } else {
     try {
-      await requireUser()
-    } catch {
-      return { ok: false, error: AUTH_ERROR }
+      storeId = (await requireStore()).storeId
+    } catch (error) {
+      return { ok: false, error: storeErrorMessage(error) }
     }
   }
+  const db = forStore(storeId)
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       let qrCodeId: string | undefined
       let targetTableId = tableId
 
@@ -134,7 +142,7 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
       }
 
       const session = await tx.tableSession.create({
-        data: { tableId: effectiveTableId, qrCodeId },
+        data: { storeId, tableId: effectiveTableId, qrCodeId },
         select: { id: true },
       })
 
@@ -155,11 +163,14 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
 
 /// รวมโต๊ะ — โต๊ะรองต้องว่างเท่านั้น และบิลทั้งหมดหลังจากนี้วิ่งเข้า session ของโต๊ะหลัก
 export async function mergeTables(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = mergeTablesSchema.safeParse({
     primaryTableId: formData.get("primaryTableId") ?? "",
@@ -176,7 +187,7 @@ export async function mergeTables(formData: FormData): Promise<ActionResult> {
   const { primaryTableId, secondaryTableId } = parsed.data
 
   try {
-    const codes = await prisma.$transaction(async (tx) => {
+    const codes = await db.$transaction(async (tx) => {
       const primary = await tx.table.findUnique({
         where: { id: primaryTableId },
         select: { id: true, code: true, primaryTableId: true },
@@ -222,11 +233,14 @@ export async function mergeTables(formData: FormData): Promise<ActionResult> {
 
 /// ยกเลิกการรวมโต๊ะ — ทำได้เฉพาะตอน session ของโต๊ะหลักยังไม่ปิดบิล
 export async function unmergeTables(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = unmergeTableSchema.safeParse({
     secondaryTableId: formData.get("secondaryTableId") ?? "",
@@ -240,7 +254,7 @@ export async function unmergeTables(formData: FormData): Promise<ActionResult> {
   }
 
   try {
-    const code = await prisma.$transaction(async (tx) => {
+    const code = await db.$transaction(async (tx) => {
       const secondary = await tx.table.findUnique({
         where: { id: parsed.data.secondaryTableId },
         select: { id: true, code: true, status: true, primaryTableId: true },
@@ -272,12 +286,15 @@ export async function unmergeTables(formData: FormData): Promise<ActionResult> {
 /// ยกเลิกโต๊ะทั้งชุด — คนละกลไกกับ void บิล (F6) เพราะยังไม่มีการจ่ายเงิน จึง **ไม่สร้าง Sale**
 /// รายการอาหารที่ยังไม่เสิร์ฟถูกยกเลิกตามทั้งหมด และโต๊ะที่รวมอยู่กลับเป็นว่างพร้อมกันในทรานแซคชันเดียว
 export async function cancelTableSession(formData: FormData): Promise<ActionResult> {
-  let user
+  let ctx: StoreContext
   try {
-    user = await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const user = ctx.user
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = cancelSessionSchema.safeParse({
     sessionId: formData.get("sessionId") ?? "",
@@ -294,7 +311,7 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
   const { sessionId, reason } = parsed.data
 
   try {
-    const tableCode = await prisma.$transaction(async (tx) => {
+    const tableCode = await db.$transaction(async (tx) => {
       const session = await tx.tableSession.findUnique({
         where: { id: sessionId },
         select: { id: true, status: true, tableId: true, table: { select: { code: true } } },
@@ -357,7 +374,7 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
 
 /// โต๊ะที่ "ยุ่งอยู่" — ห้ามแก้รหัสหรือลบ เพราะรหัสถูกใช้อ้างบนทิกเก็ตครัวและใบเสร็จที่ออกไปแล้ว
 async function assertTableIdle(
-  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  tx: StoreTx,
   tableId: string,
 ) {
   const table = await tx.table.findUnique({
@@ -380,11 +397,14 @@ async function assertTableIdle(
 }
 
 export async function createTable(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = createTableSchema.safeParse({ code: formData.get("code") })
   if (!parsed.success) {
@@ -392,7 +412,7 @@ export async function createTable(formData: FormData): Promise<ActionResult> {
   }
 
   try {
-    await prisma.table.create({ data: { code: parsed.data.code } })
+    await db.table.create({ data: { storeId, code: parsed.data.code } })
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
       return { ok: false, error: `มีโต๊ะรหัส ${parsed.data.code} อยู่แล้ว`, fieldErrors: { code: "รหัสนี้ซ้ำ" } }
@@ -409,11 +429,14 @@ export async function createTable(formData: FormData): Promise<ActionResult> {
 /// สร้างโต๊ะเป็นชุด — รหัสที่ซ้ำกับของเดิมถูกข้ามไป ไม่ล้มทั้งชุด
 /// (ร้านมักกดซ้ำเพื่อเติมโต๊ะที่ขาด การล้มทั้งชุดเพราะซ้ำ 1 ตัวคือพฤติกรรมที่น่ารำคาญ)
 export async function createTablesBulk(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = bulkTableSchema.safeParse({
     prefix: formData.get("prefix") ?? "",
@@ -429,7 +452,7 @@ export async function createTablesBulk(formData: FormData): Promise<ActionResult
   const width = String(to).length
   const codes = Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(width, "0")}`)
 
-  const existing = await prisma.table.findMany({ where: { code: { in: codes } }, select: { code: true } })
+  const existing = await db.table.findMany({ where: { code: { in: codes } }, select: { code: true } })
   const taken = new Set(existing.map((t) => t.code))
   const fresh = codes.filter((code) => !taken.has(code))
 
@@ -438,7 +461,7 @@ export async function createTablesBulk(formData: FormData): Promise<ActionResult
   }
 
   try {
-    await prisma.table.createMany({ data: fresh.map((code) => ({ code })), skipDuplicates: true })
+    await db.table.createMany({ data: fresh.map((code) => ({ storeId, code })), skipDuplicates: true })
   } catch {
     return { ok: false, error: "เพิ่มโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
@@ -456,11 +479,14 @@ export async function createTablesBulk(formData: FormData): Promise<ActionResult
 }
 
 export async function renameTable(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = renameTableSchema.safeParse({ id: formData.get("id"), code: formData.get("code") })
   if (!parsed.success) {
@@ -468,7 +494,7 @@ export async function renameTable(formData: FormData): Promise<ActionResult> {
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       await assertTableIdle(tx, parsed.data.id)
       await tx.table.update({ where: { id: parsed.data.id }, data: { code: parsed.data.code } })
     })
@@ -487,17 +513,20 @@ export async function renameTable(formData: FormData): Promise<ActionResult> {
 }
 
 export async function deleteTable(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
   try {
-    await requireUser()
-  } catch {
-    return { ok: false, error: AUTH_ERROR }
+    ctx = await requireStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
   }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const table = await assertTableIdle(tx, parsed.data.id)
 
       // ★ มีประวัติการเปิดโต๊ะแล้วลบไม่ได้ — TableSession ผูกกับบิลที่ออกไปแล้ว

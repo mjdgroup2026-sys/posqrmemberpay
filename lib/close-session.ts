@@ -1,5 +1,6 @@
 import "server-only"
-import { prisma } from "@/lib/prisma"
+import { forStore, type StoreTx } from "@/lib/db"
+import { nextSaleNumber } from "@/lib/sale-number"
 import { toNumber } from "@/lib/format"
 import type { PaymentMethodValue } from "@/lib/types"
 
@@ -16,6 +17,8 @@ import type { PaymentMethodValue } from "@/lib/types"
 export const SYSTEM_USER_ID = "system"
 
 export type ClosePaymentInput = {
+  /// ร้านเจ้าของโต๊ะ (Phase 13) — ผู้เรียกต้องรู้แล้วว่าเป็นร้านไหน (พนักงาน: requireStore · webhook: ref1)
+  storeId: string
   sessionId: string
   paymentMethod: Extract<PaymentMethodValue, "PROMPTPAY" | "CARD" | "CASH" | "TRANSFER">
   /// พนักงานที่กดยืนยัน — เว้นว่างเมื่อมาจาก webhook (จะใช้ผู้ใช้ระบบแทน)
@@ -59,10 +62,9 @@ class CloseAbort extends Error {
   }
 }
 
-type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
-
 /// ผู้ใช้ระบบสำหรับบิลที่ปิดเองอัตโนมัติจาก webhook — Sale.cashierId เป็น FK ที่ห้ามว่าง
-async function ensureSystemUser(tx: TxClient): Promise<string> {
+/// (ตาราง user ไม่มี storeId — ผู้ใช้ระบบเป็นคนเดียวกันทุกร้าน)
+async function ensureSystemUser(tx: StoreTx): Promise<string> {
   const existing = await tx.user.findUnique({ where: { id: SYSTEM_USER_ID }, select: { id: true } })
   if (existing) return existing.id
 
@@ -78,23 +80,10 @@ async function ensureSystemUser(tx: TxClient): Promise<string> {
   return created.id
 }
 
-/// เลขบิลถัดไป — ใช้ advisory lock ตัวเดียวกับ POS หน้าร้าน เพื่อไม่ให้เลขชนกันข้ามช่องทาง
-const SALE_NUMBER_LOCK = 720_001
-
-async function nextSaleNumber(tx: TxClient): Promise<string> {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(${SALE_NUMBER_LOCK}::bigint)::text AS locked`
-  const rows = await tx.$queryRaw<{ max: number | null }[]>`
-    SELECT MAX(CAST(SUBSTRING("saleNumber" FROM '^INV-([0-9]+)$') AS INTEGER)) AS max
-    FROM "sale"
-    WHERE "saleNumber" ~ '^INV-[0-9]+$'
-  `
-  const max = rows[0]?.max ?? 0
-  return `INV-${String(max + 1).padStart(6, "0")}`
-}
-
 export async function closeSessionWithPayment(input: ClosePaymentInput): Promise<ClosePaymentResult> {
+  const db = forStore(input.storeId)
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       // ★ กัน webhook ยิงซ้ำ — ตรวจก่อนทำอะไรทั้งหมด แล้วคืนบิลเดิมไปเลย
       if (input.paymentReference) {
         const existing = await tx.sale.findUnique({
@@ -142,7 +131,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
       if (lines.length === 0) throw new CloseAbort("โต๊ะนี้ยังไม่มีรายการที่ต้องชำระ")
 
       const settings = await tx.storeSettings.findUnique({
-        where: { id: "default" },
+        where: { storeId: input.storeId },
         select: { serviceChargePercent: true },
       })
       const servicePercent = toNumber(settings?.serviceChargePercent ?? 0)
@@ -168,10 +157,11 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
       }
 
       const cashierId = input.cashierId ?? (await ensureSystemUser(tx))
-      const saleNumber = await nextSaleNumber(tx)
+      const saleNumber = await nextSaleNumber(tx, input.storeId)
 
       const sale = await tx.sale.create({
         data: {
+          storeId: input.storeId,
           saleNumber,
           channel: "MOBILE_ORDER",
           tableSessionId: session.id,
@@ -227,7 +217,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
     //   ทั้งสองแบบคือ "จ่ายเงินก้อนเดียวกัน" จึงต้องตอบว่าสำเร็จ ไม่ใช่ล้มเหลว มิฉะนั้นธนาคาร retry ไม่รู้จบ
     //   เช็คด้วย reference เท่านั้น — ถ้าคนละ reference แปลว่าเก็บเงินสองก้อนจริง ต้องปล่อยให้ fail ให้เห็น
     if (input.paymentReference) {
-      const existing = await prisma.sale.findUnique({
+      const existing = await db.sale.findUnique({
         where: { paymentReference: input.paymentReference },
         select: { id: true, saleNumber: true, total: true },
       })

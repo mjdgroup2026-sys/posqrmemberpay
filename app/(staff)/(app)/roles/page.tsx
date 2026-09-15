@@ -14,10 +14,10 @@ export const metadata = { title: "บทบาทและสิทธิ์" }
 /// หน้า /roles ใช้สิทธิ์ USERS เดียวกับหน้าผู้ใช้งาน — ไม่มี resource แยกตาม §4
 /// ดูได้ด้วย USERS:VIEW · แก้ไขได้ต้องมี USERS:EDIT
 export default async function RolesPage() {
-  await requirePageAccess("USERS")
+  const { storeId } = await requirePageAccess("USERS")
   const canEdit = await hasPermission("USERS", "EDIT")
 
-  const roles = await listRoles()
+  const roles = await listRoles(storeId)
 
   return (
     <RoleManager

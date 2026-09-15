@@ -9,16 +9,16 @@ export const metadata = { title: "ปิดยอดประจำวัน" }
 
 export default async function ClosingPage() {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  await requirePageAccess("POS_CLOSING")
+  const { storeId } = await requirePageAccess("POS_CLOSING")
 
   const session = await getSession()
   if (!session?.user) redirect("/login")
 
   const cashierId = session.user.id
   const [summary, today, history] = await Promise.all([
-    getTodaySalesSummary(cashierId),
-    getTodayClosing(cashierId),
-    listClosings({ cashierId, limit: 30 }),
+    getTodaySalesSummary(storeId, cashierId),
+    getTodayClosing(storeId, cashierId),
+    listClosings(storeId, { cashierId, limit: 30 }),
   ])
 
   return (

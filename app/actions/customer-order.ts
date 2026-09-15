@@ -1,7 +1,8 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { prisma } from "@/lib/prisma"
+import { forStore, type StoreTx } from "@/lib/db"
+import { findStoreByQrToken } from "@/lib/store-resolve"
 import { toNumber } from "@/lib/format"
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
 import {
@@ -24,9 +25,15 @@ class CustomerAbort extends Error {
   }
 }
 
-type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
+/// ร้านของลูกค้าคนนี้ = ร้านเจ้าของ qrToken (Phase 13) — ฝั่งลูกค้าไม่มี session/cookie มีแค่ token ใน URL
+async function resolveCustomerStore(qrToken: string): Promise<string> {
+  const store = await findStoreByQrToken(qrToken)
+  if (!store) throw new CustomerAbort({ error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" })
+  if (store.status === "SUSPENDED") throw new CustomerAbort({ error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" })
+  return store.storeId
+}
 
-async function requireLiveSession(tx: TxClient, qrToken: string) {
+async function requireLiveSession(tx: StoreTx, qrToken: string) {
   const qr = await tx.qRCode.findUnique({
     where: { token: qrToken },
     select: { id: true, status: true, tableId: true, table: { select: { primaryTableId: true } } },
@@ -72,7 +79,9 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
   const { qrToken, items } = parsed.data
 
   try {
-    const created = await prisma.$transaction(async (tx) => {
+    const storeId = await resolveCustomerStore(qrToken)
+    const db = forStore(storeId)
+    const created = await db.$transaction(async (tx) => {
       const session = await requireLiveSession(tx, qrToken)
       if (session.status === "AWAITING_BILL") {
         throw new CustomerAbort({ error: "โต๊ะนี้ขอเช็กบิลแล้ว สั่งอาหารเพิ่มไม่ได้ กรุณาแจ้งพนักงาน" })
@@ -140,6 +149,7 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
 
       const order = await tx.mobileOrder.create({
         data: {
+          storeId,
           tableSessionId: session.id,
           orderNumber,
           items: {
@@ -164,7 +174,7 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
     // พิมพ์ทิกเก็ตหลัง commit — พิมพ์ไม่ผ่านต้องไม่ทำให้ออร์เดอร์ของลูกค้าหาย
     let printed = false
     if (isPrinterConfigured()) {
-      const table = await prisma.table.findUnique({
+      const table = await db.table.findUnique({
         where: { id: created.tableId },
         select: { code: true },
       })
@@ -180,7 +190,7 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
         })),
       })
       if (printed) {
-        await prisma.mobileOrder.update({
+        await db.mobileOrder.update({
           where: { id: created.order.id },
           data: { printedAt: new Date() },
         })
@@ -214,7 +224,8 @@ export async function callStaff(formData: FormData): Promise<ActionResult> {
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
+    const storeId = await resolveCustomerStore(parsed.data.qrToken)
+    await forStore(storeId).$transaction(async (tx) => {
       const session = await requireLiveSession(tx, parsed.data.qrToken)
 
       // กันกดรัว ๆ — ถ้ายังมีใบที่พนักงานไม่ได้กดรับทราบ ไม่ต้องสร้างใบใหม่ซ้ำ
@@ -231,7 +242,7 @@ export async function callStaff(formData: FormData): Promise<ActionResult> {
       }
 
       await tx.notification.create({
-        data: { tableSessionId: session.id, type: "CALL_STAFF", reason: parsed.data.reason ?? null },
+        data: { storeId, tableSessionId: session.id, type: "CALL_STAFF", reason: parsed.data.reason ?? null },
       })
     })
 
@@ -249,7 +260,8 @@ export async function requestBill(formData: FormData): Promise<ActionResult<{ to
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   try {
-    const total = await prisma.$transaction(async (tx) => {
+    const storeId = await resolveCustomerStore(parsed.data.qrToken)
+    const total = await forStore(storeId).$transaction(async (tx) => {
       const session = await requireLiveSession(tx, parsed.data.qrToken)
 
       const items = await tx.mobileOrderItem.findMany({
@@ -269,7 +281,7 @@ export async function requestBill(formData: FormData): Promise<ActionResult<{ to
         select: { id: true },
       })
       if (!pending) {
-        await tx.notification.create({ data: { tableSessionId: session.id, type: "CHECK_BILL" } })
+        await tx.notification.create({ data: { storeId, tableSessionId: session.id, type: "CHECK_BILL" } })
       }
 
       return Math.round((sum + Number.EPSILON) * 100) / 100

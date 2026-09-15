@@ -18,8 +18,8 @@ export default async function CustomerStatusPage({ params }: PageProps<"/order/[
   }
 
   const [view, settings] = await Promise.all([
-    getCustomerOrderView(session.sessionId),
-    getStoreSettings(),
+    getCustomerOrderView(session.storeId, session.sessionId),
+    getStoreSettings(session.storeId),
   ])
 
   if (!view) {

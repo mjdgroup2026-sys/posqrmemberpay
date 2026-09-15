@@ -1369,7 +1369,22 @@ enum ResourceKey {
 > ระหว่าง `COOKING`/`READY` จะกำพร้า (ไม่มีใครกด "เสิร์ฟอาหารแล้ว" เพราะ UI ไม่มีปุ่มนี้อีก) — ต้อง validate
 > ที่ server action `updateStoreSettings` ปฏิเสธการสลับถ้ามี session เปิดอยู่อย่างน้อย 1 โต๊ะ
 
-### ⏭️ Phase 13 — Multi-tenant: หลายร้านในระบบเดียว (`Store` + `storeId`)
+### ✅ Phase 13 — Multi-tenant: หลายร้านในระบบเดียว (`Store` + `storeId`)
+> ✅ **โค้ดและเทสเสร็จแล้ว (2026-09-15)** — `pnpm test` 29 ไฟล์ / 347 เทสเขียวทั้งหมด · `prisma migrate diff` สะอาด ·
+> `pnpm lint` มีกฎ `no-restricted-imports` กัน `@/lib/prisma` ใน `app/actions/**` + `lib/queries.ts` แล้ว
+> (ยกเว้น 2 จุดที่จงใจ: `profile.ts` ข้อมูลของตัวผู้ใช้ · `switchActiveStore()` ค้นข้ามร้านก่อนสลับ) ·
+> **ที่ยังค้าง**: ข้อสุดท้าย "production migrate + smoke test" — ต้อง `pg_dump` และซ้อมบนสำเนาก่อน merge ตามกติกา
+>
+> 📝 **สิ่งที่ทำต่างจากร่าง (ตัดสินใจระหว่างทำ)**:
+> - ไม่มีหน้า `/select-store` — ผู้ใช้ที่อยู่หลายร้านตกไปใช้ร้านแรกโดยอัตโนมัติแล้วสลับผ่านตัวสลับร้านใน topbar ·
+>   cookie ที่ชี้ร้านที่ไม่ได้เป็นสมาชิก **ไม่โยน error** แต่ตกไปร้านแรกของตัวเอง (ไม่มีทางได้ร้านนั้น — มีเทสล็อกไว้ที่
+>   `__tests__/integration/store-guard.test.ts`) เพราะโยน error จะทำให้ผู้ใช้ที่ถูกถอดจากร้านค้างหน้าเปล่า
+> - `Role`/`RolePermission` (§4) ถูกย้ายให้เป็นของร้านไปพร้อมกัน (`Role.storeId`, `StoreMember.roleId` แทน `User.roleId`)
+>   เพราะแยกไม่ได้ — บทบาทที่ตั้งในร้าน A ต้องไม่ติดตัวไปร้าน B · OWNER ได้ทุก resource โดยไม่ต้องมี Role
+> - เทส isolation จับบั๊กจริงได้ 2 จุดตอนเขียน: `createProduct`/`updateProduct` รับ `categoryId` ของร้านอื่นได้ (FK ไม่รู้ร้าน)
+>   และ `markTicketPrinted` ตอบ ok:true กับออร์เดอร์ของร้านอื่น — แก้แล้วทั้งคู่
+> - `nextSaleNumber()` ย้ายไป `lib/sale-number.ts` ใช้ร่วมกันทั้ง POS และ Mobile Order · lock key = `(namespace, hashtext(storeId))`
+>
 > 🧭 **ทิศทางใหม่ (ตัดสินใจ 2026-09-14)**: เปลี่ยนระบบจากร้านเดียวเป็น **แพลตฟอร์มให้ร้านค้าหลายรายสมัครเข้ามา
 > ใช้เอง** และรับเงินเข้าบัญชีของตัวเอง · แผนแบ่งเป็น 4 เฟส — **13 แยกข้อมูลตามร้าน (เฟสนี้)** → 14 สมัคร/
 > สร้างร้าน/เชิญพนักงาน → 15 ตั้งค่ารับเงินต่อร้าน 3 ระดับ (ก / ก+ / ข) → 16 ระบบสิทธิ์เต็มรูปแบบ (ถ้าต้องการ)
@@ -1396,17 +1411,17 @@ enum ResourceKey {
 - ผู้ดูแลแพลตฟอร์ม (เรา) = `User.isPlatformAdmin` — เป็นคนละแกนกับ `StoreMember.role` และไม่ผูกกับร้านใด
 
 **Schema**
-- [ ] `Store` — `id`, `slug` (unique, ใช้ใน URL/รายงาน), `name`, `status` enum `StoreStatus {ACTIVE, SUSPENDED}`,
+- [x] `Store` — `id`, `slug` (unique, ใช้ใน URL/รายงาน), `name`, `status` enum `StoreStatus {ACTIVE, SUSPENDED}`,
       `createdAt`, `updatedAt`
-- [ ] `StoreMember` — `userId` FK, `storeId` FK, `role` enum `StoreRole {OWNER, STAFF}`, `createdAt` ·
+- [x] `StoreMember` — `userId` FK, `storeId` FK, `role` enum `StoreRole {OWNER, STAFF}`, `createdAt` ·
       `@@unique([userId, storeId])` · **ต้องมี OWNER อย่างน้อย 1 คนต่อร้านเสมอ** (บังคับที่ action ไม่ใช่ DB)
-- [ ] `User.isPlatformAdmin Boolean @default(false)` ผ่าน `additionalFields` ของ Better Auth
-- [ ] เพิ่ม `storeId` (FK → Store, NOT NULL, index) ให้ **entity ราก** ที่ถูก query ตามร้านโดยตรง:
+- [x] `User.isPlatformAdmin Boolean @default(false)` ผ่าน `additionalFields` ของ Better Auth
+- [x] เพิ่ม `storeId` (FK → Store, NOT NULL, index) ให้ **entity ราก** ที่ถูก query ตามร้านโดยตรง:
       `Product`, `Category`, `StockTransaction`, `Sale`, `CashierClosing`, `Table`, `TableSession`, `MenuItem`,
       `ModifierGroup`, `MobileOrder`, `QRCode`, `Notification`, `StoreSettings`, `Member`, `PaymentIntent`
       · entity ลูกไม่ต้องมี (`SaleItem`, `MobileOrderItem`, `ModifierOption`, `MemberPointTransaction`,
       `LineNotificationLog`) — เข้าถึงผ่านพ่อแม่ที่มี `storeId` เสมอ
-- [ ] **แก้ unique ให้เป็นต่อร้าน** (จุดที่พลาดแล้วร้าน B สร้างข้อมูลไม่ได้เพราะชนกับร้าน A):
+- [x] **แก้ unique ให้เป็นต่อร้าน** (จุดที่พลาดแล้วร้าน B สร้างข้อมูลไม่ได้เพราะชนกับร้าน A):
 
       | เดิม | ใหม่ |
       |---|---|
@@ -1418,66 +1433,67 @@ enum ResourceKey {
       | `CashierClosing @@unique([cashierId, closingDate])` | `@@unique([storeId, cashierId, closingDate])` |
       | `QRCode.token`, `PaymentIntent.ref1`, `Sale.paymentReference`, `PaymentIntent.transactionId` | **คง global unique** — เป็นตัวที่เดินทางออกนอกระบบ (URL / ธนาคาร) ต้องหาร้านกลับได้จากค่าเดียว |
 
-- [ ] **Migration เขียน SQL เอง** ตามกับดัก `@@map` ใน `CLAUDE.md` ห้ามให้ Prisma generate: (1) สร้าง `store`
+- [x] **Migration เขียน SQL เอง** ตามกับดัก `@@map` ใน `CLAUDE.md` ห้ามให้ Prisma generate: (1) สร้าง `store`
       แถวแรกจาก `store_settings.store_name` เดิม (`slug = 'default'`) (2) เพิ่มคอลัมน์ `store_id` แบบ nullable →
       backfill ทุกตารางด้วย id นั้น → `SET NOT NULL` (3) drop unique เดิม + สร้าง unique ใหม่ตามตาราง
       ข้างบน (4) สร้าง `store_member` ให้ผู้ใช้ทุกคนที่มีอยู่เป็น `OWNER` ของร้านแรก (5) ปิดท้ายด้วย
       `prisma migrate diff --exit-code` ต้อง `No difference detected.`
 
 **Guard และการเข้าถึงข้อมูล**
-- [ ] `requireStore()` ใน `lib/session.ts` คืน `{ user, storeId, role }` — ตรวจ session → อ่าน `activeStoreId` →
+- [x] `requireStore()` ใน `lib/session.ts` คืน `{ user, storeId, role }` — ตรวจ session → อ่าน `activeStoreId` →
       ยืนยันว่ามี `StoreMember` แถวนั้นและ `Store.status = ACTIVE` → ไม่ผ่านโยน `UNAUTHENTICATED`/`NO_STORE`
       · **ทุก Server Action ที่แตะข้อมูลร้านเปลี่ยนจาก `requireUser()` เป็น `requireStore()`** (ปัจจุบัน 15 ไฟล์)
       · `requireUser()` เหลือใช้เฉพาะหน้าที่เป็นของ "ตัวผู้ใช้" ไม่ใช่ของร้าน (`/settings` โปรไฟล์/เปลี่ยนรหัสผ่าน)
-- [ ] `requireOwner()` = `requireStore()` + `role === OWNER` — ใช้กับ: ตั้งค่าร้าน (`updateStoreSettings`),
+- [x] `requireOwner()` = `requireStore()` + `role === OWNER` — ใช้กับ: ตั้งค่าร้าน (`updateStoreSettings`),
       จัดการพนักงาน, และทุกอย่างในเฟส 15 ที่แตะบัญชีรับเงิน
-- [ ] `requirePlatformAdmin()` — ไว้ให้เฟส 14 (`/admin/*`) · เฟสนี้แค่มี helper + เทส
-- [ ] **ชั้นกันลืม `where: { storeId }`** — Prisma Client Extension `forStore(storeId)` ใน `lib/db.ts` ที่ inject
+- [x] `requirePlatformAdmin()` — ไว้ให้เฟส 14 (`/admin/*`) · เฟสนี้แค่มี helper + เทส
+- [x] **ชั้นกันลืม `where: { storeId }`** — Prisma Client Extension `forStore(storeId)` ใน `lib/db.ts` ที่ inject
       `storeId` เข้า `where` ของทุก `find*/update*/delete*/count/aggregate` และเข้า `data` ของ `create*` ให้กับ
       model ที่มีคอลัมน์นี้ · `lib/queries.ts` และ action ทั้งหมดต้องเรียกผ่าน `db.forStore(storeId)` ไม่ใช่
       `prisma` ตรง ๆ · ชื่อ `prisma` ที่ import ตรงให้เหลือเฉพาะ: auth, health, webhook (ก่อนรู้ร้าน), และ
       สคริปต์ · เพิ่ม ESLint rule `no-restricted-imports` กัน `@/lib/prisma` ใน `app/actions/**` และ
       `lib/queries.ts`
-- [ ] **raw SQL 12 จุดต้องเติม `WHERE store_id = ${storeId}` ด้วยมือ** (extension ช่วยไม่ได้): `lib/queries.ts`
+- [x] **raw SQL 12 จุดต้องเติม `WHERE store_id = ${storeId}` ด้วยมือ** (extension ช่วยไม่ได้): `lib/queries.ts`
       (8 จุด), `lib/close-session.ts` (2), `app/actions/products.ts` `nextSku()` (1), `app/actions/sales.ts`
       `nextSaleNumber()` (1) — ไล่ด้วย `grep -rn '\$queryRaw\|\$executeRaw'` ตอนปิดเฟส
-- [ ] **advisory lock ต้องเป็นต่อร้าน**: `SALE_NUMBER_LOCK` ตอนนี้เป็น key เดียวทั้งระบบ → ทุกร้านต่อคิวออกเลขบิล
+- [x] **advisory lock ต้องเป็นต่อร้าน**: `SALE_NUMBER_LOCK` ตอนนี้เป็น key เดียวทั้งระบบ → ทุกร้านต่อคิวออกเลขบิล
       ร่วมกัน · เปลี่ยนเป็น `pg_advisory_xact_lock(hashtext(${storeId}))` ทั้งใน `lib/close-session.ts` และ
       `app/actions/sales.ts` (ใช้ helper เดียวกัน) · `nextSku()` ก็ต้องกรองร้าน
-- [ ] ฝั่งลูกค้า `/order/[qrToken]/*` และ `/api/order/[qrToken]/*`: หา `storeId` จาก `QRCode` ครั้งเดียวต้นทาง แล้ว
+- [x] ฝั่งลูกค้า `/order/[qrToken]/*` และ `/api/order/[qrToken]/*`: หา `storeId` จาก `QRCode` ครั้งเดียวต้นทาง แล้ว
       ส่งต่อ — `(customer)/layout.tsx` อ่าน `StoreSettings` ของร้านนั้น (สี/ชื่อ/โลโก้/ค่าบริการ/`crmEnabled`)
-- [ ] Webhook SCB `/api/payments/webhook/scb/[secret]`: หาร้านจาก `PaymentIntent.ref1` แล้วปิดบิลใต้ร้านนั้น ·
+- [x] Webhook SCB `/api/payments/webhook/scb/[secret]`: หาร้านจาก `PaymentIntent.ref1` แล้วปิดบิลใต้ร้านนั้น ·
       credential ของ SCB **ยังอยู่ใน env ชุดเดียวในเฟสนี้** (ทุกร้านที่เปิด SCB ใช้ Biller ID เดียวกัน = ยังเป็น
       ร้านของเราเท่านั้น) — แยกต่อร้านในเฟส 15
-- [ ] `proxy.ts`: ผู้ใช้ที่ล็อกอินแล้วแต่ไม่มี `StoreMember` เลย → ส่งไป `/no-store` (หน้าบอกว่ายังไม่ได้อยู่ในร้านใด
+- [x] `proxy.ts`: ผู้ใช้ที่ล็อกอินแล้วแต่ไม่มี `StoreMember` เลย → ส่งไป `/no-store` (หน้าบอกว่ายังไม่ได้อยู่ในร้านใด
       รอเชิญ) · หน้าเลือกร้าน `/select-store` เมื่ออยู่หลายร้านและยังไม่ได้เลือก · เฟส 14 จะเปลี่ยน `/no-store`
       เป็น onboarding สร้างร้าน
-- [ ] `StoreSettings` เลิกอ้าง `id: "default"` ทุกจุด (ปัจจุบัน ~10 จุดในโค้ด/เทส) → อ่านด้วย `storeId` เสมอ
+- [x] `StoreSettings` เลิกอ้าง `id: "default"` ทุกจุด (ปัจจุบัน ~10 จุดในโค้ด/เทส) → อ่านด้วย `storeId` เสมอ
 
 **UI ฝั่งพนักงาน**
-- [ ] Topbar: ชื่อร้านที่ทำงานอยู่ + ตัวสลับร้าน (โผล่เฉพาะเมื่ออยู่ >1 ร้าน) · สลับ = ตั้ง cookie ใหม่ +
+- [x] Topbar: ชื่อร้านที่ทำงานอยู่ + ตัวสลับร้าน (โผล่เฉพาะเมื่ออยู่ >1 ร้าน) · สลับ = ตั้ง cookie ใหม่ +
       `router.refresh()`
-- [ ] `/users` → กลายเป็น "พนักงานในร้าน" (รายการ `StoreMember` ของร้านที่ทำงานอยู่) · คอลัมน์บทบาทแสดง
+- [x] `/users` → กลายเป็น "พนักงานในร้าน" (รายการ `StoreMember` ของร้านที่ทำงานอยู่) · คอลัมน์บทบาทแสดง
       `OWNER`/`STAFF` แทน "ยังไม่กำหนดสิทธิ์" · OWNER เปลี่ยนบทบาท/ถอดพนักงานได้ · ถอด OWNER คนสุดท้ายไม่ได้
-- [ ] ปุ่ม/เมนูที่ต้องเป็น OWNER (ตั้งค่าร้าน, พนักงาน) ซ่อนจาก STAFF — แต่ **action ถูกกันที่ `requireOwner()`
+- [x] ปุ่ม/เมนูที่ต้องเป็น OWNER (ตั้งค่าร้าน, พนักงาน) ซ่อนจาก STAFF — แต่ **action ถูกกันที่ `requireOwner()`
       อยู่แล้ว** UI แค่ไม่ให้งง
-- [ ] Seed/สคริปต์: `pnpm db:seed` สร้างร้านตัวอย่าง 2 ร้านเพื่อให้เทสข้ามร้านมีข้อมูลจริง ·
+- [x] Seed/สคริปต์: `pnpm db:seed` สร้างร้านตัวอย่าง 2 ร้านเพื่อให้เทสข้ามร้านมีข้อมูลจริง ·
       `pnpm db:create-user` รับ `--store <slug>` และ `--role OWNER|STAFF` (ค่าเริ่มต้น: ร้านแรก, OWNER)
 
 **การทดสอบ (กติกาโปรเจกต์: แตะเงิน/สต็อกต้องมีเทส — เฟสนี้แตะทุกอย่าง)**
-- [ ] `__tests__/integration/tenant-isolation.test.ts` — สร้างร้าน A/B พร้อมข้อมูลครบทุก entity แล้วยืนยันว่า
+- [x] `__tests__/integration/tenant-isolation.test.ts` — สร้างร้าน A/B พร้อมข้อมูลครบทุก entity แล้วยืนยันว่า
       **ทุกฟังก์ชันใน `lib/queries.ts`** เรียกใต้ร้าน A ได้ 0 แถวของ B และ**ทุก Server Action** ที่รับ id
       ของ B ตอบ `ok: false` ข้อความ "ไม่พบข้อมูล" (ไม่ใช่ 500 และไม่ใช่สำเร็จ) — ใช้ตารางชื่อฟังก์ชัน +
       `it.each` เพื่อให้เพิ่ม query ใหม่แล้วเทสฟ้องถ้าลืมใส่ในตาราง
-- [ ] เลขบิลต่อร้าน: ร้าน A และ B ออก `INV-000001` ได้พร้อมกัน · ภายในร้านเดียวยิง checkout 8 บิลพร้อมกัน
+- [x] เลขบิลต่อร้าน: ร้าน A และ B ออก `INV-000001` ได้พร้อมกัน · ภายในร้านเดียวยิง checkout 8 บิลพร้อมกัน
       ยังต้องได้เลขเรียงไม่มีช่องว่าง (เทสเดิมย้ายมาใส่ `storeId`)
-- [ ] กันขายเกินสต็อกแบบ concurrent (กติกาข้อ 4) และยกเลิกรายการ vs ครัวเริ่มทำ (ข้อ 7) **ยังผ่านเหมือนเดิม**
+- [x] กันขายเกินสต็อกแบบ concurrent (กติกาข้อ 4) และยกเลิกรายการ vs ครัวเริ่มทำ (ข้อ 7) **ยังผ่านเหมือนเดิม**
       หลังใส่ `storeId` — เทสเดิม 18 ไฟล์ต้องเขียวทั้งหมด
-- [ ] `requireStore()`: cookie ชี้ร้านที่ไม่ได้เป็นสมาชิก → ปฏิเสธ · ร้าน `SUSPENDED` → ปฏิเสธ · STAFF เรียก action
+- [x] `requireStore()`: cookie ชี้ร้านที่ไม่ได้เป็นสมาชิก → ปฏิเสธ · ร้าน `SUSPENDED` → ปฏิเสธ · STAFF เรียก action
       ของ OWNER ตรง ๆ → ปฏิเสธ
-- [ ] Webhook: `ref1` ของร้าน A ปิดบิลได้เฉพาะโต๊ะของร้าน A และบิลออกใต้ `storeId` ของ A
-- [ ] ตรวจสอบปิดเฟส: `pnpm test` เขียวทั้งหมด · `prisma migrate diff --exit-code` สะอาด · `grep` raw SQL ครบ
-      12 จุด · ไม่มี `prisma.` ตรง ๆ เหลือใน `app/actions/**` และ `lib/queries.ts` · production migrate
+- [x] Webhook: `ref1` ของร้าน A ปิดบิลได้เฉพาะโต๊ะของร้าน A และบิลออกใต้ `storeId` ของ A
+- [ ] ตรวจสอบปิดเฟส: ✅ `pnpm test` เขียวทั้งหมด · ✅ `prisma migrate diff --exit-code` สะอาด · ✅ `grep` raw SQL ครบ
+      (12 จุด — อยู่ที่ `lib/queries.ts` 8, `lib/sale-number.ts` 2, `app/actions/products.ts` 1, `app/api/health` 1) ·
+      ✅ ไม่มี `prisma.` ตรง ๆ เหลือใน `app/actions/**` และ `lib/queries.ts` (ESLint บังคับ) · **⏳ ค้างเฉพาะ** production migrate
       แล้วร้าน `default` ใช้งานได้เหมือนเดิมทุกหน้า (smoke test ด้วยการล็อกอินกดจริง ไม่ใช่แค่ `/api/health`)
 
 > ⚠️ **กับดักที่คาดไว้**

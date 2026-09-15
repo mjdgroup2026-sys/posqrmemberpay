@@ -19,7 +19,7 @@ export default async function CustomerItemPage({
     )
   }
 
-  const [item, settings] = await Promise.all([getMenuItem(menuItemId), getStoreSettings()])
+  const [item, settings] = await Promise.all([getMenuItem(session.storeId, menuItemId), getStoreSettings(session.storeId)])
 
   if (!item) {
     return <CustomerNotice title="ไม่พบเมนูนี้" description="เมนูนี้อาจถูกปิดขายไปแล้ว กรุณาเลือกเมนูอื่น" />

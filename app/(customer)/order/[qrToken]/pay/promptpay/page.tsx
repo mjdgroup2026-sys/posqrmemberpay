@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import QRCode from "qrcode"
 import { getCustomerPaymentStatus, getStoreSettings } from "@/lib/queries"
+import { findStoreByQrToken } from "@/lib/store-resolve"
 import { buildPromptPayPayload } from "@/lib/promptpay"
 import { issuePaymentIntent } from "@/lib/payment-intent"
 import { createQrCode, isScbConfigured } from "@/lib/payment-provider/scb"
@@ -11,7 +12,8 @@ export const metadata = { title: "ชำระด้วยพร้อมเพ�
 
 export default async function PromptPayPage({ params }: PageProps<"/order/[qrToken]/pay/promptpay">) {
   const { qrToken } = await params
-  const [status, settings] = await Promise.all([getCustomerPaymentStatus(qrToken), getStoreSettings()])
+  const [status, store] = await Promise.all([getCustomerPaymentStatus(qrToken), findStoreByQrToken(qrToken)])
+  const settings = store ? await getStoreSettings(store.storeId) : null
 
   if (status.state === "PAID") redirect(`/order/${qrToken}/pay/success`)
   if (status.state === "UNKNOWN" || status.total <= 0) redirect(`/order/${qrToken}/pay`)
@@ -25,7 +27,7 @@ export default async function PromptPayPage({ params }: PageProps<"/order/[qrTok
   let payload: string | null = null
 
   if (isScbConfigured()) {
-    const intent = await issuePaymentIntent(status.sessionId, status.total)
+    const intent = await issuePaymentIntent(status.storeId, status.sessionId, status.total)
     const issued = await createQrCode({ amount: status.total, ref1: intent.ref1 })
     if (issued.ok) {
       payload = issued.data

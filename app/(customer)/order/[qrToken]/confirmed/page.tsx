@@ -22,7 +22,7 @@ export default async function CustomerConfirmedPage({
     )
   }
 
-  const settings = await getStoreSettings()
+  const settings = await getStoreSettings(session.storeId)
 
   return (
     <CustomerShell

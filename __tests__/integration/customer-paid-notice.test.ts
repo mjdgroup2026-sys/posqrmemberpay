@@ -12,14 +12,13 @@ import {
   resetDb,
   setStoreSettings,
   testPrisma,
+  TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "test-user", name: "ผู้ทดสอบ", email: "test@example.com" })),
-  getSession: vi.fn(async () => ({ user: { id: "test-user" } })),
-}))
+/// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
+vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).sessionMockModule())
 
 const dbReady = await isTestDbReachable()
 
@@ -78,6 +77,7 @@ describe.skipIf(!dbReady)("แจ้งพนักงานเมื่อล�
     const before = Date.now()
 
     const closed = await closeSessionWithPayment({
+      storeId: TEST_STORE_ID,
       sessionId,
       paymentMethod: "PROMPTPAY",
       paymentReference: "SCBTX-PAID-1",
@@ -86,7 +86,7 @@ describe.skipIf(!dbReady)("แจ้งพนักงานเมื่อล�
     })
     expect(closed.ok).toBe(true)
 
-    const rows = await listCustomerPaidBills()
+    const rows = await listCustomerPaidBills(TEST_STORE_ID)
     expect(rows).toHaveLength(1)
     expect(rows[0]?.tableCode).toBe(table.code)
     expect(rows[0]?.tableId).toBe(table.id)
@@ -103,6 +103,7 @@ describe.skipIf(!dbReady)("แจ้งพนักงานเมื่อล�
     const { table, sessionId } = await seedSessionWithBill()
 
     const closed = await closeSessionWithPayment({
+      storeId: TEST_STORE_ID,
       sessionId,
       paymentMethod: "CASH",
       cashierId: "test-user",
@@ -110,7 +111,7 @@ describe.skipIf(!dbReady)("แจ้งพนักงานเมื่อล�
     })
     expect(closed.ok).toBe(true)
 
-    const rows = await listCustomerPaidBills()
+    const rows = await listCustomerPaidBills(TEST_STORE_ID)
     expect(rows).toHaveLength(1)
     expect(rows[0]?.tableId).toBe(table.id)
     expect(rows[0]?.autoClosed).toBe(false)
@@ -121,6 +122,7 @@ describe.skipIf(!dbReady)("แจ้งพนักงานเมื่อล�
     const { sessionId } = await seedSessionWithBill()
 
     const closed = await closeSessionWithPayment({
+      storeId: TEST_STORE_ID,
       sessionId,
       paymentMethod: "PROMPTPAY",
       paymentReference: "SCBTX-AUTO-1",
@@ -129,7 +131,7 @@ describe.skipIf(!dbReady)("แจ้งพนักงานเมื่อล�
     })
     expect(closed.ok).toBe(true)
 
-    const rows = await listCustomerPaidBills()
+    const rows = await listCustomerPaidBills(TEST_STORE_ID)
     expect(rows[0]?.autoClosed).toBe(true)
     expect(rows[0]?.closedByName).toBeNull()
   })
@@ -138,6 +140,7 @@ describe.skipIf(!dbReady)("แจ้งพนักงานเมื่อล�
     const { sessionId } = await seedSessionWithBill()
 
     const closed = await closeSessionWithPayment({
+      storeId: TEST_STORE_ID,
       sessionId,
       paymentMethod: "PROMPTPAY",
       paymentReference: "SCBTX-PAID-2",
@@ -148,9 +151,9 @@ describe.skipIf(!dbReady)("แจ้งพนักงานเมื่อล�
     const saleId = closed.ok === true ? closed.saleId : ""
 
     await backdateSale(saleId, 29)
-    expect(await listCustomerPaidBills()).toHaveLength(1)
+    expect(await listCustomerPaidBills(TEST_STORE_ID)).toHaveLength(1)
 
     await backdateSale(saleId, 31)
-    expect(await listCustomerPaidBills()).toHaveLength(0)
+    expect(await listCustomerPaidBills(TEST_STORE_ID)).toHaveLength(0)
   })
 })
