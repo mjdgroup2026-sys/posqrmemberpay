@@ -24,12 +24,13 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 - **Role-Based Permission** — นอกขอบเขต v1 ดูหัวข้อ "สถานะการพัฒนา" ท้ายไฟล์นี้
   · **ข้อยกเว้น**: บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) อนุมัติแล้วเป็นส่วนหนึ่งของ Phase 13
 - **Phase 14–16 (onboarding / รับเงินต่อร้าน / RBAC เต็ม)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
-  · **Phase 13 (multi-tenant) merge + migrate production แล้ว 2026-09-15** (PR #1) — ต้องทำตามลำดับ 14 → 15 → 16
-  ห้ามข้าม และ migration ที่แตะข้อมูลจริงต้อง `pg_dump` + ซ้อมบนสำเนาก่อนเสมอเหมือนที่ทำกับ Phase 13
+  · **Phase 13 (multi-tenant) merge + migrate production แล้ว 2026-09-15** (PR #1) · **Phase 14 แบ่งเป็น 3 PR:
+  14a Onboarding (โค้ด+เทสเสร็จ 2026-09-15, branch `feat/phase-14a-onboarding`) → 14b Subscription → 14c Brand**
+  — ต้องทำตามลำดับ ห้ามข้าม และ migration ที่แตะข้อมูลจริงต้อง `pg_dump` + ซ้อมบนสำเนาก่อนเสมอเหมือนที่ทำกับ Phase 13
 
 ## 📧 ระบบอีเมล (ต่อ Resend แล้วใน Phase 5)
 
-ฟังก์ชันส่งอีเมลต้องอยู่ที่ **`lib/mail.ts`** ที่เดียว (`sendVerificationMail` / `sendResetPasswordMail`)
+ฟังก์ชันส่งอีเมลต้องอยู่ที่ **`lib/mail.ts`** ที่เดียว (`sendVerificationMail` / `sendResetPasswordMail` / `sendStoreInviteMail`)
 ส่งผ่าน Resend HTTP API ด้วย `fetch` — ไม่เพิ่ม dependency · `lib/auth.ts` เป็นแค่ผู้เรียก
 
 | env | ค่า |
@@ -37,6 +38,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 | `RESEND_API_KEY` | key จาก resend.com — **เว้นว่าง = dev พิมพ์ลิงก์ลง console, production throw** |
 | `MAIL_FROM` | ต้องอยู่ใต้โดเมนที่ verify ไว้: `MJD Mobile Order <no-reply@mail.jayjayservices.com>` |
 | `MAIL_REPLY_TO` | ไม่บังคับ |
+| `SIGNUP_OPEN` | `true` = ใครก็สมัครได้ (Phase 14a) · ไม่ตั้ง = allowlist `SIGNUP_ALLOWED_*` เดิม / ปิดสมัคร (fail closed) — **production ต้องตั้งเป็น `true` ตอน deploy 14a** |
 
 - **ห้ามพิมพ์ลิงก์ยืนยัน/รีเซ็ตรหัสผ่านลง log บน production** — ลิงก์คือ credential ชั่วคราว
 - อีเมลใช้ **inline style + สี hex ดิบ** โดยตั้งใจ (mail client ไม่รองรับ `var()`) เป็นข้อยกเว้นเดียวของกติกาสี
@@ -64,6 +66,9 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    extension ช่วยไม่ได้ · `findUnique` ด้วย id จากผู้ใช้ปลอดภัยเพราะ extension ยัด storeId เข้า where ให้ —
    แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId`) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
    · เพิ่ม query/action ใหม่ต้องเพิ่มในตารางของ `__tests__/integration/tenant-isolation.test.ts` ไม่งั้นเทสแดง
+   · **การค้นข้ามร้านทำได้ 2 ที่เท่านั้น** (Phase 13–14a): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
+   qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้) และ `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
+   ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว) — ที่อื่นห้าม
 6. **ข้อความที่ผู้ใช้เห็นเป็นภาษาไทยทั้งหมด** รวมถึงข้อความ validation และ error
 7. **(Phase 6+, MJD Mobile Order) เปลี่ยน `MobileOrderItem.status` ต้องเป็น conditional update**
    (`updateMany` + `where: { status: 'AWAITING_KITCHEN' }`) เหมือนกติกากันขายเกินสต็อกในข้อ 4 — ป้องกัน race
@@ -81,7 +86,8 @@ script เหล่านี้ต้องตั้งใน `package.json` ต
 | `pnpm lint` | ESLint (flat config; Next.js 16 ไม่มี `next lint` แล้ว) |
 | `npx tsc --noEmit` | typecheck (ถ้าฟ้อง `LayoutProps`/`PageProps` ไม่รู้จัก ให้รัน `npx next typegen` ก่อน) |
 | `pnpm db:seed` | seed ข้อมูลตัวอย่าง SKU-1001…SKU-1007 + บิลขายตัวอย่าง 8 บิล (ต้องมีผู้ใช้ในระบบก่อน) |
-| `pnpm db:create-user "อีเมล" "รหัสผ่าน" "ชื่อ"` | สร้างบัญชีพนักงาน (สมัครเองผ่านหน้าเว็บถูกปิดด้วย `disableSignUp`) |
+| `pnpm db:create-user "อีเมล" "รหัสผ่าน" "ชื่อ" [--store slug] [--role OWNER|STAFF]` | สร้างบัญชีพนักงานจากบรรทัดคำสั่ง (ข้ามการยืนยันอีเมล) — ปกติให้ผู้ใช้สมัครเองผ่าน `/register` เมื่อตั้ง `SIGNUP_OPEN=true` (Phase 14a) |
+| `pnpm db:set-platform-admin "อีเมล" [--off]` | ตั้ง/ถอดผู้ดูแลแพลตฟอร์ม (`User.isPlatformAdmin`) — เห็นเมนู "แพลตฟอร์ม" + `/admin/stores` · ไม่มี UI ตั้งโดยตั้งใจ |
 | `pnpm db:generate` | generate Prisma Client (ต้อง **รีสตาร์ต dev server** หลังรันเสมอ) |
 
 ## การทดสอบ
@@ -380,8 +386,14 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
 `requireStore()`/`requireOwner()` · `forStore()` extension · ตัวสลับร้านใน topbar · `/users` = พนักงานในร้าน ·
 เทส isolation ครอบทุก query/action · ร้านเดิมกลายเป็น `store_default` (slug `default`) admin เป็น OWNER
 
-**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 14–16**
-(ร่างแล้ว ยังไม่เริ่ม — ทิศทาง: ร้านสมัครเอง, เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**🔨 Phase 14a Onboarding โค้ด+เทสเสร็จ (2026-09-15, branch `feat/phase-14a-onboarding` — รอ merge)**: สมัครเองได้เมื่อ
+`SIGNUP_OPEN=true` → `/onboarding` สร้างร้าน (Store + Settings + บทบาท + OWNER + โต๊ะ/QR ตัวอย่าง 4 + เมนูตัวอย่าง 3
+ในทรานแซคชันเดียว) → เชิญพนักงานทางอีเมล (`StoreInvite` เก็บแค่ SHA-256 ของ token · ลิงก์ `/invite/[token]` public ·
+ตอบรับได้ทั้ง token และจากรายการคำเชิญค้างบน `/no-store`) → `/admin/stores` ระงับ/ปลดระงับร้าน (ผู้ดูแลแพลตฟอร์ม)
+· **ตอน deploy ต้องตั้ง `SIGNUP_OPEN=true` ใน `.env` บน VPS** ไม่งั้นยังปิดสมัครเหมือนเดิม
+
+**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 14b Subscription / 14c Brand** (ร่างใน spec แล้ว — ทิศทาง: เก็บค่าใช้งานเป็นวัน
+ตาม tier โต๊ะ, หลายสาขาใต้ Brand) · **Phase 15–16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**

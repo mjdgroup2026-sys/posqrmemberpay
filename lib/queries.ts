@@ -1,6 +1,8 @@
 import "server-only"
 import { forStore } from "@/lib/db"
-import { findStoreByQrToken } from "@/lib/store-resolve"
+import { findStoreByInviteTokenHash, findStoreByQrToken } from "@/lib/store-resolve"
+import { hashInviteToken } from "@/lib/invite-token"
+import { inviteTokenSchema } from "@/lib/validation"
 import { toNumber } from "@/lib/format"
 import { businessDayRange, businessDateOnly } from "@/lib/day"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
@@ -1749,4 +1751,91 @@ export async function listMenuForManage(storeId: string): Promise<ManagedMenuIte
       })),
     })),
   }))
+}
+
+// ───────────────────── คำเชิญเข้าร้าน (Phase 14a) ─────────────────────
+
+export type PendingInvite = {
+  id: string
+  email: string
+  role: "OWNER" | "STAFF"
+  expiresAt: Date
+  createdAt: Date
+  invitedByName: string
+}
+
+/// คำเชิญที่ยังไม่ตอบรับ/ไม่ถูกยกเลิก/ไม่หมดอายุ ของร้านที่ทำงานอยู่ — ไว้แสดงบนหน้า /users
+export async function listPendingInvites(storeId: string): Promise<PendingInvite[]> {
+  const db = forStore(storeId)
+  const rows = await db.storeInvite.findMany({
+    where: { acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      expiresAt: true,
+      createdAt: true,
+      invitedBy: { select: { name: true } },
+    },
+  })
+  return rows.map((r) => ({
+    id: r.id,
+    email: r.email,
+    role: r.role,
+    expiresAt: r.expiresAt,
+    createdAt: r.createdAt,
+    invitedByName: r.invitedBy.name,
+  }))
+}
+
+export type InviteLookup =
+  | {
+      ok: true
+      storeId: string
+      storeName: string
+      inviterName: string
+      email: string
+      role: "OWNER" | "STAFF"
+      expiresAt: Date
+    }
+  | { ok: false; reason: "NOT_FOUND" | "EXPIRED" | "REVOKED" | "ACCEPTED" | "STORE_SUSPENDED" }
+
+/// อ่านคำเชิญจาก token ดิบใน URL เพื่อแสดงหน้า /invite/[token] — ไม่ต้องล็อกอิน ไม่เขียนอะไร
+/// ไม่รับ storeId เพราะผู้รับยังไม่รู้ร้าน — token คือตัวบอกร้าน (lib/store-resolve.ts) เหมือน qrToken
+export async function lookupInvite(rawToken: string): Promise<InviteLookup> {
+  const parsed = inviteTokenSchema.safeParse({ token: rawToken })
+  if (!parsed.success) return { ok: false, reason: "NOT_FOUND" }
+  const tokenHash = hashInviteToken(parsed.data.token)
+
+  const store = await findStoreByInviteTokenHash(tokenHash)
+  if (!store) return { ok: false, reason: "NOT_FOUND" }
+  if (store.status === "SUSPENDED") return { ok: false, reason: "STORE_SUSPENDED" }
+
+  const invite = await forStore(store.storeId).storeInvite.findUnique({
+    where: { tokenHash },
+    select: {
+      email: true,
+      role: true,
+      expiresAt: true,
+      acceptedAt: true,
+      revokedAt: true,
+      store: { select: { name: true } },
+      invitedBy: { select: { name: true } },
+    },
+  })
+  if (!invite) return { ok: false, reason: "NOT_FOUND" }
+  if (invite.acceptedAt) return { ok: false, reason: "ACCEPTED" }
+  if (invite.revokedAt) return { ok: false, reason: "REVOKED" }
+  if (invite.expiresAt.getTime() <= Date.now()) return { ok: false, reason: "EXPIRED" }
+
+  return {
+    ok: true,
+    storeId: store.storeId,
+    storeName: invite.store.name,
+    inviterName: invite.invitedBy.name,
+    email: invite.email,
+    role: invite.role,
+    expiresAt: invite.expiresAt,
+  }
 }

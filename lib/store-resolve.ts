@@ -28,3 +28,63 @@ export async function findStoreByPaymentRef1(ref1: string): Promise<ResolvedStor
   if (!intent) return null
   return { storeId: intent.store.id, slug: intent.store.slug, status: intent.store.status }
 }
+
+/// คำเชิญเข้าร้าน (Phase 14a) — ลิงก์ในอีเมลมีแค่ token จึงต้องหาร้านจาก hash ของมันเช่นเดียวกัน
+export async function findStoreByInviteTokenHash(tokenHash: string): Promise<ResolvedStore | null> {
+  const invite = await prisma.storeInvite.findUnique({
+    where: { tokenHash },
+    select: { store: { select: { id: true, slug: true, status: true } } },
+  })
+  if (!invite) return null
+  return { storeId: invite.store.id, slug: invite.store.slug, status: invite.store.status }
+}
+
+/// ตอบรับคำเชิญจากหน้า /no-store ด้วย id (ผู้ใช้สมัครผ่านลิงก์เชิญแล้วผ่านการยืนยันอีเมลจน URL หาย)
+export async function findStoreByInviteId(inviteId: string): Promise<ResolvedStore | null> {
+  const invite = await prisma.storeInvite.findUnique({
+    where: { id: inviteId },
+    select: { store: { select: { id: true, slug: true, status: true } } },
+  })
+  if (!invite) return null
+  return { storeId: invite.store.id, slug: invite.store.slug, status: invite.store.status }
+}
+
+export type PendingInviteForUser = {
+  id: string
+  storeId: string
+  storeName: string
+  role: "OWNER" | "STAFF"
+  inviterName: string
+  expiresAt: Date
+}
+
+/// คำเชิญที่ค้างอยู่ของอีเมลนี้ (ทุกร้าน) — ข้อมูล "ของตัวผู้ใช้" ไม่ใช่ของร้าน จึงค้นข้ามร้านได้ที่นี่
+/// ใช้แสดงบน /no-store และ /onboarding ให้คนที่ถูกเชิญกดเข้าร่วมได้แม้ลิงก์ในอีเมลหายไประหว่างสมัคร
+export async function listPendingInvitesForEmail(email: string): Promise<PendingInviteForUser[]> {
+  const rows = await prisma.storeInvite.findMany({
+    where: {
+      email: email.trim().toLowerCase(),
+      acceptedAt: null,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+      store: { status: "ACTIVE" },
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      storeId: true,
+      role: true,
+      expiresAt: true,
+      store: { select: { name: true } },
+      invitedBy: { select: { name: true } },
+    },
+  })
+  return rows.map((r) => ({
+    id: r.id,
+    storeId: r.storeId,
+    storeName: r.store.name,
+    role: r.role,
+    inviterName: r.invitedBy.name,
+    expiresAt: r.expiresAt,
+  }))
+}

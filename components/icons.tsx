@@ -37,4 +37,10 @@ export {
   CreditCard as IconCard,
   BookOpen as IconMenu,
   Banknote as IconCash,
+  // Phase 14a — onboarding / คำเชิญ / ผู้ดูแลแพลตฟอร์ม
+  Send as IconSend,
+  ShieldCheck as IconShield,
+  Ban as IconBan,
+  Copy as IconCopy,
+  UserPlus as IconUserPlus,
 } from "lucide-react"

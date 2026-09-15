@@ -23,13 +23,12 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
-    // เปิดสมัครเองได้ แต่ต้องผ่านด่าน allowlist เท่านั้น (hooks.before ด้านล่าง)
+    // เปิดสมัครเองได้ตามนโยบายใน lib/signup-allowlist.ts (hooks.before ด้านล่าง):
+    //   SIGNUP_OPEN=true = ใครก็สมัครได้ (แพลตฟอร์ม Phase 14a) · ไม่ตั้ง = allowlist เดิม / ปิด
     //
-    // ⚠️ v1 ไม่มีระบบสิทธิ์ตามบทบาท — `requireUser()` เช็คแค่ว่าล็อกอินอยู่ ใครสมัครสำเร็จ
-    //    จึงกลายเป็นพนักงานเต็มตัวทันที (แก้สต็อก ขาย void บิล ปิดยอด เห็นยอดขายทั้งหมด)
-    //    ด่านที่กันคนนอกจึงมีสองชั้น และต้องมีครบทั้งคู่:
-    //      1. allowlist ที่ hooks.before — กันตั้งแต่ก่อนสร้าง user
-    //      2. requireEmailVerification — ต้องคุมอีเมลนั้นได้จริงถึงจะล็อกอินได้
+    // ปลอดภัยแล้วตั้งแต่ Phase 13: ผู้สมัครใหม่ไม่มี StoreMember จึงเห็นได้แค่ /no-store → /onboarding
+    // สร้างร้านเปล่าของตัวเอง ไม่ได้เป็นพนักงานของร้านใคร · ด่านที่ยังต้องมีคือ
+    // requireEmailVerification — ต้องคุมอีเมลนั้นได้จริงถึงจะล็อกอิน/รับคำเชิญเข้าร้านได้
     disableSignUp: false,
     // ★ ต้องยืนยันอีเมลก่อนจึงล็อกอินได้ — ล็อกอินก่อนยืนยันได้ 403 code EMAIL_NOT_VERIFIED
     //   บัญชีที่ผู้ดูแลสร้างด้วย `pnpm db:create-user` ถูกตั้ง emailVerified = true มาแล้ว

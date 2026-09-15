@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { toast } from "sonner"
 import { switchActiveStore } from "@/app/actions/store-members"
-import { IconStore } from "@/components/icons"
+import Link from "next/link"
+import { IconPlus, IconStore } from "@/components/icons"
 
 export type StoreOption = { storeId: string; name: string; role: "OWNER" | "STAFF"; status: "ACTIVE" | "SUSPENDED" }
 
@@ -15,6 +16,10 @@ type Props = {
 
 /// ตัวสลับร้านใน topbar (Phase 13) — โผล่เป็น dropdown เฉพาะเมื่ออยู่มากกว่า 1 ร้าน
 /// อยู่ร้านเดียวแสดงแค่ชื่อร้าน ไม่ให้มีปุ่มที่กดแล้วไม่มีอะไรให้เลือก
+/// Phase 14a: มีทางไป /onboarding สร้างร้านเพิ่มเสมอ (ผู้ใช้เป็น OWNER ได้หลายร้าน = หลายสาขา)
+
+const NEW_STORE_VALUE = "__new__"
+
 export function StoreSwitcher({ activeStoreId, stores }: Props) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -22,15 +27,25 @@ export function StoreSwitcher({ activeStoreId, stores }: Props) {
 
   if (stores.length <= 1) {
     return (
-      <span className="row" style={{ gap: 6, fontWeight: 600 }}>
+      <span className="row" style={{ gap: 8, fontWeight: 600 }}>
         <IconStore size={16} aria-hidden />
         {active?.name ?? "ร้านของฉัน"}
+        <Link href="/onboarding" className="btn btn-ghost btn-sm btn-icon" title="สร้างร้าน/สาขาเพิ่ม">
+          <IconPlus size={14} aria-hidden />
+          <span className="sr-only">สร้างร้านใหม่</span>
+        </Link>
       </span>
     )
   }
 
   async function handleChange(event: React.ChangeEvent<HTMLSelectElement>) {
     const storeId = event.target.value
+    if (storeId === NEW_STORE_VALUE) {
+      // คืนค่า select กลับก่อน ไม่ให้ค้างที่ตัวเลือก "สร้างร้านใหม่" ถ้าผู้ใช้กด back
+      event.target.value = activeStoreId
+      router.push("/onboarding")
+      return
+    }
     if (storeId === activeStoreId) return
     setBusy(true)
     const formData = new FormData()
@@ -67,6 +82,7 @@ export function StoreSwitcher({ activeStoreId, stores }: Props) {
             {store.status === "SUSPENDED" ? " (ถูกระงับ)" : ""}
           </option>
         ))}
+        <option value={NEW_STORE_VALUE}>＋ สร้างร้านใหม่…</option>
       </select>
     </label>
   )

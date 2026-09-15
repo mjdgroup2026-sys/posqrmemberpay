@@ -35,6 +35,7 @@ export const STORE_SCOPED_MODELS: ReadonlySet<string> = new Set([
   "PaymentIntent",
   "Role",
   "StoreMember",
+  "StoreInvite",
 ])
 
 type AnyArgs = Record<string, unknown>

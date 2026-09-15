@@ -157,6 +157,8 @@ model User {
   cancelledOrderItems       MobileOrderItem[] @relation("OrderItemCancelledBy")
   acknowledgedNotifications Notification[]    @relation("NotificationAckBy")
   storeSettingsUpdates      StoreSettings[]   @relation("StoreSettingsUpdatedBy")
+  sentInvites               StoreInvite[]     @relation("StoreInviteInvitedBy")
+  acceptedInvites           StoreInvite[]     @relation("StoreInviteAcceptedBy")
   closings                  CashierClosing[]
 
   @@map("user")
@@ -743,6 +745,7 @@ model Store {
   notifications     Notification[]
   customers         Member[]
   paymentIntents    PaymentIntent[]
+  invites           StoreInvite[]
 
   @@map("store")
 }
@@ -768,4 +771,30 @@ model StoreMember {
   @@index([storeId])
   @@index([roleId])
   @@map("store_member")
+}
+
+/// คำเชิญเข้าร้านทางอีเมล (Phase 14a) — ลิงก์เชิญคือ credential ชั่วคราว จึงเก็บแค่ SHA-256 ของ token
+/// ไม่เก็บ token ดิบ (หลุดจากฐานแล้วใช้ไม่ได้) · ใช้ครั้งเดียว: acceptInvite เขียนด้วย
+/// updateMany where acceptedAt: null, revokedAt: null (กติกาข้อ 7) กันกดรับพร้อมกันได้ 2 ครั้ง
+model StoreInvite {
+  id           String    @id @default(cuid())
+  storeId      String
+  /// เก็บเป็นตัวพิมพ์เล็กเสมอ — ตอนรับต้องตรงกับอีเมลของบัญชีที่ล็อกอินอยู่
+  email        String
+  role         StoreRole @default(STAFF)
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  acceptedById String?
+  revokedAt    DateTime?
+  invitedById  String
+  createdAt    DateTime  @default(now())
+
+  store      Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  invitedBy  User  @relation("StoreInviteInvitedBy", fields: [invitedById], references: [id])
+  acceptedBy User? @relation("StoreInviteAcceptedBy", fields: [acceptedById], references: [id])
+
+  @@index([storeId])
+  @@index([email])
+  @@map("store_invite")
 }

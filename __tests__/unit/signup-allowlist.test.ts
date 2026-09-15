@@ -68,3 +68,32 @@ describe("allowlist การสมัครสมาชิก (Phase 5)", () =>
     }
   })
 })
+
+describe("โหมดเปิดสมัคร SIGNUP_OPEN (Phase 14a)", () => {
+  it("SIGNUP_OPEN=true → ใครก็สมัครได้ โดยไม่ต้องมี allowlist", () => {
+    const e = env({ SIGNUP_OPEN: "true" })
+    expect(readSignupPolicy(e).open).toBe(true)
+    expect(readSignupPolicy(e).unconfigured).toBe(false)
+    expect(isSignupAllowed("anyone@anywhere.io", e)).toBe(true)
+  })
+
+  it("รับค่าแบบไม่สนตัวพิมพ์/ช่องว่าง แต่ค่าอื่นที่ไม่ใช่ true = ไม่เปิด", () => {
+    expect(readSignupPolicy(env({ SIGNUP_OPEN: " TRUE " })).open).toBe(true)
+    expect(readSignupPolicy(env({ SIGNUP_OPEN: "1" })).open).toBe(false)
+    expect(readSignupPolicy(env({ SIGNUP_OPEN: "yes" })).open).toBe(false)
+    expect(isSignupAllowed("anyone@anywhere.io", env({ SIGNUP_OPEN: "false" }))).toBe(false)
+  })
+
+  it("เปิดสมัครแล้วก็ยังต้องเป็นรูปแบบอีเมลที่มี @ คั่นพอดีหนึ่งตัว", () => {
+    const e = env({ SIGNUP_OPEN: "true" })
+    expect(isSignupAllowed("not-an-email", e)).toBe(false)
+    expect(isSignupAllowed("a@b@c", e)).toBe(false)
+    expect(isSignupAllowed("@example.com", e)).toBe(false)
+  })
+
+  it("SIGNUP_OPEN ไม่ใช่ true → กลับไปใช้ allowlist เดิมตามปกติ", () => {
+    const e = env({ SIGNUP_OPEN: "false", SIGNUP_ALLOWED_DOMAINS: "example.com" })
+    expect(isSignupAllowed("x@example.com", e)).toBe(true)
+    expect(isSignupAllowed("x@other.com", e)).toBe(false)
+  })
+})

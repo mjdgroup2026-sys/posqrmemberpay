@@ -88,6 +88,8 @@ export async function resetDb(): Promise<void> {
       '"member", "store_settings", "product", "category",',
       // ตารางสิทธิ์ (§4) — ต้องล้างด้วย ไม่งั้นบทบาทจากเทสก่อนหน้าค้างแล้วชนกับ unique ของชื่อบทบาท
       '"role_permission", "role",',
+      // คำเชิญเข้าร้าน (Phase 14a) อ้าง store + user
+      '"store_invite",',
       // ร้านและสมาชิก (Phase 13) — ล้างท้ายสุดเพราะทุกตารางข้างบนอ้างมาที่นี่
       '"store_member", "store"',
       "RESTART IDENTITY CASCADE",

@@ -1520,14 +1520,85 @@ enum ResourceKey {
 > - `Member.phone` เลิก unique ทั้งระบบ → ฟอร์มสมัครสมาชิกบน `pay/success` ต้องรู้ `storeId` จาก session
 >   ของโต๊ะ ไม่ใช่จาก cookie พนักงาน (ลูกค้าไม่มี cookie นั้น)
 
-### ⏭️ Phase 14 — Onboarding: สมัคร/สร้างร้าน/เชิญพนักงาน + ผู้ดูแลแพลตฟอร์ม + ค่าใช้งานแบบต่ออายุ
-> ร่างคร่าว ๆ — ลงรายละเอียดเมื่อ Phase 13 ปิด
-- [ ] สมัคร → ยืนยันอีเมล → `/onboarding` สร้างร้าน (ชื่อ, slug, สีธีม) → เป็น OWNER อัตโนมัติ ในทรานแซคชันเดียว
-      กับ `StoreSettings` เริ่มต้น + โต๊ะ/เมนูตัวอย่างชุดเล็กให้ลองกดได้ทันที
-- [ ] เชิญพนักงานทางอีเมล (`lib/mail.ts` ฟังก์ชันที่ 3 `sendStoreInviteMail`) → ลิงก์มี token หมดอายุ → ผู้รับสมัคร/
-      ล็อกอินแล้วถูกผูกเป็น STAFF
-- [ ] `/admin/stores` (เฉพาะ `isPlatformAdmin`): รายชื่อร้าน, ระงับ/ปลดระงับ, ดูจำนวนบิล/ยอดขายรวมต่อร้าน —
-      **อ่านอย่างเดียว ไม่ให้ผู้ดูแลแพลตฟอร์มแก้ข้อมูลในร้าน**
+### 🔨 Phase 14 — Onboarding: สมัคร/สร้างร้าน/เชิญพนักงาน + ผู้ดูแลแพลตฟอร์ม + ค่าใช้งานแบบต่ออายุ
+> **แบ่งเป็น 3 PR ตามลำดับ (ตัดสินใจ 2026-09-15 หลัง Phase 13 ขึ้น production)** — แต่ละก้อน migrate production
+> แยกรอบตามกติกา (pg_dump + ซ้อมบนสำเนา): **14a Onboarding** (กำลังทำ) → **14b Subscription** → **14c Brand**
+> · 14b/14c แตะเงินจึงต้องมีเทส concurrent · 14c พึ่ง 14b (จ่ายรวม batch)
+> · **14a โค้ด+เทสเสร็จ 2026-09-15** บน branch `feat/phase-14a-onboarding` — migration `add_store_invite` (additive) ·
+>   env ใหม่ที่ต้องตั้งบน VPS ตอน deploy: `SIGNUP_OPEN=true` (ไม่ตั้ง = พฤติกรรมเดิม)
+
+#### ✅ 14a — Onboarding: สมัครเอง / สร้างร้าน / เชิญพนักงาน / ผู้ดูแลแพลตฟอร์ม (ไม่แตะเงิน)
+
+**Schema**
+- [x] `StoreInvite` — `id`, `storeId` FK (Cascade), `email` (lower-case), `role StoreRole @default(STAFF)`,
+      `tokenHash String @unique` (SHA-256 ของ token ดิบ — **ไม่เก็บ token ดิบ** เพราะลิงก์เชิญคือ credential ชั่วคราว),
+      `expiresAt` (7 วัน), `acceptedAt?`, `acceptedById?`, `revokedAt?`, `invitedById`, `createdAt` ·
+      `@@index([storeId])`, `@@index([email])` · เพิ่มใน `STORE_SCOPED_MODELS` ของ `lib/db.ts`
+- [x] migration `add_store_invite` เขียน SQL เอง (additive อย่างเดียว) → `migrate diff --exit-code` สะอาด
+
+**เปิดสมัคร**
+- [x] env ใหม่ `SIGNUP_OPEN=true` → ใครก็สมัครได้ (allowlist `SIGNUP_ALLOWED_*` ยังทำงานเมื่อตั้งไว้และ
+      `SIGNUP_OPEN` ไม่ใช่ `true`) · ไม่ตั้งอะไรเลย = ปิดสมัครเหมือนเดิม (ปลอดภัยต่อ production ที่ยังไม่ตั้ง)
+      · ปลอดภัยแล้วเพราะ Phase 13: ผู้สมัครใหม่ไม่มี `StoreMember` → เห็นได้แค่ `/no-store`/`/onboarding`/`/settings`
+      ไม่ได้เป็นพนักงานร้านใครอีกต่อไป (comment เตือนเดิมใน `lib/auth.ts` ต้องแก้ตาม)
+
+**สร้างร้าน (`/onboarding`)**
+- [x] action `createStore(formData)` — `requireUser()` (ยังไม่มีร้าน) → zod: ชื่อร้าน 2–60 ตัว, slug `^[a-z0-9-]{3,30}$`
+      (auto จากชื่อฝั่ง client แก้ได้ · สงวน `default`, `admin`, `api`, `order`), สีธีม hex 6 หลัก →
+      `provisionStore(tx, { ownerUserId })` + **ข้อมูลตัวอย่างในทรานแซคชันเดียว**: โต๊ะ `T1`–`T4` (+ QR static),
+      เมนูตัวอย่าง 3 รายการปักหมุด `isFeatured` (MenuItem ไม่มีหมวด — หมวดเป็นของ Product) → ตั้ง cookie `activeStoreId` → `/` · slug ซ้ำ → `ok:false`
+      "slug นี้ถูกใช้แล้ว" · ผู้ใช้เป็น OWNER ได้หลายร้าน (ทางที่ spec แนะนำสำหรับหลายสาขาก่อนมี Brand)
+- [x] `/no-store` เคส `NO_STORE` → ปุ่มหลัก "สร้างร้านของคุณ" ไป `/onboarding` (เคส `STORE_SUSPENDED` คงเดิม) ·
+      ตัวสลับร้านใน topbar เพิ่มรายการ "＋ สร้างร้านใหม่"
+
+**เชิญพนักงาน**
+- [x] `lib/mail.ts` ฟังก์ชันที่ 3 `sendStoreInviteMail(to, { storeName, inviterName, url })` — กติกาอีเมลเดิมทุกข้อ
+      (inline style, คืน `MailResult`, **ห้าม log ลิงก์บน production**)
+- [x] `inviteMember(formData)` — `requireOwner()` → zod อีเมล + role → อีเมลนั้นเป็นสมาชิกอยู่แล้ว → `ok:false` ·
+      มีคำเชิญค้างของอีเมลเดิม → ออก token ใหม่ทับ (revoke ใบเก่า) · สร้างแถว + ส่งอีเมล · ส่งไม่สำเร็จ → แถวยังอยู่
+      คืน `ok:true` พร้อมข้อความเตือน + ลิงก์คัดลอกให้เจ้าของส่งเอง (เฉพาะ dev/`skipped`) ·
+      `revokeInvite(formData)` — `requireOwner()`, ตั้ง `revokedAt`
+- [x] `acceptInvite(formData)` — `requireUser()` → หา invite ด้วย `tokenHash` ผ่าน `prisma` ตรง (ยังไม่รู้ร้าน — เหมือน
+      webhook) → ตรวจ: ไม่หมดอายุ, ไม่ถูก revoke, **อีเมลผู้ใช้ที่ล็อกอินต้องตรงกับอีเมลในคำเชิญ** → ผูก `StoreMember`
+      (upsert) + `acceptedAt` ด้วย **`updateMany where acceptedAt: null, revokedAt: null`** (กติกาข้อ 7 —
+      กดรับ 2 ครั้งพร้อมกันผ่านครั้งเดียว) → ตั้ง cookie ไปร้านนั้น
+- [x] หน้า public `/invite/[token]` (เพิ่ม `ALWAYS_PUBLIC_PREFIXES` ใน `proxy.ts`): แสดงชื่อร้าน/ผู้เชิญ/อีเมล ·
+      ยังไม่ล็อกอิน → ปุ่ม "สมัคร"/"เข้าสู่ระบบ" พา token ไปด้วย (`?invite=`) แล้วกลับมาหน้านี้ · ล็อกอินแล้ว → ปุ่ม
+      "เข้าร่วมร้าน" เรียก `acceptInvite` · หมดอายุ/ถูกยกเลิก/อีเมลไม่ตรง → ข้อความไทยอธิบาย ไม่ใช่ 500
+- [x] `/users` (OWNER): ฟอร์มเชิญ (อีเมล + บทบาท) + ตาราง "คำเชิญที่รอตอบรับ" (อีเมล/บทบาท/หมดอายุ/ปุ่มยกเลิก) ·
+      query `listPendingInvites(storeId)`
+
+**ผู้ดูแลแพลตฟอร์ม**
+- [x] `/admin/stores` — `requirePlatformAdmin()` ที่ต้นหน้า (ไม่ผูกกับร้าน ทำงานได้แม้ admin ไม่มี `StoreMember`) ·
+      ตาราง: ชื่อ/slug/สถานะ/สมาชิก/จำนวนบิล/ยอดขายรวม/สร้างเมื่อ · **อ่านอย่างเดียว ไม่แก้ข้อมูลในร้าน** ·
+      query `listStoresForAdmin()` อยู่ใน **`lib/admin-queries.ts`** (ไฟล์ใหม่ — ชั้นอ่านของแพลตฟอร์มที่ค้นข้ามร้านโดยตั้งใจ)
+      แยกจาก `lib/queries.ts` เพื่อไม่ต้องยกเว้น ESLint และไม่ให้ตาราง isolation ต้องมีข้อยกเว้น
+- [x] `setStoreStatus(formData)` — `requirePlatformAdmin()` → `ACTIVE`/`SUSPENDED` · ระงับแล้ว `requireStore()`
+      ปฏิเสธทันทีในคำขอถัดไป (มีอยู่แล้วจาก Phase 13) · ระงับร้านที่ตัวเองเป็นสมาชิกได้ (ไม่มีข้อยกเว้น)
+- [x] sidebar หมวด "แพลตฟอร์ม" เห็นเฉพาะ `isPlatformAdmin` (layout อ่านจาก DB เพราะ session ของ Better Auth ไม่มีฟิลด์นี้)
+      · สคริปต์ `pnpm db:set-platform-admin <email> [--off]` — ไม่มี UI ตั้งโดยตั้งใจ (สิทธิ์ข้ามทุกร้าน)
+
+**เทส**
+- [x] `onboarding.test.ts`: สร้างร้านครบชุด (Store/Settings/Role 3/StoreMember OWNER/โต๊ะ 4/QR 4/เมนู 3) ในครั้งเดียว ·
+      slug ซ้ำ → `ok:false` แถวไม่เพิ่ม · slug สงวน → `ok:false` · ผู้ใช้เดิมสร้างร้านที่ 2 ได้และเป็น OWNER ทั้งสอง ·
+      ยังไม่ล็อกอิน → `ok:false`
+- [x] `store-invite.test.ts`: STAFF เชิญไม่ได้ · เชิญอีเมลที่เป็นสมาชิกแล้ว → `ok:false` · เชิญซ้ำ → ใบเก่าถูก revoke ·
+      รับด้วย token ผิด/หมดอายุ/ถูกยกเลิก/อีเมลไม่ตรง → `ok:false` ไม่มี `StoreMember` · รับสำเร็จ → STAFF + `acceptedAt` ·
+      **รับพร้อมกัน 2 ครั้ง → สำเร็จ 1** · token ดิบไม่อยู่ในฐาน (มีแต่ hash)
+- [x] `platform-admin.test.ts`: ไม่ใช่ admin → `ok:false` · ระงับแล้ว `requireStore()` ของสมาชิกร้านนั้นโยน
+      `STORE_SUSPENDED` · ปลดระงับกลับมาใช้ได้ · `listStoresForAdmin()` เห็นทุกร้านพร้อมตัวเลขถูก
+- [x] เติม `tenant-isolation.test.ts`: `listPendingInvites` ในตาราง query · `revokeInvite` ด้วย id ของร้าน B →
+      `ok:false` · `inviteMember`/`acceptInvite`/`createStore`/`setStoreStatus` ในรายการที่ไม่มี foreign id
+
+#### 14b — ค่าใช้งานแบบต่ออายุ (Store Subscription) — PR ถัดไป
+> รายละเอียดอยู่ในหัวข้อ "ค่าใช้งานแบบต่ออายุ" ด้านล่าง (ยังไม่เริ่ม)
+
+#### 14c — ร้านหลายสาขา (`Brand`) — PR สุดท้ายของ Phase 14
+> รายละเอียดอยู่ในหัวข้อ "ร้านหลายสาขา" ด้านล่าง (ยังไม่เริ่ม — พึ่ง 14b)
+
+---
+
+**ร่างเดิมของ 14b/14c (คงไว้เป็นสัญญา ลงรายละเอียดเพิ่มตอนเริ่มแต่ละก้อน):**
 - [ ] **ร้านหลายสาขา (`Brand`)** — ตัดสินใจ 2026-09-14: **1 สาขา = 1 `Store` เสมอ** (เมนู/โต๊ะ/QR/tier/รายงาน
       แยกกันโดยธรรมชาติ สาขาเล็กจ่าย S สาขาใหญ่จ่าย L) · `Brand` เป็นแค่ชั้นบาง ๆ ครอบด้านบนเพื่อลดงานซ้ำของเจ้าของ
       **ไม่ใช่ที่เก็บข้อมูลขาย** — ห้ามย้าย `Table`/`MenuItem`/`Sale` ขึ้นไปอยู่ระดับ Brand

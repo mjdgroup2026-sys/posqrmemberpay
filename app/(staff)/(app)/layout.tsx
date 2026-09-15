@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { getSession, resolveStoreContext } from "@/lib/session"
+import { prisma } from "@/lib/prisma"
 import { getLowStockCount, getPendingNotificationCount } from "@/lib/queries"
 import { getCurrentPermissions, type ResourceKey } from "@/lib/permissions"
 import { Sidebar } from "@/components/sidebar"
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
         lowStockCount={lowStockCount}
         pendingNotificationCount={pendingNotificationCount}
         viewableResources={viewableResources}
+        isPlatformAdmin={user.isPlatformAdmin}
       />
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Topbar
@@ -52,9 +54,15 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   )
 }
 
-/// ชื่อ/อีเมลสำหรับ topbar เมื่อผู้ใช้ยังไม่มีร้าน — resolveStoreContext() ไม่คืน user ในกรณีนั้น
+/// ชื่อ/อีเมล/สถานะผู้ดูแลแพลตฟอร์มสำหรับ shell เมื่อผู้ใช้ยังไม่มีร้าน — resolveStoreContext() ไม่คืน user ในกรณีนั้น
+/// (ผู้ดูแลแพลตฟอร์มมักไม่ได้อยู่ในร้านใดเลย จึงต้องอ่าน isPlatformAdmin จาก DB ที่นี่ ไม่ใช่จาก session)
 async function requireUserSummary() {
   const session = await getSession()
   if (!session?.user) redirect("/login")
-  return { name: session.user.name, email: session.user.email }
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { name: true, email: true, isPlatformAdmin: true },
+  })
+  if (!user) redirect("/login")
+  return user
 }

@@ -59,6 +59,8 @@ type StoreFixture = {
   memberPhone: string
   roleId: string
   staffId: string
+  inviteId: string
+  inviteEmail: string
 }
 
 describe.skipIf(!dbReady)("การแยกข้อมูลตามร้าน (Phase 13 — tenant isolation)", () => {
@@ -88,6 +90,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       stock: await import("@/app/actions/stock"),
       "store-members": await import("@/app/actions/store-members"),
       tables: await import("@/app/actions/tables"),
+      onboarding: await import("@/app/actions/onboarding"),
+      admin: await import("@/app/actions/admin"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -225,6 +229,16 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       data: { memberId: member.id, saleId: sale.id, points: 4 },
     })
     const role = await db.role.create({ data: { storeId, name: `บทบาทร้าน ${tag}` } })
+    // คำเชิญค้าง (Phase 14a) — อีเมล/hash มี tag ของร้านไว้จับการรั่ว
+    const invite = await db.storeInvite.create({
+      data: {
+        storeId,
+        email: `invitee-${suffix}@example.com`,
+        tokenHash: `hash-${suffix}`,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        invitedById: ownerId,
+      },
+    })
 
     return {
       storeId,
@@ -250,6 +264,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       memberPhone: member.phone,
       roleId: role.id,
       staffId: staff.id,
+      inviteId: invite.id,
+      inviteEmail: invite.email,
     }
   }
 
@@ -276,6 +292,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       f.roleId,
       f.staffId,
       f.ownerId,
+      f.inviteId,
+      f.inviteEmail,
       `ร้าน ${f.tag}`,
     ]
   }
@@ -290,7 +308,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
   // ───────────────────── 1. lib/queries.ts ─────────────────────
 
   /// queries ที่รับ qrToken (ฝั่งลูกค้า) — ร้านมาจาก token เอง ไม่มี storeId ให้ส่ง ทดสอบแยกด้านล่าง
-  const TOKEN_SCOPED_QUERIES = ["resolveCustomerSession", "getCustomerPaymentStatus"]
+  const TOKEN_SCOPED_QUERIES = ["resolveCustomerSession", "getCustomerPaymentStatus", "lookupInvite"]
 
   type QueryCase = [name: string, run: (q: typeof queries, a: StoreFixture, b: StoreFixture) => Promise<unknown>]
   const QUERY_CASES: QueryCase[] = [
@@ -336,6 +354,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["listRoleOptions", (q, a) => q.listRoleOptions(a.storeId)],
     ["listTablesForManage", (q, a) => q.listTablesForManage(a.storeId)],
     ["listMenuForManage", (q, a) => q.listMenuForManage(a.storeId)],
+    ["listPendingInvites", (q, a) => q.listPendingInvites(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -390,6 +409,12 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "updateStoreSettings",
     "updateProfile",
     "switchActiveStore",
+    // Phase 14a: สร้างร้านใหม่ (ยังไม่มีร้าน) · เชิญด้วยอีเมล (ไม่ใช่ id) · ตอบรับด้วย token ของตัวเอง
+    // · ผู้ดูแลแพลตฟอร์มทำงานข้ามร้านโดยตั้งใจ (เทสแยกที่ platform-admin.test.ts)
+    "createStore",
+    "inviteMember",
+    "acceptInvite",
+    "setStoreStatus",
     // ฝั่งลูกค้า: ร้านมาจาก qrToken เสมอ — ทดสอบแยกด้านล่าง
     "submitOrder",
     "callStaff",
@@ -616,6 +641,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "deleteTable",
       (b) => makeFormData({ id: b.table2Id }),
       async (b) => expect(await testPrisma().table.count({ where: { id: b.table2Id } })).toBe(1),
+    ],
+    [
+      "revokeInvite",
+      (b) => makeFormData({ id: b.inviteId }),
+      async (b) => expect((await testPrisma().storeInvite.findUniqueOrThrow({ where: { id: b.inviteId } })).revokedAt).toBeNull(),
     ],
   ]
 

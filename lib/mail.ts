@@ -140,3 +140,22 @@ export async function sendVerificationMail(to: string, url: string): Promise<Mai
     url,
   )
 }
+
+/// คำเชิญเข้าร้าน (Phase 14a) — ชื่อร้าน/ชื่อผู้เชิญเป็นข้อมูลที่ผู้ใช้กรอกเอง escape ใน renderHtml แล้ว
+export async function sendStoreInviteMail(
+  to: string,
+  invite: { storeName: string; inviterName: string; role: "OWNER" | "STAFF"; url: string },
+): Promise<MailResult> {
+  const roleLabel = invite.role === "OWNER" ? "เจ้าของร้าน" : "พนักงาน"
+  return deliver(
+    to,
+    {
+      subject: `${invite.inviterName} เชิญคุณเข้าร่วมร้าน ${invite.storeName} — MJD Mobile Order`,
+      heading: `คุณได้รับเชิญเข้าร่วมร้าน ${invite.storeName}`,
+      intro: `${invite.inviterName} เชิญคุณเข้าร่วมร้าน ${invite.storeName} ในบทบาท${roleLabel} กดปุ่มด้านล่างเพื่อตอบรับ — ถ้ายังไม่มีบัญชี ระบบจะให้สมัครด้วยอีเมลนี้ก่อน`,
+      buttonLabel: "ตอบรับคำเชิญ",
+      footnote: "ลิงก์นี้ใช้ได้ครั้งเดียวและหมดอายุใน 7 วัน ต้องตอบรับด้วยบัญชีที่ใช้อีเมลเดียวกับที่ได้รับอีเมลนี้ ถ้าคุณไม่รู้จักร้านนี้ ไม่ต้องทำอะไร",
+    },
+    invite.url,
+  )
+}
