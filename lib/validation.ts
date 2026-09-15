@@ -470,3 +470,66 @@ export const storeStatusSchema = z.object({
   storeId: requiredId("ไม่พบร้านที่ต้องการแก้ไข"),
   status: z.enum(["ACTIVE", "SUSPENDED"], { message: "สถานะร้านไม่ถูกต้อง" }),
 })
+
+// ───────────────────── ค่าใช้งานแบบต่ออายุ (Phase 14b) ─────────────────────
+
+const planTierEnum = z.enum(["S", "M", "L", "XL"], { message: "ระดับแพ็กเกจไม่ถูกต้อง" })
+
+export const claimTrialSchema = z.object({
+  promptPayId: z.string({ error: "กรุณากรอกเลขพร้อมเพย์ของร้าน" }).trim().min(10, "กรุณากรอกเลขพร้อมเพย์ของร้าน").max(32, "เลขพร้อมเพย์ยาวเกินไป"),
+})
+
+export const renewalRequestSchema = z.object({
+  planCode: z.string({ error: "กรุณาเลือกแพ็กเกจ" }).trim().regex(/^[A-Z]{1,2}-[A-Z]\d{1,2}$/, "รหัสแพ็กเกจไม่ถูกต้อง"),
+})
+
+export const upgradeRequestSchema = z.object({
+  tier: planTierEnum,
+})
+
+export const subscriptionIdSchema = z.object({
+  id: requiredId("ไม่พบรายการค่าใช้งานที่ต้องการ"),
+})
+
+export const confirmSubscriptionSchema = z.object({
+  id: requiredId("ไม่พบรายการค่าใช้งานที่ต้องการยืนยัน"),
+  paymentReference: z
+    .string({ error: "กรุณากรอกเลขอ้างอิงจากธนาคาร" })
+    .trim()
+    .min(4, "เลขอ้างอิงจากธนาคารต้องมีอย่างน้อย 4 ตัว")
+    .max(64, "เลขอ้างอิงยาวเกินไป"),
+})
+
+export const voidSubscriptionSchema = z.object({
+  id: requiredId("ไม่พบรายการค่าใช้งานที่ต้องการยกเลิก"),
+  reason: z.string({ error: "กรุณาระบุเหตุผล" }).trim().min(3, "กรุณาระบุเหตุผลอย่างน้อย 3 ตัวอักษร").max(200, "เหตุผลยาวเกินไป"),
+})
+
+export const grantCustomDaysSchema = z.object({
+  storeId: requiredId("ไม่พบร้านที่ต้องการเติมวัน"),
+  days: z.coerce.number({ error: "จำนวนวันต้องเป็นตัวเลข" }).int("จำนวนวันต้องเป็นจำนวนเต็ม").min(1, "อย่างน้อย 1 วัน").max(3650, "ไม่เกิน 3650 วัน"),
+  tier: planTierEnum.optional(),
+  note: z.string({ error: "กรุณาระบุหมายเหตุ" }).trim().min(3, "กรุณาระบุหมายเหตุอย่างน้อย 3 ตัวอักษร").max(200, "หมายเหตุยาวเกินไป"),
+})
+
+export const setTableLimitSchema = z.object({
+  storeId: requiredId("ไม่พบร้านที่ต้องการแก้ไข"),
+  tableLimit: z.coerce.number({ error: "เพดานโต๊ะต้องเป็นตัวเลข" }).int("เพดานโต๊ะต้องเป็นจำนวนเต็ม").min(1, "อย่างน้อย 1 โต๊ะ").max(1000, "ไม่เกิน 1000 โต๊ะ"),
+  note: z.string({ error: "กรุณาระบุหมายเหตุ" }).trim().min(3, "กรุณาระบุหมายเหตุอย่างน้อย 3 ตัวอักษร").max(200, "หมายเหตุยาวเกินไป"),
+})
+
+/// ออกแพ็กเกจ version ใหม่ — code เดิม = แทนที่ version ก่อน · code ใหม่ = version 1
+export const publishPlanSchema = z.object({
+  code: z.string({ error: "กรุณากรอกรหัสแพ็กเกจ" }).trim().toUpperCase().regex(/^[A-Z]{1,2}-[A-Z]\d{1,2}$/, "รหัสต้องเป็นรูปแบบ เช่น S-D7, M-M3"),
+  name: z.string({ error: "กรุณากรอกชื่อแพ็กเกจ" }).trim().min(2, "ชื่อแพ็กเกจสั้นเกินไป").max(60, "ชื่อแพ็กเกจยาวเกินไป"),
+  tier: planTierEnum,
+  tableLimit: z.coerce.number({ error: "เพดานโต๊ะต้องเป็นตัวเลข" }).int().min(1, "อย่างน้อย 1 โต๊ะ").max(1000, "ไม่เกิน 1000 โต๊ะ"),
+  durationDays: z.coerce.number({ error: "จำนวนวันต้องเป็นตัวเลข" }).int().min(1, "อย่างน้อย 1 วัน").max(3650, "ไม่เกิน 3650 วัน"),
+  ratePerDay: z.coerce.number({ error: "เรตต่อวันต้องเป็นตัวเลข" }).min(0, "เรตต่อวันติดลบไม่ได้").max(100000, "เรตต่อวันสูงเกินไป"),
+  price: z.coerce.number({ error: "ราคาสุทธิต้องเป็นตัวเลข" }).min(0, "ราคาติดลบไม่ได้").max(10_000_000, "ราคาสูงเกินไป"),
+  sortOrder: z.coerce.number({ error: "ลำดับต้องเป็นตัวเลข" }).int().min(0).max(999).default(0),
+})
+
+export const planCodeSchema = z.object({
+  code: z.string({ error: "ไม่พบรหัสแพ็กเกจ" }).trim().toUpperCase().min(1, "ไม่พบรหัสแพ็กเกจ").max(20),
+})

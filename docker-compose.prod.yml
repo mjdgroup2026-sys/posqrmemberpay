@@ -46,6 +46,9 @@ x-app-base: &app-base
     # ชำระเงิน MJD Mobile Order (Phase 10) — ไม่ตั้ง = ปุ่มพร้อมเพย์ปิด และ webhook ตอบ 503
     PROMPTPAY_ID: ${PROMPTPAY_ID:-}
     PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
+    # ค่าใช้งานแบบต่ออายุ (Phase 14b) — พร้อมเพย์ของแพลตฟอร์ม + secret ของ cron เตือนหมดอายุ
+    PLATFORM_PROMPTPAY_ID: ${PLATFORM_PROMPTPAY_ID:-}
+    CRON_SECRET: ${CRON_SECRET:-}
     # SCB Open API — ไม่ตั้ง = ถอยไปใช้ QR พร้อมเพย์ที่สร้างเอง (พนักงานกดยืนยันเอง)
     # ตั้งครบเมื่อไหร่ SCB จะเป็นคนออก QR ให้ ซึ่งพก ref1 ไปด้วยจึงปิดบิลอัตโนมัติได้
     SCB_API_BASE: ${SCB_API_BASE:-}

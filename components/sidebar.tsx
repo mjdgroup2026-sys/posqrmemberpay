@@ -21,6 +21,7 @@ import {
   IconStore,
   IconLock,
   IconShield,
+  IconCard,
   IconMenu,
 } from "@/components/icons"
 import type { ResourceKey } from "@/lib/permissions"
@@ -35,6 +36,8 @@ type NavItem = {
   resource?: ResourceKey
   /// เมนูของผู้ดูแลแพลตฟอร์ม (Phase 14a) — คนละแกนกับ resource ของร้าน เห็นเฉพาะ User.isPlatformAdmin
   platformAdmin?: true
+  /// เมนูของเจ้าของร้าน (Phase 14b) — StoreMember.role = OWNER เท่านั้น
+  ownerOnly?: true
 }
 
 const GROUPS: { title?: string; items: NavItem[] }[] = [
@@ -72,37 +75,46 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
     items: [
       { href: "/users", label: "ผู้ใช้งาน", Icon: IconUsers, resource: "USERS" },
       { href: "/roles", label: "บทบาทและสิทธิ์", Icon: IconLock, resource: "USERS" },
+      { href: "/billing", label: "ค่าใช้งาน", Icon: IconCard, ownerOnly: true },
       { href: "/settings", label: "ตั้งค่า", Icon: IconSettings },
     ],
   },
   {
     title: "แพลตฟอร์ม",
-    items: [{ href: "/admin/stores", label: "ร้านค้าทั้งหมด", Icon: IconShield, platformAdmin: true }],
+    items: [
+      { href: "/admin/stores", label: "ร้านค้าทั้งหมด", Icon: IconShield, platformAdmin: true },
+      { href: "/admin/plans", label: "แพ็กเกจค่าใช้งาน", Icon: IconCard, platformAdmin: true },
+    ],
   },
 ]
 
 /// href ที่มีเส้นทางลูก (เช่น /pos กับ /pos/history) ต้องเทียบแบบตรงตัว
 /// ไม่งั้นเมนูแม่จะสว่างค้างตอนอยู่หน้าลูก
-const EXACT_MATCH = new Set(["/", "/pos"])
+const EXACT_MATCH = new Set(["/", "/pos", "/admin/stores"])
 
 export function Sidebar({
   lowStockCount,
   pendingNotificationCount = 0,
   viewableResources,
   isPlatformAdmin = false,
+  isOwner = false,
 }: {
   lowStockCount: number
   pendingNotificationCount?: number
   /// resource ที่ผู้ใช้มีสิทธิ์ VIEW — layout คำนวณจาก DB ให้ทุกคำขอ
   viewableResources: ResourceKey[]
   isPlatformAdmin?: boolean
+  isOwner?: boolean
 }) {
   const pathname = usePathname()
 
   // เมนูที่ไม่ผูก resource แสดงเสมอ · ที่ผูกไว้ต้องมีสิทธิ์ VIEW ถึงจะเห็น (§4)
   // ซ่อนเมนูเป็นแค่ความสะดวก ด่านจริงคือ requirePageAccess() ที่ตัวหน้า
-  const canView = (item: NavItem) =>
-    item.platformAdmin ? isPlatformAdmin : !item.resource || viewableResources.includes(item.resource)
+  const canView = (item: NavItem) => {
+    if (item.platformAdmin) return isPlatformAdmin
+    if (item.ownerOnly) return isOwner
+    return !item.resource || viewableResources.includes(item.resource)
+  }
 
   // กลุ่มที่ไม่เหลือเมนูเลยต้องหายไปทั้งกลุ่ม ไม่ใช่เหลือหัวข้อลอย ๆ
   const visibleGroups = GROUPS.map((group) => ({ group, items: group.items.filter(canView) })).filter(

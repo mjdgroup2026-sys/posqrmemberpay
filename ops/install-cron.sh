@@ -52,6 +52,8 @@ mkdir -p "$LOG_DIR"
   echo "*/5 * * * * ${SCRIPT_DIR}/health-alert.sh >> ${LOG_DIR}/health.log 2>&1"
   echo "# ซ้อมกู้คืนทุกวันอาทิตย์ 04:05 — backup ที่ไม่เคยซ้อมกู้เท่ากับไม่มี backup"
   echo "5 4 * * 0 ${SCRIPT_DIR}/restore-db.sh --drill >> ${LOG_DIR}/restore-drill.log 2>&1"
+  echo "# เตือนแพ็กเกจใกล้หมดอายุ 7/3/1 วัน ทุกวัน 09:10 (Phase 14b) — ยิง route ของแอปด้วย CRON_SECRET จาก .env"
+  echo "10 9 * * * ${SCRIPT_DIR}/plan-expiry-cron.sh >> ${LOG_DIR}/plan-expiry.log 2>&1"
   echo "$MARK_END"
 } | crontab -
 

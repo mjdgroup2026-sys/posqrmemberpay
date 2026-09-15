@@ -2,8 +2,10 @@
 
 import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
-import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireSellingStore, requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { findStoreByQrToken } from "@/lib/store-resolve"
+import { isPlanActive } from "@/lib/subscription"
+import { assertTableCapacity, TableLimitExceeded } from "@/lib/table-limit"
 import {
   openTableSchema,
   mergeTablesSchema,
@@ -66,10 +68,12 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
     const store = await findStoreByQrToken(qrToken)
     if (!store) return { ok: false, error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" }
     if (store.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว" }
+    // แพ็กเกจหมดอายุ (Phase 14b) — เปิดโต๊ะใหม่ไม่ได้ทั้งจากฝั่งลูกค้าและพนักงาน
+    if (!isPlanActive(new Date(), store.planExpiresAt)) return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว" }
     storeId = store.storeId
   } else {
     try {
-      storeId = (await requireStore()).storeId
+      storeId = (await requireSellingStore()).storeId
     } catch (error) {
       return { ok: false, error: storeErrorMessage(error) }
     }
@@ -412,8 +416,13 @@ export async function createTable(formData: FormData): Promise<ActionResult> {
   }
 
   try {
-    await db.table.create({ data: { storeId, code: parsed.data.code } })
+    // เพดานโต๊ะตาม tier (Phase 14b) — นับใต้ advisory lock ในทรานแซคชันเดียวกับการสร้าง
+    await db.$transaction(async (tx) => {
+      await assertTableCapacity(tx, storeId, ctx.plan.tableLimit, 1)
+      await tx.table.create({ data: { storeId, code: parsed.data.code } })
+    })
   } catch (error) {
+    if (error instanceof TableLimitExceeded) return { ok: false, error: error.userMessage }
     if ((error as { code?: string }).code === "P2002") {
       return { ok: false, error: `มีโต๊ะรหัส ${parsed.data.code} อยู่แล้ว`, fieldErrors: { code: "รหัสนี้ซ้ำ" } }
     }
@@ -461,8 +470,12 @@ export async function createTablesBulk(formData: FormData): Promise<ActionResult
   }
 
   try {
-    await db.table.createMany({ data: fresh.map((code) => ({ storeId, code })), skipDuplicates: true })
-  } catch {
+    await db.$transaction(async (tx) => {
+      await assertTableCapacity(tx, storeId, ctx.plan.tableLimit, fresh.length)
+      await tx.table.createMany({ data: fresh.map((code) => ({ storeId, code })), skipDuplicates: true })
+    })
+  } catch (error) {
+    if (error instanceof TableLimitExceeded) return { ok: false, error: error.userMessage }
     return { ok: false, error: "เพิ่มโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 

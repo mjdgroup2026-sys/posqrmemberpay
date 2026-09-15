@@ -2,7 +2,9 @@ import "server-only"
 import { cache } from "react"
 import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
-import { resolveStoreContext, type StoreContext } from "@/lib/session"
+import { resolveStoreContext, type StoreContext, type StorePlan } from "@/lib/session"
+import { isPlanActive } from "@/lib/subscription"
+import { storeErrorMessage } from "@/lib/store-errors"
 import type { StoreRole } from "@/generated/prisma/client"
 import type { PermissionAction, ResourceKey } from "@/generated/prisma/client"
 
@@ -74,6 +76,8 @@ export type CurrentUserPermissions = {
   /// ร้านที่กำลังทำงานอยู่ (Phase 13) — ทุก query ต้องกรองด้วยค่านี้
   storeId: string
   storeRole: StoreRole
+  /// แพ็กเกจของร้าน (Phase 14b) — action ที่ขายใหม่ต้องเช็ก isPlanActive ก่อน (ผ่าน guardAction(..., { selling: true }))
+  plan: StorePlan
   roleId: string | null
   roleName: string | null
   /// resource → action ที่ทำได้ · ไม่มีคีย์ = ไม่มีสิทธิ์เลยกับ resource นั้น
@@ -105,6 +109,7 @@ async function permissionsFromContext(context: StoreContext): Promise<CurrentUse
     email: context.user.email,
     storeId: context.storeId,
     storeRole: context.role,
+    plan: context.plan,
   }
 
   if (context.role === "OWNER") {
@@ -170,11 +175,16 @@ export type ActionGuard =
 export async function guardAction(
   resource: ResourceKey,
   action: PermissionAction,
+  options: { selling?: boolean } = {},
 ): Promise<ActionGuard> {
   const permissions = await getCurrentPermissions()
   if (!permissions) return { ok: false, error: "กรุณาเข้าสู่ระบบก่อนทำรายการ" }
   if (!permissions.granted[resource]?.includes(action)) {
     return { ok: false, error: permissionErrorMessage(resource, action) }
+  }
+  // selling (Phase 14b) — action ที่สร้างการขายใหม่ต้องมีแพ็กเกจที่ยังไม่หมดอายุ (แนวเดียวกับ requireSellingStore)
+  if (options.selling && !isPlanActive(new Date(), permissions.plan.expiresAt)) {
+    return { ok: false, error: storeErrorMessage(new Error("STORE_EXPIRED")) }
   }
   return { ok: true, user: permissions }
 }

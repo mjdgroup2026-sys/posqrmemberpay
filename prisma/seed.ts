@@ -202,7 +202,15 @@ async function main() {
 
   // ร้าน + settings + บทบาทระบบ ก่อนทุกอย่าง (Phase 13) — ผู้ใช้ทุกคนที่มีอยู่เป็น OWNER ของร้านแรก
   const { storeId } = await provisionStore(prisma, DEFAULT_STORE)
-  await provisionStore(prisma, SECOND_STORE)
+  const second = await provisionStore(prisma, SECOND_STORE)
+  // ร้านตัวอย่างต้อง "ขายได้" ทันที (Phase 14b) — ให้แพ็กเกจ XL ถึง 2099 เหมือน backfill ร้านเดิมบน production
+  // (ร้านที่สร้างจริงผ่าน /onboarding เริ่มที่ยังไม่มีแพ็กเกจ แล้วรับสิทธิ์ทดลองที่ /billing)
+  for (const id of [storeId, second.storeId]) {
+    await prisma.store.update({
+      where: { id },
+      data: { planTier: "XL", tableLimit: 120, planExpiresAt: new Date("2099-12-31T00:00:00.000Z") },
+    })
+  }
   const users = await prisma.user.findMany({ where: { id: { not: "system" } }, select: { id: true } })
   for (const user of users) {
     await prisma.storeMember.upsert({

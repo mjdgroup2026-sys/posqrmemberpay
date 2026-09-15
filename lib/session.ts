@@ -3,7 +3,8 @@ import { cache } from "react"
 import { cookies, headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import type { StoreRole, StoreStatus } from "@/generated/prisma/client"
+import type { PlanTier, StoreRole, StoreStatus } from "@/generated/prisma/client"
+import { isPlanActive } from "@/lib/subscription"
 
 export async function getSession() {
   return auth.api.getSession({ headers: await headers() })
@@ -31,10 +32,19 @@ export type StoreMembershipSummary = {
   role: StoreRole
 }
 
+/// แพ็กเกจของร้าน (Phase 14b) — ค่า denormalized บน Store อ่านมาพร้อมกันในคำขอเดียว
+export type StorePlan = {
+  tier: PlanTier | null
+  tableLimit: number
+  /// null = ยังไม่มีแพ็กเกจ (ร้านใหม่ที่ยังไม่รับสิทธิ์ทดลอง/จ่าย) → ขายไม่ได้
+  expiresAt: Date | null
+}
+
 export type StoreContext = {
   user: { id: string; name: string; email: string; isPlatformAdmin: boolean }
   storeId: string
   store: { id: string; slug: string; name: string; status: StoreStatus }
+  plan: StorePlan
   role: StoreRole
   /// บทบาท matrix สิทธิ์ F1–F9 ในร้านนี้ (null = ยังไม่กำหนด) — OWNER ไม่ใช้ค่านี้
   permissionRoleId: string | null
@@ -65,7 +75,9 @@ export const resolveStoreContext = cache(async (): Promise<StoreContextResult> =
           storeId: true,
           role: true,
           roleId: true,
-          store: { select: { id: true, slug: true, name: true, status: true } },
+          store: {
+            select: { id: true, slug: true, name: true, status: true, planTier: true, tableLimit: true, planExpiresAt: true },
+          },
         },
       },
     },
@@ -94,7 +106,8 @@ export const resolveStoreContext = cache(async (): Promise<StoreContextResult> =
     context: {
       user: { id: user.id, name: user.name, email: user.email, isPlatformAdmin: user.isPlatformAdmin },
       storeId: membership.storeId,
-      store: membership.store,
+      store: { id: membership.store.id, slug: membership.store.slug, name: membership.store.name, status: membership.store.status },
+      plan: { tier: membership.store.planTier, tableLimit: membership.store.tableLimit, expiresAt: membership.store.planExpiresAt },
       role: membership.role,
       permissionRoleId: membership.roleId,
       memberships,
@@ -108,6 +121,15 @@ export async function requireStore(): Promise<StoreContext> {
   const result = await resolveStoreContext()
   if (!result.ok) throw new Error(result.reason)
   return result.context
+}
+
+/// ร้านที่ "ขายได้" — แพ็กเกจยังไม่หมดอายุ (Phase 14b) · ใช้กับ action ที่สร้างข้อมูลขายใหม่เท่านั้น
+/// (เปิดโต๊ะ, checkout POS, รับออเดอร์ลูกค้า) — reports/history/settings/ปิดบิลโต๊ะที่เปิดอยู่แล้ว ใช้ requireStore() ตามเดิม
+/// ไม่แก้ requireStore() เพราะ "หมดอายุ = อ่านได้ ขายไม่ได้" ไม่ใช่ล็อกทั้งร้าน
+export async function requireSellingStore(): Promise<StoreContext> {
+  const context = await requireStore()
+  if (!isPlanActive(new Date(), context.plan.expiresAt)) throw new Error("STORE_EXPIRED")
+  return context
 }
 
 /// เฉพาะเจ้าของร้าน — ตั้งค่าร้าน จัดการพนักงาน และทุกอย่างที่แตะบัญชีรับเงิน (Phase 15)

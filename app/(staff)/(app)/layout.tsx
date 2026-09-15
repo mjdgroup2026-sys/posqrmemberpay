@@ -5,6 +5,7 @@ import { getLowStockCount, getPendingNotificationCount } from "@/lib/queries"
 import { getCurrentPermissions, type ResourceKey } from "@/lib/permissions"
 import { Sidebar } from "@/components/sidebar"
 import { Topbar } from "@/components/topbar"
+import { PlanExpiryBanner } from "@/components/plan-expiry-banner"
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   // ร้านที่ทำงานอยู่ (Phase 13) — ไม่มีร้าน/ร้านถูกระงับ ยัง render shell ได้ (badge เป็น 0, เมนูว่าง)
@@ -39,6 +40,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
         pendingNotificationCount={pendingNotificationCount}
         viewableResources={viewableResources}
         isPlatformAdmin={user.isPlatformAdmin}
+        isOwner={context?.role === "OWNER"}
       />
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Topbar
@@ -48,7 +50,11 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
           activeStoreId={context?.storeId ?? null}
           stores={memberships.map((m) => ({ storeId: m.storeId, name: m.name, role: m.role, status: m.status }))}
         />
-        <main className="content">{children}</main>
+        <main className="content">
+          {/* เตือนแพ็กเกจ 7/3/1 วัน + หมดอายุ (Phase 14b) — คำนวณสด ไม่ต้องกดรับทราบ */}
+          {context ? <PlanExpiryBanner expiresAt={context.plan.expiresAt} isOwner={context.role === "OWNER"} /> : null}
+          {children}
+        </main>
       </div>
     </div>
   )

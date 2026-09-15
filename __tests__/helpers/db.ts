@@ -61,14 +61,31 @@ export const OTHER_STORE_SLUG = "test-b"
 
 /// สร้างร้านให้ครบชุด (Store + StoreSettings + บทบาทระบบ) ผ่าน provisionStore() ตัวเดียวกับ production
 /// idempotent — เรียกซ้ำได้ในเทสเดียวกัน
+/// ค่าเริ่มต้นให้ร้านทดสอบ "มีแพ็กเกจใช้งานอยู่" (XL ถึง 2099 — เหมือน backfill ร้านเดิม) เพื่อให้เทสเดิมทั้งหมด
+/// ยังวัดตรรกะธุรกิจ ไม่ไปติดด่าน requireSellingStore (Phase 14b) · เทส billing ระบุ plan เองเพื่อจำลองร้านใหม่/หมดอายุ
+export type TestStorePlan = "active" | "none" | { tier: "S" | "M" | "L" | "XL"; tableLimit: number; expiresAt: Date | null }
+
 export async function ensureTestStore(
-  input: { id?: string; slug?: string; name?: string; status?: "ACTIVE" | "SUSPENDED" } = {},
+  input: { id?: string; slug?: string; name?: string; status?: "ACTIVE" | "SUSPENDED"; plan?: TestStorePlan } = {},
 ) {
   const db = testPrisma()
   const id = input.id ?? TEST_STORE_ID
   const slug = input.slug ?? (id === OTHER_STORE_ID ? OTHER_STORE_SLUG : TEST_STORE_SLUG)
+  // ร้านที่มีอยู่แล้วและไม่ได้ระบุ plan → ไม่ทับ (ensureTestUser เรียกซ้ำผ่านทางนี้ ไม่ควรล้าง plan "none" ที่เทสตั้งไว้)
+  const existed = Boolean(await db.store.findUnique({ where: { id }, select: { id: true } }))
   const { storeId } = await provisionStore(db, { id, slug, name: input.name ?? `ร้านทดสอบ ${slug}` })
-  if (input.status) await db.store.update({ where: { id: storeId }, data: { status: input.status } })
+  if (existed && !input.plan) {
+    if (input.status) await db.store.update({ where: { id: storeId }, data: { status: input.status } })
+    return storeId
+  }
+  const plan = input.plan ?? "active"
+  const planData =
+    plan === "active"
+      ? { planTier: "XL" as const, tableLimit: 120, planExpiresAt: new Date("2099-12-31T00:00:00.000Z") }
+      : plan === "none"
+        ? { planTier: null, tableLimit: 12, planExpiresAt: null }
+        : { planTier: plan.tier, tableLimit: plan.tableLimit, planExpiresAt: plan.expiresAt }
+  await db.store.update({ where: { id: storeId }, data: { ...planData, ...(input.status ? { status: input.status } : {}) } })
   return storeId
 }
 
@@ -88,8 +105,8 @@ export async function resetDb(): Promise<void> {
       '"member", "store_settings", "product", "category",',
       // ตารางสิทธิ์ (§4) — ต้องล้างด้วย ไม่งั้นบทบาทจากเทสก่อนหน้าค้างแล้วชนกับ unique ของชื่อบทบาท
       '"role_permission", "role",',
-      // คำเชิญเข้าร้าน (Phase 14a) อ้าง store + user
-      '"store_invite",',
+      // คำเชิญเข้าร้าน (Phase 14a) อ้าง store + user · ค่าใช้งาน (Phase 14b) — trial_claim ไม่มี FK แต่ต้องล้างด้วย
+      '"store_invite", "store_subscription", "trial_claim",',
       // ร้านและสมาชิก (Phase 13) — ล้างท้ายสุดเพราะทุกตารางข้างบนอ้างมาที่นี่
       '"store_member", "store"',
       "RESTART IDENTITY CASCADE",

@@ -616,6 +616,8 @@ model StoreSettings {
   hasKDS               Boolean  @default(false)
   serviceChargePercent Decimal  @default(0) @db.Decimal(5, 2)
   crmEnabled           Boolean  @default(false)
+  /// เลขพร้อมเพย์ของร้าน (normalize เป็นตัวเลขล้วน) — ใช้รับสิทธิ์ทดลอง (Phase 14b) · Phase 15 ย้ายเข้า StorePaymentConfig
+  promptPayId          String?
   updatedAt            DateTime @updatedAt
   updatedById          String?
 
@@ -720,15 +722,23 @@ enum StoreRole {
 /// 1 ร้าน = 1 สาขา — ทุกตารางรากของข้อมูลขายมี storeId ชี้มาที่นี่
 /// ห้ามใช้ชื่อ Member (นั่นคือลูกค้าสะสมแต้มของร้าน)
 model Store {
-  id        String      @id @default(cuid())
+  id                String      @id @default(cuid())
   /// ใช้ใน URL/รายงาน/สคริปต์ — ร้านแรกที่ migrate มาจาก v1 คือ "default"
-  slug      String      @unique
-  name      String
-  status    StoreStatus @default(ACTIVE)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  slug              String      @unique
+  name              String
+  status            StoreStatus @default(ACTIVE)
+  /// ค่า denormalized จากแถว StoreSubscription PAID ล่าสุด (Phase 14b) — อัปเดตในทรานแซคชันเดียวกับการยืนยันเสมอ
+  /// planExpiresAt null = ยังไม่มีแพ็กเกจ → ขายไม่ได้ (requireSellingStore) · ร้านเดิมก่อนระบบค่าใช้งาน backfill ถึง 2099
+  planTier          PlanTier?
+  tableLimit        Int         @default(12)
+  planExpiresAt     DateTime?
+  /// ระดับเตือนหมดอายุที่ส่งอีเมลไปแล้ว (0/7/3/1) — กันส่งซ้ำ รีเซ็ตเป็น 0 เมื่อต่ออายุ
+  expiryNoticeLevel Int         @default(0)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   settings          StoreSettings?
+  subscriptions     StoreSubscription[]
   members           StoreMember[]
   roles             Role[]
   products          Product[]
@@ -797,4 +807,125 @@ model StoreInvite {
   @@index([storeId])
   @@index([email])
   @@map("store_invite")
+}
+
+// ───────────────────── ค่าใช้งานแบบต่ออายุ (Phase 14b — Store Subscription) ─────────────────────
+
+/// tier กำหนดเพดานโต๊ะและเรตต่อวัน — เกิน XL (120 โต๊ะ) = ติดต่อเรา ผู้ดูแลใช้ CUSTOM + setTableLimit
+enum PlanTier {
+  S
+  M
+  L
+  XL
+}
+
+enum SubscriptionKind {
+  RENEWAL
+  /// จ่ายส่วนต่าง tier สำหรับวันที่เหลือ — periodEnd = วันหมดอายุเดิม ไม่ยืดวัน
+  UPGRADE
+  /// ทดลอง 7 วัน tier S ครั้งเดียวต่อเลขพร้อมเพย์ (TrialClaim)
+  TRIAL
+  /// ผู้ดูแลแพลตฟอร์มเติมวัน/ชดเชย — และใช้ backfill ร้านที่มีอยู่ก่อนระบบค่าใช้งาน
+  CUSTOM
+}
+
+enum SubscriptionStatus {
+  /// รอผู้ดูแลยืนยันเงินเข้า — ยังไม่มีผลกับ Store.planExpiresAt
+  PENDING
+  PAID
+  /// ยกเลิก (ทั้งคำขอที่ยังไม่จ่าย และการถอยรายการที่ PAID ไปแล้ว — กรณีหลังต้องถอย planExpiresAt/tableLimit ในทรานแซคชันเดียวกัน)
+  VOID
+}
+
+enum SubscriptionPaymentMethod {
+  TRANSFER
+  PROMPTPAY
+  /// ทดลอง / ชดเชย / backfill ร้านเดิม
+  FREE
+}
+
+/// แพ็กเกจที่ขาย — **append-only เหมือน StockTransaction**: แก้ราคา/เพดานโต๊ะ = สร้างแถว version ใหม่
+/// แล้วตั้ง supersededById + isActive=false ให้แถวเก่า ห้าม UPDATE แถวเดิม → นี่คือ "ประวัติเรต" ที่ตรวจย้อนหลังได้
+/// ราคาสุทธิ (price) ตั้งตรง ๆ ไม่คำนวณจาก ratePerDay × days (ปัดเป็นเลขกลมตามตารางใน spec)
+model SubscriptionPlan {
+  id              String   @id @default(cuid())
+  /// เช่น S-D7, M-M3, TRIAL — unique ร่วมกับ version
+  code            String
+  version         Int      @default(1)
+  name            String
+  tier            PlanTier
+  tableLimit      Int
+  durationDays    Int
+  ratePerDay      Decimal  @db.Decimal(8, 2)
+  discountPercent Decimal  @default(0) @db.Decimal(5, 2)
+  price           Decimal  @db.Decimal(10, 2)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  supersededById  String?  @unique
+  createdAt       DateTime @default(now())
+  createdById     String?
+
+  supersededBy  SubscriptionPlan?   @relation("PlanSupersession", fields: [supersededById], references: [id])
+  supersedes    SubscriptionPlan?   @relation("PlanSupersession")
+  subscriptions StoreSubscription[]
+
+  @@unique([code, version])
+  @@index([isActive])
+  @@map("subscription_plan")
+}
+
+/// ledger การต่ออายุของร้าน — append-only · ตัวเลขทุกตัวเป็น snapshot ณ ตอนซื้อ (แก้แพ็กเกจทีหลังไม่กระทบ)
+/// Store.planTier/tableLimit/planExpiresAt เป็นค่า denormalized จากแถว PAID ล่าสุด — อัปเดตในทรานแซคชันเดียวกับการยืนยันเสมอ
+model StoreSubscription {
+  id               String                    @id @default(cuid())
+  storeId          String
+  /// null เฉพาะ CUSTOM/backfill ที่ไม่ได้อ้างแพ็กเกจใด
+  planId           String?
+  kind             SubscriptionKind
+  tier             PlanTier
+  tableLimit       Int
+  days             Int
+  ratePerDay       Decimal                   @db.Decimal(8, 2)
+  discountPercent  Decimal                   @default(0) @db.Decimal(5, 2)
+  listPrice        Decimal                   @db.Decimal(10, 2)
+  amount           Decimal                   @db.Decimal(10, 2)
+  periodStart      DateTime
+  periodEnd        DateTime
+  status           SubscriptionStatus        @default(PENDING)
+  paymentMethod    SubscriptionPaymentMethod
+  /// เลขอ้างอิงที่ร้านใส่ในบันทึกโอน (SUB-XXXXXX) — ไว้ให้ผู้ดูแลจับคู่กับรายการในแอปธนาคาร
+  requestRef       String                    @unique
+  /// เลขอ้างอิงจากธนาคารที่ผู้ดูแลกรอกตอนยืนยัน — unique กันยืนยันซ้ำ/เพิ่มวันซ้ำ
+  paymentReference String?                   @unique
+  paidAt           DateTime?
+  confirmedById    String?
+  voidedAt         DateTime?
+  voidedById       String?
+  /// แถว VOID ที่ถอยรายการ PAID ชี้กลับมาที่รายการเดิม
+  reversesId       String?                   @unique
+  note             String?
+  createdById      String?
+  createdAt        DateTime                  @default(now())
+
+  store    Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  plan     SubscriptionPlan?  @relation(fields: [planId], references: [id])
+  reverses StoreSubscription? @relation("SubscriptionReversal", fields: [reversesId], references: [id])
+  reversal StoreSubscription? @relation("SubscriptionReversal")
+
+  @@index([storeId])
+  @@index([status])
+  @@index([periodEnd])
+  @@map("store_subscription")
+}
+
+/// สิทธิ์ทดลองผูกกับเลขพร้อมเพย์ (SHA-256 ของเลขที่ normalize แล้ว ไม่เก็บเลขดิบ) — 1 เลข = ทดลองได้ครั้งเดียวตลอดกาล
+/// **ตั้งใจไม่มี FK/cascade ไป Store** — ร้านถูกลบแถวนี้ต้องอยู่ เลขเดิมโผล่อีก = ไม่ได้ทดลอง ต้องจ่าย
+/// และ **ไม่อยู่ใน STORE_SCOPED_MODELS** เพราะต้องค้นข้ามร้านเพื่อกันใช้ซ้ำ
+model TrialClaim {
+  id              String   @id @default(cuid())
+  promptPayIdHash String   @unique
+  storeId         String
+  claimedAt       DateTime @default(now())
+
+  @@map("trial_claim")
 }

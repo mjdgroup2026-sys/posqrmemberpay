@@ -8,45 +8,46 @@ import { prisma } from "@/lib/prisma"
 /// ทั้งสองค่า unique ทั้งระบบ (ไม่ใช่ต่อร้าน) จึงชี้ร้านได้จากค่าเดียว — หลังจากนี้ทุก query
 /// ต้องผ่าน forStore(storeId) ตามปกติ
 
-export type ResolvedStore = { storeId: string; slug: string; status: "ACTIVE" | "SUSPENDED" }
+/// planExpiresAt (Phase 14b) — ฝั่งลูกค้าต้องรู้ว่าร้าน "ยังขายได้" ไหมตั้งแต่ตอนหาร้าน (null = ยังไม่มีแพ็กเกจ)
+export type ResolvedStore = { storeId: string; slug: string; status: "ACTIVE" | "SUSPENDED"; planExpiresAt: Date | null }
 
 /// `cache()` — หน้า/layout/route ฝั่งลูกค้าเรียกซ้ำหลายจุดในคำขอเดียว ยิง query ครั้งเดียวพอ
 export const findStoreByQrToken = cache(async (qrToken: string): Promise<ResolvedStore | null> => {
   const qr = await prisma.qRCode.findUnique({
     where: { token: qrToken },
-    select: { store: { select: { id: true, slug: true, status: true } } },
+    select: { store: { select: { id: true, slug: true, status: true, planExpiresAt: true } } },
   })
   if (!qr) return null
-  return { storeId: qr.store.id, slug: qr.store.slug, status: qr.store.status }
+  return { storeId: qr.store.id, slug: qr.store.slug, status: qr.store.status, planExpiresAt: qr.store.planExpiresAt }
 })
 
 export async function findStoreByPaymentRef1(ref1: string): Promise<ResolvedStore | null> {
   const intent = await prisma.paymentIntent.findUnique({
     where: { ref1 },
-    select: { store: { select: { id: true, slug: true, status: true } } },
+    select: { store: { select: { id: true, slug: true, status: true, planExpiresAt: true } } },
   })
   if (!intent) return null
-  return { storeId: intent.store.id, slug: intent.store.slug, status: intent.store.status }
+  return { storeId: intent.store.id, slug: intent.store.slug, status: intent.store.status, planExpiresAt: intent.store.planExpiresAt }
 }
 
 /// คำเชิญเข้าร้าน (Phase 14a) — ลิงก์ในอีเมลมีแค่ token จึงต้องหาร้านจาก hash ของมันเช่นเดียวกัน
 export async function findStoreByInviteTokenHash(tokenHash: string): Promise<ResolvedStore | null> {
   const invite = await prisma.storeInvite.findUnique({
     where: { tokenHash },
-    select: { store: { select: { id: true, slug: true, status: true } } },
+    select: { store: { select: { id: true, slug: true, status: true, planExpiresAt: true } } },
   })
   if (!invite) return null
-  return { storeId: invite.store.id, slug: invite.store.slug, status: invite.store.status }
+  return { storeId: invite.store.id, slug: invite.store.slug, status: invite.store.status, planExpiresAt: invite.store.planExpiresAt }
 }
 
 /// ตอบรับคำเชิญจากหน้า /no-store ด้วย id (ผู้ใช้สมัครผ่านลิงก์เชิญแล้วผ่านการยืนยันอีเมลจน URL หาย)
 export async function findStoreByInviteId(inviteId: string): Promise<ResolvedStore | null> {
   const invite = await prisma.storeInvite.findUnique({
     where: { id: inviteId },
-    select: { store: { select: { id: true, slug: true, status: true } } },
+    select: { store: { select: { id: true, slug: true, status: true, planExpiresAt: true } } },
   })
   if (!invite) return null
-  return { storeId: invite.store.id, slug: invite.store.slug, status: invite.store.status }
+  return { storeId: invite.store.id, slug: invite.store.slug, status: invite.store.status, planExpiresAt: invite.store.planExpiresAt }
 }
 
 export type PendingInviteForUser = {

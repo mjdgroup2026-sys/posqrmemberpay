@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
 import { findStoreByQrToken } from "@/lib/store-resolve"
+import { isPlanActive } from "@/lib/subscription"
 import { toNumber } from "@/lib/format"
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
 import {
@@ -26,10 +27,15 @@ class CustomerAbort extends Error {
 }
 
 /// ร้านของลูกค้าคนนี้ = ร้านเจ้าของ qrToken (Phase 13) — ฝั่งลูกค้าไม่มี session/cookie มีแค่ token ใน URL
-async function resolveCustomerStore(qrToken: string): Promise<string> {
+/// mustBeSelling (Phase 14b): การสั่งอาหารใหม่ต้องมีแพ็กเกจที่ยังไม่หมดอายุ — แต่เรียกพนักงาน/เช็กบิล/จ่าย
+/// ของโต๊ะที่เปิดอยู่แล้วต้องทำได้ต่อ ไม่งั้นลูกค้าที่กินอยู่จะปิดบิลไม่ได้
+async function resolveCustomerStore(qrToken: string, mustBeSelling = false): Promise<string> {
   const store = await findStoreByQrToken(qrToken)
   if (!store) throw new CustomerAbort({ error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" })
   if (store.status === "SUSPENDED") throw new CustomerAbort({ error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" })
+  if (mustBeSelling && !isPlanActive(new Date(), store.planExpiresAt)) {
+    throw new CustomerAbort({ error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" })
+  }
   return store.storeId
 }
 
@@ -79,7 +85,7 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
   const { qrToken, items } = parsed.data
 
   try {
-    const storeId = await resolveCustomerStore(qrToken)
+    const storeId = await resolveCustomerStore(qrToken, true)
     const db = forStore(storeId)
     const created = await db.$transaction(async (tx) => {
       const session = await requireLiveSession(tx, qrToken)
