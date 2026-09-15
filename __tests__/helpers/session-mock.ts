@@ -1,5 +1,6 @@
 import { vi } from "vitest"
 import { storeErrorMessage } from "@/lib/store-errors"
+import { isPlanActive } from "@/lib/subscription"
 import { testPrisma } from "./db"
 
 /// mock ของ `@/lib/session` ที่ใช้ร่วมกันทุก integration test (Phase 13)
@@ -40,7 +41,9 @@ async function resolveStoreContext() {
           storeId: true,
           role: true,
           roleId: true,
-          store: { select: { id: true, slug: true, name: true, status: true } },
+          store: {
+            select: { id: true, slug: true, name: true, status: true, planTier: true, tableLimit: true, planExpiresAt: true },
+          },
         },
       },
     },
@@ -66,7 +69,8 @@ async function resolveStoreContext() {
     context: {
       user: { id: user.id, name: user.name, email: user.email, isPlatformAdmin: user.isPlatformAdmin },
       storeId: membership.storeId,
-      store: membership.store,
+      store: { id: membership.store.id, slug: membership.store.slug, name: membership.store.name, status: membership.store.status },
+      plan: { tier: membership.store.planTier, tableLimit: membership.store.tableLimit, expiresAt: membership.store.planExpiresAt },
       role: membership.role,
       permissionRoleId: membership.roleId,
       memberships,
@@ -88,6 +92,12 @@ export function sessionMockModule() {
     requireStore: vi.fn(async () => {
       const result = await resolveStoreContext()
       if (!result.ok) throw new Error(result.reason)
+      return result.context
+    }),
+    requireSellingStore: vi.fn(async () => {
+      const result = await resolveStoreContext()
+      if (!result.ok) throw new Error(result.reason)
+      if (!isPlanActive(new Date(), result.context.plan.expiresAt)) throw new Error("STORE_EXPIRED")
       return result.context
     }),
     requireOwner: vi.fn(async () => {

@@ -61,6 +61,8 @@ type StoreFixture = {
   staffId: string
   inviteId: string
   inviteEmail: string
+  subscriptionId: string
+  subscriptionRef: string
 }
 
 describe.skipIf(!dbReady)("การแยกข้อมูลตามร้าน (Phase 13 — tenant isolation)", () => {
@@ -92,6 +94,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       tables: await import("@/app/actions/tables"),
       onboarding: await import("@/app/actions/onboarding"),
       admin: await import("@/app/actions/admin"),
+      billing: await import("@/app/actions/billing"),
+      "admin-billing": await import("@/app/actions/admin-billing"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -240,6 +244,26 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       },
     })
 
+    // คำขอค่าใช้งานที่รอยืนยัน (Phase 14b) — requestRef มี tag ไว้จับการรั่ว
+    const subscription = await db.storeSubscription.create({
+      data: {
+        storeId,
+        kind: "RENEWAL",
+        tier: "S",
+        tableLimit: 12,
+        days: 7,
+        ratePerDay: "10.00",
+        listPrice: "70.00",
+        amount: "70.00",
+        periodStart: new Date(),
+        periodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        status: "PENDING",
+        paymentMethod: "PROMPTPAY",
+        requestRef: `SUB-${tag}${tag}${tag}${tag}${tag}${tag}`,
+        createdById: ownerId,
+      },
+    })
+
     return {
       storeId,
       ownerId,
@@ -266,6 +290,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       staffId: staff.id,
       inviteId: invite.id,
       inviteEmail: invite.email,
+      subscriptionId: subscription.id,
+      subscriptionRef: subscription.requestRef,
     }
   }
 
@@ -294,6 +320,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       f.ownerId,
       f.inviteId,
       f.inviteEmail,
+      f.subscriptionId,
+      f.subscriptionRef,
       `ร้าน ${f.tag}`,
     ]
   }
@@ -355,6 +383,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["listTablesForManage", (q, a) => q.listTablesForManage(a.storeId)],
     ["listMenuForManage", (q, a) => q.listMenuForManage(a.storeId)],
     ["listPendingInvites", (q, a) => q.listPendingInvites(a.storeId)],
+    ["listSubscriptionHistory", (q, a) => q.listSubscriptionHistory(a.storeId)],
+    ["getBillingOverview", (q, a) => q.getBillingOverview(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -415,6 +445,17 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "inviteMember",
     "acceptInvite",
     "setStoreStatus",
+    // Phase 14b: ฝั่งร้านไม่รับ id ของข้อมูลร้าน (แพ็กเกจเป็นของแพลตฟอร์ม) · ฝั่งแพลตฟอร์มทำงานข้ามร้านโดยตั้งใจ
+    // (เทสสิทธิ์อยู่ที่ billing.test.ts — ผู้ที่ไม่ใช่ admin ถูกปฏิเสธทุกตัว)
+    "claimTrial",
+    "requestRenewal",
+    "requestUpgrade",
+    "confirmSubscription",
+    "voidSubscription",
+    "grantCustomDays",
+    "setTableLimit",
+    "publishPlanVersion",
+    "retirePlan",
     // ฝั่งลูกค้า: ร้านมาจาก qrToken เสมอ — ทดสอบแยกด้านล่าง
     "submitOrder",
     "callStaff",
@@ -646,6 +687,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "revokeInvite",
       (b) => makeFormData({ id: b.inviteId }),
       async (b) => expect((await testPrisma().storeInvite.findUniqueOrThrow({ where: { id: b.inviteId } })).revokedAt).toBeNull(),
+    ],
+    [
+      "cancelPendingRequest",
+      (b) => makeFormData({ id: b.subscriptionId }),
+      async (b) => expect((await testPrisma().storeSubscription.findUniqueOrThrow({ where: { id: b.subscriptionId } })).status).toBe("PENDING"),
     ],
   ]
 

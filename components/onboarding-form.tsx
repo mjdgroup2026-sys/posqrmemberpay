@@ -57,8 +57,8 @@ export function OnboardingForm({ hasExistingStore }: { hasExistingStore: boolean
         return
       }
       toast.success(result.message)
-      // cookie ชี้ร้านใหม่แล้ว — โหลด layout ใหม่ให้ sidebar/topbar เห็นร้าน
-      router.push("/")
+      // cookie ชี้ร้านใหม่แล้ว — พาไปหน้าค่าใช้งานเพื่อรับสิทธิ์ทดลอง/เลือกแพ็กเกจก่อนเริ่มขาย (Phase 14b)
+      router.push("/billing")
       router.refresh()
     } catch {
       toast.error("สร้างร้านไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")

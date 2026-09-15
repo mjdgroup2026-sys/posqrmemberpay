@@ -2,6 +2,7 @@ import "server-only"
 import { forStore } from "@/lib/db"
 import { findStoreByInviteTokenHash, findStoreByQrToken } from "@/lib/store-resolve"
 import { hashInviteToken } from "@/lib/invite-token"
+import { isPlanActive } from "@/lib/subscription"
 import { inviteTokenSchema } from "@/lib/validation"
 import { toNumber } from "@/lib/format"
 import { businessDayRange, businessDateOnly } from "@/lib/day"
@@ -1069,7 +1070,7 @@ export type CustomerSession =
       openedAt: Date
       awaitingBill: boolean
     }
-  | { ok: false; reason: "QR_NOT_FOUND" | "QR_INVALIDATED" | "NO_SESSION" | "STORE_SUSPENDED" }
+  | { ok: false; reason: "QR_NOT_FOUND" | "QR_INVALIDATED" | "NO_SESSION" | "STORE_SUSPENDED" | "STORE_EXPIRED" }
 
 /// แปลง QR token เป็น session ที่ใช้งานอยู่ — ทุกหน้าฝั่งลูกค้าเรียกตัวนี้ก่อนเสมอ
 /// ไม่สร้าง session ใหม่ที่นี่ (การสร้างอยู่ที่ server action `openTableSession` เท่านั้น)
@@ -1094,7 +1095,8 @@ export async function resolveCustomerSession(qrToken: string): Promise<CustomerS
     orderBy: { openedAt: "desc" },
     select: { id: true, openedAt: true, status: true, table: { select: { id: true, code: true } } },
   })
-  if (!session) return { ok: false, reason: "NO_SESSION" }
+  // แพ็กเกจหมดอายุ (Phase 14b): โต๊ะที่เปิดอยู่แล้วยังเช็กบิล/จ่ายได้ → บอกเฉพาะตอนที่ยังไม่มี session ให้เกาะ
+  if (!session) return { ok: false, reason: isPlanActive(new Date(), store.planExpiresAt) ? "NO_SESSION" : "STORE_EXPIRED" }
 
   return {
     ok: true,
@@ -1837,5 +1839,137 @@ export async function lookupInvite(rawToken: string): Promise<InviteLookup> {
     email: invite.email,
     role: invite.role,
     expiresAt: invite.expiresAt,
+  }
+}
+
+// ───────────────────── ค่าใช้งานแบบต่ออายุ (Phase 14b) ─────────────────────
+
+export type SubscriptionRow = {
+  id: string
+  kind: "RENEWAL" | "UPGRADE" | "TRIAL" | "CUSTOM"
+  status: "PENDING" | "PAID" | "VOID"
+  tier: "S" | "M" | "L" | "XL"
+  tableLimit: number
+  days: number
+  amount: number
+  listPrice: number
+  paymentMethod: "TRANSFER" | "PROMPTPAY" | "FREE"
+  requestRef: string
+  paymentReference: string | null
+  periodStart: Date
+  periodEnd: Date
+  paidAt: Date | null
+  voidedAt: Date | null
+  note: string | null
+  createdAt: Date
+  /// ถูกถอยด้วยแถว VOID ทีหลัง (แถวนี้ยัง PAID ตาม ledger append-only แต่ไม่มีผลแล้ว)
+  reversed: boolean
+}
+
+function toSubscriptionRow(r: {
+  id: string
+  kind: SubscriptionRow["kind"]
+  status: SubscriptionRow["status"]
+  tier: SubscriptionRow["tier"]
+  tableLimit: number
+  days: number
+  amount: Prisma.Decimal
+  listPrice: Prisma.Decimal
+  paymentMethod: SubscriptionRow["paymentMethod"]
+  requestRef: string
+  paymentReference: string | null
+  periodStart: Date
+  periodEnd: Date
+  paidAt: Date | null
+  voidedAt: Date | null
+  note: string | null
+  createdAt: Date
+  reversal: { id: string } | null
+}): SubscriptionRow {
+  return {
+    id: r.id,
+    kind: r.kind,
+    status: r.status,
+    tier: r.tier,
+    tableLimit: r.tableLimit,
+    days: r.days,
+    amount: toNumber(r.amount),
+    listPrice: toNumber(r.listPrice),
+    paymentMethod: r.paymentMethod,
+    requestRef: r.requestRef,
+    paymentReference: r.paymentReference,
+    periodStart: r.periodStart,
+    periodEnd: r.periodEnd,
+    paidAt: r.paidAt,
+    voidedAt: r.voidedAt,
+    note: r.note,
+    createdAt: r.createdAt,
+    reversed: r.reversal !== null,
+  }
+}
+
+const SUBSCRIPTION_SELECT = {
+  id: true,
+  kind: true,
+  status: true,
+  tier: true,
+  tableLimit: true,
+  days: true,
+  amount: true,
+  listPrice: true,
+  paymentMethod: true,
+  requestRef: true,
+  paymentReference: true,
+  periodStart: true,
+  periodEnd: true,
+  paidAt: true,
+  voidedAt: true,
+  note: true,
+  createdAt: true,
+  reversal: { select: { id: true } },
+} satisfies Prisma.StoreSubscriptionSelect
+
+/// ประวัติค่าใช้งานของร้าน (ทุกแถว รวม PENDING/VOID) — หน้า /billing
+export async function listSubscriptionHistory(storeId: string): Promise<SubscriptionRow[]> {
+  const rows = await forStore(storeId).storeSubscription.findMany({
+    orderBy: { createdAt: "desc" },
+    select: SUBSCRIPTION_SELECT,
+  })
+  return rows.map(toSubscriptionRow)
+}
+
+export type BillingOverview = {
+  tier: "S" | "M" | "L" | "XL" | null
+  tableLimit: number
+  planExpiresAt: Date | null
+  tableCount: number
+  /// คำขอที่รอผู้ดูแลยืนยัน (มีได้ครั้งละ 1 ใบ)
+  pending: SubscriptionRow | null
+  /// รับสิทธิ์ทดลองได้ไหม — ยังไม่มีแพ็กเกจเลย และร้านนี้ยังไม่เคยรับ
+  trialAvailable: boolean
+  promptPayIdSet: boolean
+}
+
+export async function getBillingOverview(storeId: string): Promise<BillingOverview> {
+  const db = forStore(storeId)
+  const [store, tableCount, pending, trialRows, settings] = await Promise.all([
+    // Store ไม่อยู่ใน STORE_SCOPED_MODELS (มันคือร้านเอง) — extension ปล่อยผ่าน อ่านด้วย id ตรง
+    db.store.findUniqueOrThrow({
+      where: { id: storeId },
+      select: { planTier: true, tableLimit: true, planExpiresAt: true },
+    }),
+    db.table.count(),
+    db.storeSubscription.findFirst({ where: { status: "PENDING" }, orderBy: { createdAt: "desc" }, select: SUBSCRIPTION_SELECT }),
+    db.storeSubscription.count({ where: { kind: "TRIAL" } }),
+    db.storeSettings.findUnique({ where: { storeId }, select: { promptPayId: true } }),
+  ])
+  return {
+    tier: store.planTier,
+    tableLimit: store.tableLimit,
+    planExpiresAt: store.planExpiresAt,
+    tableCount,
+    pending: pending ? toSubscriptionRow(pending) : null,
+    trialAvailable: store.planExpiresAt === null && trialRows === 0,
+    promptPayIdSet: Boolean(settings?.promptPayId),
   }
 }

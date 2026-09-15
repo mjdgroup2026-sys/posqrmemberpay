@@ -21,6 +21,11 @@ const NOTICE: Record<Exclude<CustomerSession, { ok: true }>["reason"], { title: 
     title: "ร้านนี้ปิดรับออเดอร์ชั่วคราว",
     description: "กรุณาสั่งกับพนักงานโดยตรง",
   },
+  // แพ็กเกจของร้านหมดอายุ/ยังไม่เปิดใช้ (Phase 14b) — ลูกค้าไม่ต้องรู้เรื่องค่าใช้งานของร้าน แค่ให้สั่งกับพนักงาน
+  STORE_EXPIRED: {
+    title: "ร้านนี้ปิดรับออเดอร์ชั่วคราว",
+    description: "กรุณาสั่งกับพนักงานโดยตรง",
+  },
 }
 
 export default async function CustomerMenuPage({ params }: PageProps<"/order/[qrToken]/menu">) {

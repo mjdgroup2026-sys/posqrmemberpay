@@ -39,7 +39,8 @@ function round2(value: number): number {
 export async function createSale(formData: FormData): Promise<ActionResult<ReceiptData>> {
   // ด่านชั้นที่ 2 ของ §4 — เช็คสิทธิ์ POS:ADD ก่อนแตะข้อมูลเสมอ
   // ห้ามพึ่งปุ่มที่ซ่อนไว้ฝั่ง client เพราะ Server Action ถูกเรียกตรงได้
-  const guard = await guardAction("POS", "ADD")
+  // selling: แพ็กเกจหมดอายุ = ขายใหม่ไม่ได้ (Phase 14b) — void/ประวัติ/ปิดยอดยังทำได้
+  const guard = await guardAction("POS", "ADD", { selling: true })
   if (!guard.ok) return { ok: false, error: guard.error }
   const storeId = guard.user.storeId
   const db = forStore(storeId)

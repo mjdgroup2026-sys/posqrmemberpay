@@ -159,3 +159,22 @@ export async function sendStoreInviteMail(
     invite.url,
   )
 }
+
+/// เตือนแพ็กเกจใกล้หมดอายุ (Phase 14b) — ส่งถึง OWNER ทุกคนของร้าน ที่ระดับ 7 / 3 / 1 วัน (ครั้งเดียวต่อระดับ)
+export async function sendPlanExpiryMail(
+  to: string,
+  notice: { storeName: string; daysLeft: number; expiresAt: Date; url: string },
+): Promise<MailResult> {
+  const when = notice.expiresAt.toLocaleString("th-TH", { dateStyle: "long", timeStyle: "short", timeZone: "Asia/Bangkok" })
+  return deliver(
+    to,
+    {
+      subject: `แพ็กเกจร้าน ${notice.storeName} จะหมดอายุใน ${notice.daysLeft} วัน — MJD Mobile Order`,
+      heading: `แพ็กเกจของร้าน ${notice.storeName} จะหมดอายุใน ${notice.daysLeft} วัน`,
+      intro: `แพ็กเกจจะหมดอายุวันที่ ${when} เมื่อหมดอายุ ร้านยังดูข้อมูลเดิมได้ แต่จะเปิดโต๊ะ ขาย และรับออเดอร์ใหม่ไม่ได้ ต่ออายุล่วงหน้าได้เลย วันที่เหลือจะถูกนับต่อท้ายไม่หาย`,
+      buttonLabel: "ต่ออายุแพ็กเกจ",
+      footnote: "อีเมลนี้ส่งถึงเจ้าของร้านทุกคน ถ้าต่ออายุแล้วไม่ต้องทำอะไรเพิ่ม",
+    },
+    notice.url,
+  )
+}

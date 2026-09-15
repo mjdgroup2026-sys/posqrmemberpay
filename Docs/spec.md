@@ -1524,8 +1524,9 @@ enum ResourceKey {
 > **แบ่งเป็น 3 PR ตามลำดับ (ตัดสินใจ 2026-09-15 หลัง Phase 13 ขึ้น production)** — แต่ละก้อน migrate production
 > แยกรอบตามกติกา (pg_dump + ซ้อมบนสำเนา): **14a Onboarding** (กำลังทำ) → **14b Subscription** → **14c Brand**
 > · 14b/14c แตะเงินจึงต้องมีเทส concurrent · 14c พึ่ง 14b (จ่ายรวม batch)
-> · **14a โค้ด+เทสเสร็จ 2026-09-15** บน branch `feat/phase-14a-onboarding` — migration `add_store_invite` (additive) ·
->   env ใหม่ที่ต้องตั้งบน VPS ตอน deploy: `SIGNUP_OPEN=true` (ไม่ตั้ง = พฤติกรรมเดิม)
+> · **14a ขึ้น production แล้ว 2026-09-15 (PR #2)** — `SIGNUP_OPEN=true` ตั้งบน VPS แล้ว
+> · **14b โค้ด+เทสเสร็จ 2026-09-15** บน branch `feat/phase-14b-subscription` — migration `add_store_subscription` (additive + backfill
+>   ร้านเดิม + seed แพ็กเกจ) · env ใหม่ตอน deploy: `PLATFORM_PROMPTPAY_ID`, `CRON_SECRET` + รัน `ops/install-cron.sh` ใหม่
 
 #### ✅ 14a — Onboarding: สมัครเอง / สร้างร้าน / เชิญพนักงาน / ผู้ดูแลแพลตฟอร์ม (ไม่แตะเงิน)
 
@@ -1590,8 +1591,25 @@ enum ResourceKey {
 - [x] เติม `tenant-isolation.test.ts`: `listPendingInvites` ในตาราง query · `revokeInvite` ด้วย id ของร้าน B →
       `ok:false` · `inviteMember`/`acceptInvite`/`createStore`/`setStoreStatus` ในรายการที่ไม่มี foreign id
 
-#### 14b — ค่าใช้งานแบบต่ออายุ (Store Subscription) — PR ถัดไป
-> รายละเอียดอยู่ในหัวข้อ "ค่าใช้งานแบบต่ออายุ" ด้านล่าง (ยังไม่เริ่ม)
+#### ✅ 14b — ค่าใช้งานแบบต่ออายุ (Store Subscription) — โค้ด+เทสเสร็จ 2026-09-15 (branch `feat/phase-14b-subscription` — รอ merge)
+> กติกา/schema/ตารางราคา/หน้าจอ/เทส อยู่ในหัวข้อ "ค่าใช้งานแบบต่ออายุ" ด้านล่าง · **การตัดสินใจเพิ่มตอนเริ่มทำ (ล็อกแล้ว 2026-09-15)**:
+> 1. **ร้านที่มีอยู่ก่อน migration** (ร้าน `default` และร้านที่สร้างไว้ก่อน deploy 14b) → backfill เป็นแถว `StoreSubscription`
+>    `kind=CUSTOM, paymentMethod=FREE, amount=0, periodEnd=2099-12-31, note="ร้านเดิมก่อนระบบค่าใช้งาน"` + `tableLimit=120` (XL)
+>    — ledger อธิบายได้ว่าทำไมไม่หมดอายุ ไม่ใช่ค่า magic · ผู้ดูแลเปลี่ยนทีหลังได้ผ่าน `setTableLimit`/`voidSubscription`
+> 2. **ร้านใหม่หลังจากนี้**: `Store.planExpiresAt = null` = **ยังไม่มีแพ็กเกจ → ขายไม่ได้** จนกว่าจะกรอกเลขพร้อมเพย์รับสิทธิ์ทดลอง
+>    7 วัน (tier S) หรือจ่าย · หน้า `/onboarding` สร้างเสร็จพาไป `/billing` ทันที พร้อมแบนเนอร์บอกชัด
+> 3. **เลขพร้อมเพย์ของร้าน** เก็บที่ `StoreSettings.promptPayId` (normalize เป็นตัวเลขล้วน) ตั้งแต่ 14b เพราะสิทธิ์ทดลองผูกกับมัน
+>    — Phase 15 จะย้ายเข้า `StorePaymentConfig` (ย้ายคอลัมน์ ไม่ใช่ออกแบบใหม่)
+> 4. **เตือน 7/3/1 วัน**: แบนเนอร์คำนวณสดใน layout ฝั่งพนักงาน + อีเมลถึง OWNER ทุกคนผ่าน route
+>    `GET /api/cron/plan-expiry/[secret]` (env `CRON_SECRET`) ที่ `ops/install-cron.sh` ยิงวันละครั้ง — แอปไม่มี scheduler ในตัว ·
+>    dedupe ด้วย `Store.expiryNoticeLevel` (0/7/3/1 — รีเซ็ตเป็น 0 เมื่อต่ออายุ)
+> 5. **รับเงินค่าใช้งาน**: QR พร้อมเพย์ของแพลตฟอร์มจาก env `PLATFORM_PROMPTPAY_ID` (ใช้ `buildPromptPayPayload()` เดิม) + เลขอ้างอิง
+>    `SUB-XXXXXX` ให้ใส่ในบันทึกโอน → ผู้ดูแลกดยืนยันพร้อมกรอกเลขอ้างอิงธนาคาร (`paymentReference` unique) · ตรวจสลิปอัตโนมัติรอ Phase 15
+> 6. **guard หมดอายุ** = `requireSellingStore()` ใหม่ (ไม่แก้ `requireStore()` — reports/settings/history ต้องเข้าได้) โยน `STORE_EXPIRED`
+>    ใช้กับ `createSale` (POS), `openTableSession` ทั้งพนักงาน/ลูกค้า, `submitOrder` · ลูกค้าเห็น "ร้านปิดรับออเดอร์ชั่วคราว" ·
+>    โต๊ะที่เปิดอยู่แล้วตอนหมดอายุยังเช็กบิล/จ่าย/ปิดบิลได้ (ไม่ใช่การขายใหม่)
+> 7. `TrialClaim` **ไม่อยู่ใน `STORE_SCOPED_MODELS`** โดยตั้งใจ — ต้องเห็นข้ามร้านเพื่อกันใช้สิทธิ์ซ้ำ · เขียน/อ่านเฉพาะใน `claimTrial()` และ
+>    `lib/admin-queries.ts`
 
 #### 14c — ร้านหลายสาขา (`Brand`) — PR สุดท้ายของ Phase 14
 > รายละเอียดอยู่ในหัวข้อ "ร้านหลายสาขา" ด้านล่าง (ยังไม่เริ่ม — พึ่ง 14b)
@@ -1620,7 +1638,7 @@ enum ResourceKey {
         ย้าย `Store` ระหว่าง Brand
       - เทส: เจ้าของ Brand เข้าสาขาใต้ Brand ได้เป็น OWNER โดยไม่มี `StoreMember` · เจ้าของ Brand A เข้าสาขาของ
         Brand B ไม่ได้ · คัดลอกเมนูแล้วแก้ราคาที่สาขาปลายทางไม่กระทบต้นทาง · ยืนยัน batch ครึ่งเดียวไม่ได้ (ทั้งหมดหรือไม่เลย)
-- [ ] **ค่าใช้งานแบบต่ออายุ (Store Subscription)** — เก็บเงินร้านเป็น "วัน" ต่ออายุล่วงหน้าได้ มีส่วนลดจูงใจ
+- [x] **ค่าใช้งานแบบต่ออายุ (Store Subscription)** — ✅ **โค้ด+เทสเสร็จ 2026-09-15 (14b)** · เก็บเงินร้านเป็น "วัน" ต่ออายุล่วงหน้าได้ มีส่วนลดจูงใจ
       ให้ซื้อนาน และ**เก็บประวัติเรตทุกครั้งที่เปลี่ยน** (ตัดสินใจ 2026-09-14)
 
       **กติกา**
@@ -1697,7 +1715,22 @@ enum ResourceKey {
         `voidRenewal(id, reason)` / `grantCustomDays(storeId, days, note)` / `setTableLimit(storeId, n, note)`
         (ผู้ดูแลแพลตฟอร์ม), `publishPlanVersion(...)` (ผู้ดูแลแพลตฟอร์ม)
 
-      **เทส (แตะเงิน → ต้องมี)**
+      **สิ่งที่ทำต่างจากร่าง (14b — ตัดสินใจระหว่างทำ)**
+      - guard หมดอายุคือ `requireSellingStore()` ตัวใหม่ + `guardAction(..., { selling: true })` สำหรับ POS — **ไม่แก้ `requireStore()`**
+        (reports/history/settings/ปิดบิลโต๊ะที่เปิดอยู่ยังใช้ได้) · ฝั่งลูกค้า `resolveCustomerSession` คืน `STORE_EXPIRED`
+        เฉพาะเมื่อไม่มี session เปิดอยู่ (โต๊ะที่กินอยู่ต้องเช็กบิล/จ่ายได้ต่อ) · `submitOrder` ถูกกัน แต่ `callStaff`/`requestBill` ไม่กัน
+      - แถว VOID ที่ถอยรายการ PAID ใช้ตัวเลข**ติดลบ** (amount/listPrice/days) เพื่อให้ยอดรวมใน ledger ถูกโดยไม่ต้องกรอง ·
+        แถวเดิมยัง PAID และมี `reversal` ชี้กลับ · query "แพ็กเกจที่มีผล" = แถว PAID ล่าสุดที่ `reversal = null`
+      - `setTableLimit` บันทึกเป็นแถว CUSTOM 0 วัน (amount 0) เพื่อให้ ledger บอกได้ว่าใครตั้งเพดานพิเศษเมื่อไหร่ทำไม
+      - ช่วงเวลาของ RENEWAL คำนวณ**ตอนยืนยัน** (stack จาก `planExpiresAt` ณ เวลานั้น) ไม่ใช่ตอนขอ — แถว PENDING เก็บค่าชั่วคราวไว้ก่อน
+      - ร้านมีคำขอ PENDING ได้ครั้งละ 1 ใบ (ต้องยกเลิกก่อนขอใหม่) — กันโอนซ้อนแล้วจับคู่เลขอ้างอิงผิด
+      - เรตต่อวันของ tier ที่ใช้คิดส่วนต่างอัปเกรดมาจาก `TIER_SPEC` ใน `lib/subscription.ts` (ค่าอ้างอิงเดียวกับตารางราคา)
+      - `lib/subscription.ts` ถูก Client Component import → hash อยู่ `lib/subscription-hash.ts` (node:crypto ไม่มีในเบราว์เซอร์)
+      - แพ็กเกจอ่านผ่าน `lib/plan-queries.ts` (ข้อมูลอ้างอิงของแพลตฟอร์ม ไม่มี storeId) · ledger ต่อร้านใน `lib/queries.ts` ผ่าน `forStore`
+      - env ใหม่ `PLATFORM_PROMPTPAY_ID`, `CRON_SECRET` (ประกาศใน `docker-compose.prod.yml` แล้ว) · cron
+        `ops/plan-expiry-cron.sh` ถูกเพิ่มใน `ops/install-cron.sh` (09:10 ทุกวัน) — **ต้องรัน `bash ops/install-cron.sh` บน VPS อีกครั้ง**
+
+      **เทส (แตะเงิน → ต้องมี)** — ✅ 2026-09-15: `subscription.test.ts` unit 24 · `billing.test.ts` 24 · `table-limit.test.ts` 5 · tenant-isolation 100
       - stack ถูกต้อง: ต่ออายุตอนเหลือ 10 วัน ด้วย S-D30 → หมดอายุ +40 วัน ไม่ใช่ +30
       - ร้านหมดอายุ: `openTableSession` / `checkout` / `createMobileOrder` ตอบ `ok:false` ข้อความไทย ส่วน `getReports`
         ยังอ่านได้

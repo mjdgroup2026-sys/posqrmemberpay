@@ -25,7 +25,8 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
   · **ข้อยกเว้น**: บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) อนุมัติแล้วเป็นส่วนหนึ่งของ Phase 13
 - **Phase 14–16 (onboarding / รับเงินต่อร้าน / RBAC เต็ม)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
   · **Phase 13 (multi-tenant) merge + migrate production แล้ว 2026-09-15** (PR #1) · **Phase 14 แบ่งเป็น 3 PR:
-  14a Onboarding (โค้ด+เทสเสร็จ 2026-09-15, branch `feat/phase-14a-onboarding`) → 14b Subscription → 14c Brand**
+  14a Onboarding (production แล้ว 2026-09-15, PR #2) → 14b Subscription (โค้ด+เทสเสร็จ 2026-09-15, branch
+  `feat/phase-14b-subscription` รอ merge) → 14c Brand (ยังไม่เริ่ม)**
   — ต้องทำตามลำดับ ห้ามข้าม และ migration ที่แตะข้อมูลจริงต้อง `pg_dump` + ซ้อมบนสำเนาก่อนเสมอเหมือนที่ทำกับ Phase 13
 
 ## 📧 ระบบอีเมล (ต่อ Resend แล้วใน Phase 5)
@@ -38,6 +39,8 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 | `RESEND_API_KEY` | key จาก resend.com — **เว้นว่าง = dev พิมพ์ลิงก์ลง console, production throw** |
 | `MAIL_FROM` | ต้องอยู่ใต้โดเมนที่ verify ไว้: `MJD Mobile Order <no-reply@mail.jayjayservices.com>` |
 | `MAIL_REPLY_TO` | ไม่บังคับ |
+| `PLATFORM_PROMPTPAY_ID` | พร้อมเพย์ของ "แพลตฟอร์ม" ที่ร้านโอนค่าใช้งานเข้า (Phase 14b) — คนละตัวกับ `PROMPTPAY_ID` ของร้าน · เว้นว่าง = หน้า `/billing` ไม่มี QR ให้สแกน |
+| `CRON_SECRET` | secret ใน path `GET /api/cron/plan-expiry/<secret>` ที่ `ops/plan-expiry-cron.sh` ยิงวันละครั้ง (09:10) ส่งอีเมลเตือน 7/3/1 วัน · ≥ 16 ตัว · เว้นว่าง = 401 (แบนเนอร์ในแอปยังขึ้น) |
 | `SIGNUP_OPEN` | `true` = ใครก็สมัครได้ (Phase 14a) · ไม่ตั้ง = allowlist `SIGNUP_ALLOWED_*` เดิม / ปิดสมัคร (fail closed) — **production ต้องตั้งเป็น `true` ตอน deploy 14a** · 🔥 **env ใหม่ทุกตัวต้องประกาศใน `environment:` ของ `docker-compose.prod.yml` ด้วย** ตั้งใน `.env` บน VPS อย่างเดียวไม่ถึงคอนเทนเนอร์ (compose ไม่ใช้ `env_file`) |
 
 - **ห้ามพิมพ์ลิงก์ยืนยัน/รีเซ็ตรหัสผ่านลง log บน production** — ลิงก์คือ credential ชั่วคราว
@@ -66,13 +69,22 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    extension ช่วยไม่ได้ · `findUnique` ด้วย id จากผู้ใช้ปลอดภัยเพราะ extension ยัด storeId เข้า where ให้ —
    แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId`) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
    · เพิ่ม query/action ใหม่ต้องเพิ่มในตารางของ `__tests__/integration/tenant-isolation.test.ts` ไม่งั้นเทสแดง
-   · **การค้นข้ามร้านทำได้ 2 ที่เท่านั้น** (Phase 13–14a): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
-   qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้) และ `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
-   ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว) — ที่อื่นห้าม
+   · **การค้นข้ามร้านทำได้ 3 ที่เท่านั้น** (Phase 13–14b): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
+   qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้), `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
+   ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว) และ `lib/plan-queries.ts` (แพ็กเกจ = ข้อมูลอ้างอิงของ
+   แพลตฟอร์ม ไม่มี storeId) — ที่อื่นห้าม · `TrialClaim` ตั้งใจไม่ scoped (กันใช้สิทธิ์ทดลองซ้ำข้ามร้าน)
+   · **(Phase 14b) action ที่ "ขายใหม่" ต้องผ่าน `requireSellingStore()`** (หรือ `guardAction(..., { selling: true })` สำหรับ POS)
+   ไม่ใช่ `requireStore()` — แพ็กเกจหมดอายุ = อ่านได้ ขายไม่ได้ (`STORE_EXPIRED`) · ที่ใช้อยู่: `createSale`, `openTableSession`
+   ทั้งสองทาง, `submitOrder` · ห้ามใส่กับปิดบิล/void/รายงาน
 6. **ข้อความที่ผู้ใช้เห็นเป็นภาษาไทยทั้งหมด** รวมถึงข้อความ validation และ error
 7. **(Phase 6+, MJD Mobile Order) เปลี่ยน `MobileOrderItem.status` ต้องเป็น conditional update**
    (`updateMany` + `where: { status: 'AWAITING_KITCHEN' }`) เหมือนกติกากันขายเกินสต็อกในข้อ 4 — ป้องกัน race
    ระหว่างพนักงานกดยกเลิกรายการกับครัวกด "เริ่มทำ" พร้อมกัน ห้ามใช้ read-then-write ธรรมดา
+9. **(Phase 14b) `StoreSubscription` และ `SubscriptionPlan` เป็น ledger append-only** เหมือน `StockTransaction` —
+   ถอยรายการ PAID = สร้างแถว VOID ชดเชย (ตัวเลขติดลบ, `reversesId`) ไม่แก้แถวเดิม · แก้ราคาแพ็กเกจ = version ใหม่
+   (`supersededById`) ห้าม UPDATE · `Store.planTier/tableLimit/planExpiresAt` เป็นค่า denormalized ที่**ต้องอัปเดตใน
+   ทรานแซคชันเดียวกับแถว PAID เสมอ** · ยืนยันจ่ายด้วย `updateMany where status: PENDING` และเพดานโต๊ะนับใต้
+   `pg_advisory_xact_lock(720_002, hashtext(storeId))` (`lib/table-limit.ts`) — ทั้งคู่มีเทส concurrent
 8. **(Phase 6+) บิลจาก MJD Mobile Order ต้องออกเป็น `Sale` ปกติเสมอ** (`channel = MOBILE_ORDER` +
    `tableSessionId`) ห้ามสร้างตารางบิลแยก เพื่อให้ Dashboard/Reports/`/pos/history`/`CashierClosing` ใช้ query
    เดิมได้ครบโดยไม่ต้องเขียน logic ซ้ำ
@@ -248,8 +260,9 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   ```bash
   grep -rn '\$queryRaw\|\$executeRaw' --include='*.ts' . --exclude-dir=node_modules --exclude-dir=generated
   ```
-  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (8 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`)
-  และ `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
+  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (8 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`),
+  `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
+  และ `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
   · ทุกจุดต้องมี `WHERE "storeId" = ${storeId}` (Phase 13)
 - **Client Component ที่ใช้ `useSearchParams()` ต้องมี `<Suspense>` ครอบ** ถ้าหน้านั้นถูก prerender แบบ static
   (หน้า auth ทั้งหมดเข้าข่าย) ไม่งั้น `pnpm build` จะพัง
@@ -386,14 +399,22 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
 `requireStore()`/`requireOwner()` · `forStore()` extension · ตัวสลับร้านใน topbar · `/users` = พนักงานในร้าน ·
 เทส isolation ครอบทุก query/action · ร้านเดิมกลายเป็น `store_default` (slug `default`) admin เป็น OWNER
 
-**🔨 Phase 14a Onboarding โค้ด+เทสเสร็จ (2026-09-15, branch `feat/phase-14a-onboarding` — รอ merge)**: สมัครเองได้เมื่อ
+**✅ Phase 14a Onboarding ขึ้น production แล้ว (2026-09-15, PR #2)**: สมัครเองได้เมื่อ
 `SIGNUP_OPEN=true` → `/onboarding` สร้างร้าน (Store + Settings + บทบาท + OWNER + โต๊ะ/QR ตัวอย่าง 4 + เมนูตัวอย่าง 3
 ในทรานแซคชันเดียว) → เชิญพนักงานทางอีเมล (`StoreInvite` เก็บแค่ SHA-256 ของ token · ลิงก์ `/invite/[token]` public ·
 ตอบรับได้ทั้ง token และจากรายการคำเชิญค้างบน `/no-store`) → `/admin/stores` ระงับ/ปลดระงับร้าน (ผู้ดูแลแพลตฟอร์ม)
-· **ตอน deploy ต้องตั้ง `SIGNUP_OPEN=true` ใน `.env` บน VPS** ไม่งั้นยังปิดสมัครเหมือนเดิม
+· `SIGNUP_OPEN=true` ตั้งบน VPS แล้ว · admin เป็น `isPlatformAdmin` แล้ว
 
-**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 14b Subscription / 14c Brand** (ร่างใน spec แล้ว — ทิศทาง: เก็บค่าใช้งานเป็นวัน
-ตาม tier โต๊ะ, หลายสาขาใต้ Brand) · **Phase 15–16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**🔨 Phase 14b Subscription โค้ด+เทสเสร็จ (2026-09-15, branch `feat/phase-14b-subscription` — รอ merge)**: ค่าใช้งานคิดเป็นวัน
+ตาม tier โต๊ะ (S/M/L/XL = 12/30/60/120 โต๊ะ · 10/20/35/60 บาท/วัน · แพ็กเกจ 7/15/30/90/180/365 วัน ราคาสุทธิตั้งตรง ๆ) ·
+ทดลอง 7 วันครั้งเดียวต่อเลขพร้อมเพย์ (`TrialClaim` เก็บ hash) · ต่ออายุ stack ต่อท้าย · อัปเกรดกลางทางจ่ายส่วนต่าง ·
+หมดอายุ = อ่านได้ ขายไม่ได้ (`requireSellingStore`) · เพดานโต๊ะใต้ advisory lock · `/billing` (OWNER) · `/admin/stores/[id]`
+ledger + ยืนยัน/ถอย/เติมวัน/ตั้งเพดาน · `/admin/plans` version ประวัติเรต · เตือน 7/3/1 วัน (แบนเนอร์ + อีเมลผ่าน cron route)
+· **ร้านเดิมทุกร้านตอน migrate ถูก backfill เป็น FREE ถึง 2099 / 120 โต๊ะ** (ledger แถว `SUB-LEGACYxxxx`) · ร้านใหม่เริ่มที่
+"ยังไม่มีแพ็กเกจ" ต้องรับสิทธิ์ทดลอง/จ่ายก่อนขาย · **ตอน deploy**: ตั้ง `PLATFORM_PROMPTPAY_ID`/`CRON_SECRET` ใน `.env` บน VPS
++ รัน `bash ops/install-cron.sh` ใหม่ + ซ้อม migration บนสำเนาก่อน (แตะ `store`/`store_settings` ที่มีข้อมูล)
+
+**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 14c Brand** (ร่างใน spec แล้ว — หลายสาขาใต้ Brand, คัดลอกเมนู, จ่ายรวม batch) · **Phase 15–16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**
