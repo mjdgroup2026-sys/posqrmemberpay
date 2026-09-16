@@ -718,14 +718,14 @@ enum ResourceKey {
 > ⛔ **นอกขอบเขต v1** — พิมพ์เขียวสำหรับเฟสถัดไป (ดู [§7 Out of Scope](#7-out-of-scope-v1))
 > Acceptance Criteria ด้านล่างไม่นับรวมใน Definition of Done ของ v1
 
-- [ ] ผู้ที่มีสิทธิ์ `USERS:EDIT` สร้าง/แก้ไข/ลบ Role ได้ (ยกเว้น Role ระบบ "ผู้ดูแลระบบ" แก้ชื่อ/ลบไม่ได้)
-- [ ] กำหนดสิทธิ์ต่อ Role แบบตาราง matrix ต่อหน้า: เลือก View/Add/Edit/Delete แยกช่อง หรือกดปุ่มลัด "Full"/"Readonly"
-- [ ] Action ที่ไม่มีความหมายกับ resource นั้น (เช่น Edit/Delete บน Stock In/Stock Out) ถูก disable ในตาราง ไม่ให้เลือก
-- [ ] กำหนด Role ให้ผู้ใช้แต่ละคนได้จากหน้า `/users`
-- [ ] ผู้ใช้ที่ยังไม่มี Role เข้าได้เฉพาะหน้า `/settings` หน้าอื่นทั้งหมดถูกปฏิเสธและไม่แสดงในเมนู
-- [ ] ไม่มีสิทธิ์ View หน้าใด → เมนูนั้นหายไปจาก Sidebar และเข้า URL ตรง ๆ ถูก redirect ไปหน้า Access Denied
-- [ ] ไม่มีสิทธิ์ Add/Edit/Delete → ปุ่มที่เกี่ยวข้องในหน้านั้นถูกซ่อน/ปิดใช้งาน และ Server Action ปฏิเสธคำขอแม้เรียกตรง
-- [ ] ห้ามลบ/เปลี่ยน Role ของผู้ใช้คนสุดท้ายที่เป็น "ผู้ดูแลระบบ" (กันระบบไม่มีผู้ดูแลเหลือ)
+- [x] ผู้ที่มีสิทธิ์ `USERS:EDIT` สร้าง/แก้ไข/ลบ Role ได้ (ยกเว้น Role ระบบ "ผู้ดูแลระบบ" แก้ชื่อ/ลบไม่ได้)
+- [x] กำหนดสิทธิ์ต่อ Role แบบตาราง matrix ต่อหน้า: เลือก View/Add/Edit/Delete แยกช่อง หรือกดปุ่มลัด "Full"/"Readonly"
+- [x] Action ที่ไม่มีความหมายกับ resource นั้น (เช่น Edit/Delete บน Stock In/Stock Out) ถูก disable ในตาราง ไม่ให้เลือก
+- [x] กำหนด Role ให้ผู้ใช้แต่ละคนได้จากหน้า `/users`
+- [x] ผู้ใช้ที่ยังไม่มี Role เข้าได้เฉพาะหน้า `/settings` หน้าอื่นทั้งหมดถูกปฏิเสธและไม่แสดงในเมนู
+- [x] ไม่มีสิทธิ์ View หน้าใด → เมนูนั้นหายไปจาก Sidebar และเข้า URL ตรง ๆ ถูก redirect ไปหน้า Access Denied
+- [x] ไม่มีสิทธิ์ Add/Edit/Delete → ปุ่มที่เกี่ยวข้องในหน้านั้นถูกซ่อน/ปิดใช้งาน และ Server Action ปฏิเสธคำขอแม้เรียกตรง
+- [x] ห้ามลบ/เปลี่ยน Role ของผู้ใช้คนสุดท้ายที่เป็น "ผู้ดูแลระบบ" (กันระบบไม่มีผู้ดูแลเหลือ)
 
 ### F11 — ผังโต๊ะ (Table Overview + รวมโต๊ะ)
 - [x] แสดงตารางโต๊ะทั้งหมดเป็น grid พร้อม filter chip นับจำนวนต่อสถานะ (ว่าง/เปิดโต๊ะ/สั่งแล้ว/รอเช็กบิล/
@@ -1854,8 +1854,8 @@ enum ResourceKey {
       1 บาทให้เจ้าของจ่ายแล้วรอ callback ≤ 2 นาที — **ผ่านแล้วเท่านั้นถึงเปิดปิดบิลอัตโนมัติ** · ระหว่างนี้ติดต่อ SCB
       เรื่อง partner program (แอปเดียวของเรา ผูกหลาย Biller ID) ถ้าได้จะตัดการถือ credential ของร้านทิ้ง
 - [x] `isScbConfigured()` = env ของแพลตฟอร์มเท่านั้น (fallback) · "ร้านนี้พร้อมไหม" ถาม `isStoreScbReady()` · ผู้ดูแลไม่ต้องตั้งโหมดให้ร้านที่ verified แล้ว
-- [ ] เทส: สลิปซ้ำไม่ปิดบิลซ้ำ · สลิปโอนเข้าบัญชีร้านอื่นถูกปฏิเสธ · ยอดขาดถูกส่งให้พนักงาน · webhook ร้าน A ปิดบิล
-      ร้าน B ไม่ได้
+- [x] เทส: สลิปซ้ำไม่ปิดบิลซ้ำ · สลิปโอนเข้าบัญชีร้านอื่นถูกปฏิเสธ · ยอดขาดถูกส่งให้พนักงาน (`payment-slip.test.ts`) · webhook ร้าน A ปิดบิล
+      ร้าน B ไม่ได้ (`payment-scb-store.test.ts`)
 
 ### ✅ Phase 16 — Role-Based Permission เต็มรูปแบบ — ขึ้น production แล้ว 2026-09-16 (PR #8)
 > = หัวข้อ "Phase ถัดไป — Role-Based Permission" ข้างบน ปรับให้ `Role` อยู่ใต้ `Store` (ร้านกำหนดบทบาทเอง) ·
@@ -1874,7 +1874,9 @@ enum ResourceKey {
 >    Mobile Order อยู่แล้ว (F1–F9 ถูกกันด้วย roleId null) สิทธิ์จึงเท่าเดิมพอดี ไม่มีใครหลุดตอน deploy · บทบาทเดิมทุกตัว (ระบบ+ที่ร้านสร้าง)
 >    ได้ MO เต็ม ยกเว้น "แคชเชียร์" ได้ระดับพนักงานเสิร์ฟ · เจ้าของปรับลดทีหลังได้ที่ `/roles` (matrix โชว์ MO_* อัตโนมัติ)
 > 4. คำเชิญพนักงานใหม่ยังให้ `roleId = null` (เข้าได้เฉพาะ `/settings` ตาม §4) — เจ้าของกำหนดบทบาทที่ `/users`
-> 5. ยังไม่ซ่อนปุ่มรายสิทธิ์ใน component ฝั่ง Mobile Order — สอดคล้องกับ F1–F9 ที่มีอยู่ (ด่านจริงคือ server 2 ชั้น) · ทำเมื่อร้านจริงร้องขอ
+> 5. **ซ่อนปุ่มรายสิทธิ์แล้ว (2026-09-16 หลัง deploy)** — ทุก client component ของ F1–F9 และ Mobile Order รับ `allowed`/`can*`
+>    (ค่าเริ่มต้นเต็ม) จากหน้า (`granted[RESOURCE]` ของ `requirePageAccess`) · หน้าปิดบิลต้อง `MO_TABLES:EDIT` · stock-in/out, ปิดยอด
+>    โชว์แบนเนอร์อ่านอย่างเดียวแทนฟอร์ม · POS ปุ่มชำระเงินปิด · เทส `__tests__/components/permission-buttons.test.tsx` · ด่านจริงยังคงเป็น server
 > 6. migration แยก 2 ไฟล์: `add_mobile_order_resources` (ALTER TYPE ADD VALUE ×5) → `backfill_mobile_order_permissions` เพราะ PostgreSQL
 >    ห้ามใช้ค่า enum ใหม่ในทรานแซคชันเดียวกับที่เพิ่ม · id แถว backfill = md5 (idempotent · ON CONFLICT DO NOTHING) · ซ้อมบนสำเนา
 >    production แล้ว diff สะอาด · ไม่มี env ใหม่

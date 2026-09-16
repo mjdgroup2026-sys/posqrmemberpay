@@ -1,5 +1,6 @@
 "use client"
 
+import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -71,10 +72,16 @@ export function TableOverview({
   tables,
   paidBills = [],
   awaitingCallback = [],
+  allowed = FULL_ACCESS,
+  canAcknowledge = true,
 }: {
   tables: TableCard[]
   paidBills?: CustomerPaidBill[]
   awaitingCallback?: PaymentAwaitingCallback[]
+  /// สิทธิ์บน MO_TABLES (§4 · Phase 16): ADD เปิด/รวมโต๊ะ · EDIT ปิดบิล · DELETE ยกเลิกโต๊ะ — ซ่อนปุ่ม ด่านจริงอยู่ที่ action
+  allowed?: AllowedActions
+  /// MO_NOTIFICATIONS:EDIT — กดรับทราบได้
+  canAcknowledge?: boolean
 }) {
   const router = useRouter()
   const [filter, setFilter] = useState<Filter>("all")
@@ -294,20 +301,22 @@ export function TableOverview({
                       {table.pendingNotification.reason ? ` · ${table.pendingNotification.reason}` : ""}
                     </span>
                   </span>
-                  <button
-                    type="button"
-                    className="btn btn-danger btn-sm btn-block"
-                    style={{ marginTop: 8 }}
-                    disabled={pending}
-                    onClick={() => handleAcknowledge(table.pendingNotification!.id)}
-                  >
-                    รับทราบ
-                  </button>
+                  {canAcknowledge ? (
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm btn-block"
+                      style={{ marginTop: 8 }}
+                      disabled={pending}
+                      onClick={() => handleAcknowledge(table.pendingNotification!.id)}
+                    >
+                      รับทราบ
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 
               <div className="row" style={{ gap: 6, marginTop: "auto", flexWrap: "wrap" }}>
-                {table.status === "EMPTY" ? (
+                {table.status === "EMPTY" && allowed.includes("ADD") ? (
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
@@ -324,7 +333,7 @@ export function TableOverview({
                       ดูออร์เดอร์
                     </Link>
                     {/* โต๊ะที่ลูกค้ากดเช็กบิลแล้ว ต้องกดปิดบิลได้จากผังโต๊ะเลย ไม่ต้องเข้าหน้ารายละเอียดก่อน */}
-                    {table.status === "AWAITING_BILL" ? (
+                    {table.status === "AWAITING_BILL" && allowed.includes("EDIT") ? (
                       <Link
                         href={`/mobile-order/tables/${table.id}/billing`}
                         className="btn btn-accent btn-sm"
@@ -332,33 +341,37 @@ export function TableOverview({
                         ปิดบิล
                       </Link>
                     ) : null}
-                    <button
-                      type="button"
-                      className="btn btn-subtle btn-sm"
-                      disabled={pending || emptyTables.length === 0}
-                      title={emptyTables.length === 0 ? "ไม่มีโต๊ะว่างให้รวม" : undefined}
-                      onClick={() => {
-                        setMergeTarget("")
-                        setMerging(table)
-                      }}
-                    >
-                      <IconMerge size={15} aria-hidden /> รวมโต๊ะ
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger btn-sm"
-                      disabled={pending}
-                      onClick={() => {
-                        setCancelReason("")
-                        setCancelling(table)
-                      }}
-                    >
-                      ยกเลิกโต๊ะ
-                    </button>
+                    {allowed.includes("ADD") ? (
+                      <button
+                        type="button"
+                        className="btn btn-subtle btn-sm"
+                        disabled={pending || emptyTables.length === 0}
+                        title={emptyTables.length === 0 ? "ไม่มีโต๊ะว่างให้รวม" : undefined}
+                        onClick={() => {
+                          setMergeTarget("")
+                          setMerging(table)
+                        }}
+                      >
+                        <IconMerge size={15} aria-hidden /> รวมโต๊ะ
+                      </button>
+                    ) : null}
+                    {allowed.includes("DELETE") ? (
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        disabled={pending}
+                        onClick={() => {
+                          setCancelReason("")
+                          setCancelling(table)
+                        }}
+                      >
+                        ยกเลิกโต๊ะ
+                      </button>
+                    ) : null}
                   </>
                 ) : null}
 
-                {table.status === "OCCUPIED_MERGED" ? (
+                {table.status === "OCCUPIED_MERGED" && allowed.includes("ADD") ? (
                   <button
                     type="button"
                     className="btn btn-subtle btn-sm"

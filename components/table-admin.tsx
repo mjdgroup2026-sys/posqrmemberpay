@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { createTable, createTablesBulk, renameTable, deleteTable } from "@/app/actions/tables"
 import { formatNumber } from "@/lib/format"
 import type { ManagedTable } from "@/lib/queries"
-import type { FieldErrors } from "@/lib/types"
+import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconBack, IconPlus, IconSpinner, IconTable, IconTrash } from "@/components/icons"
 import {
   Dialog,
@@ -26,7 +26,7 @@ const STATUS_LABEL: Record<ManagedTable["status"], string> = {
   OCCUPIED_MERGED: "ถูกรวมกับโต๊ะอื่น",
 }
 
-export function TableAdmin({ tables }: { tables: ManagedTable[] }) {
+export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedTable[]; allowed?: AllowedActions }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
@@ -112,6 +112,7 @@ export function TableAdmin({ tables }: { tables: ManagedTable[] }) {
         </Link>
       </div>
 
+      {allowed.includes("ADD") ? (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
         <section className="card-ui card-pad">
           <h2 className="t-h2" style={{ marginBottom: 12 }}>
@@ -196,6 +197,7 @@ export function TableAdmin({ tables }: { tables: ManagedTable[] }) {
           </form>
         </section>
       </div>
+      ) : null}
 
       <section className="card-ui">
         <div className="panel-head">
@@ -243,6 +245,7 @@ export function TableAdmin({ tables }: { tables: ManagedTable[] }) {
                       </td>
                       <td style={{ padding: "12px 24px", textAlign: "right" }}>
                         <span className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
+                          {allowed.includes("EDIT") ? (
                           <button
                             type="button"
                             className="btn btn-subtle btn-sm"
@@ -255,6 +258,8 @@ export function TableAdmin({ tables }: { tables: ManagedTable[] }) {
                           >
                             แก้รหัส
                           </button>
+                          ) : null}
+                          {allowed.includes("DELETE") ? (
                           <button
                             type="button"
                             className="btn btn-danger btn-sm"
@@ -268,6 +273,7 @@ export function TableAdmin({ tables }: { tables: ManagedTable[] }) {
                           >
                             <IconTrash size={15} aria-hidden />
                           </button>
+                          ) : null}
                         </span>
                       </td>
                     </tr>

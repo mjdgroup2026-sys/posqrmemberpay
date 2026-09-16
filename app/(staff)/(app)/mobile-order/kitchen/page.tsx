@@ -8,7 +8,7 @@ export const metadata = { title: "Kitchen Display" }
 
 export default async function KitchenPage() {
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId } = await requirePageAccess("MO_KITCHEN")
+  const { storeId, granted } = await requirePageAccess("MO_KITCHEN")
   const [tickets, settings] = await Promise.all([listKitchenTickets(storeId), getStoreSettings(storeId)])
 
   // ★ ร้านที่ยังไม่เปิดโหมดจอครัวไม่ควรเห็นกระดาน 3 คอลัมน์ (F18) — ของเดิม render ให้เฉย ๆ
@@ -54,5 +54,5 @@ export default async function KitchenPage() {
     )
   }
 
-  return <KitchenDisplay tickets={tickets} />
+  return <KitchenDisplay tickets={tickets} canEdit={granted.MO_KITCHEN?.includes("EDIT") ?? false} />
 }

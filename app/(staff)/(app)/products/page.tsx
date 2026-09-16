@@ -7,7 +7,7 @@ export const metadata = { title: "สินค้า" }
 
 export default async function ProductsPage({ searchParams }: PageProps<"/products">) {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId } = await requirePageAccess("PRODUCTS")
+  const { storeId, granted } = await requirePageAccess("PRODUCTS")
 
   const params = await searchParams
   const search = typeof params.q === "string" ? params.q : ""
@@ -24,6 +24,7 @@ export default async function ProductsPage({ searchParams }: PageProps<"/product
   return (
     <Suspense fallback={<p className="t-body">กำลังโหลด…</p>}>
       <ProductManager
+        allowed={granted.PRODUCTS ?? []}
         products={products}
         categories={categories}
         search={search}

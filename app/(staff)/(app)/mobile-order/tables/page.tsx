@@ -6,12 +6,20 @@ export const metadata = { title: "ผังโต๊ะ" }
 
 export default async function TablesPage() {
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId } = await requirePageAccess("MO_TABLES")
+  const { storeId, granted } = await requirePageAccess("MO_TABLES")
   const [tables, paidBills, awaitingCallback] = await Promise.all([
     listTableOverview(storeId),
     listCustomerPaidBills(storeId),
     listPaymentsAwaitingCallback(storeId),
   ])
 
-  return <TableOverview tables={tables} paidBills={paidBills} awaitingCallback={awaitingCallback} />
+  return (
+    <TableOverview
+      tables={tables}
+      paidBills={paidBills}
+      awaitingCallback={awaitingCallback}
+      allowed={granted.MO_TABLES ?? []}
+      canAcknowledge={granted.MO_NOTIFICATIONS?.includes("EDIT") ?? false}
+    />
+  )
 }

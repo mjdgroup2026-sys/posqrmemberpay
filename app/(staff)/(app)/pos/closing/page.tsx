@@ -9,7 +9,8 @@ export const metadata = { title: "ปิดยอดประจำวัน" }
 
 export default async function ClosingPage() {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId } = await requirePageAccess("POS_CLOSING")
+  const { storeId, granted } = await requirePageAccess("POS_CLOSING")
+  const canClose = granted.POS_CLOSING?.includes("ADD") ?? false
 
   const session = await getSession()
   if (!session?.user) redirect("/login")
@@ -113,8 +114,10 @@ export default async function ClosingPage() {
               </span>
               {today.note ? <p className="t-caption">หมายเหตุ: {today.note}</p> : null}
             </div>
-          ) : (
+          ) : canClose ? (
             <ClosingForm summary={summary} />
+          ) : (
+            <div className="alert-banner info">คุณมีสิทธิ์ดูยอดขายอย่างเดียว — บันทึกรายการไม่ได้ (ติดต่อเจ้าของร้านเพื่อขอสิทธิ์)</div>
           )}
         </section>
 

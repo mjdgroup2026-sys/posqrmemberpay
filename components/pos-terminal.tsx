@@ -7,8 +7,10 @@ import { createSale } from "@/app/actions/sales"
 import { formatBaht, formatNumber } from "@/lib/format"
 import type { ProductOption } from "@/lib/queries"
 import {
+  FULL_ACCESS,
   PAYMENT_METHOD_LABEL,
   RETAIL_PAYMENT_METHODS,
+  type AllowedActions,
   type FieldErrors,
   type PaymentMethodValue,
   type ReceiptData,
@@ -39,9 +41,12 @@ function round2(value: number): number {
 export function PosTerminal({
   products,
   categories,
+  allowed = FULL_ACCESS,
 }: {
   products: ProductOption[]
   categories: { id: string; name: string }[]
+  /// สิทธิ์บน POS — ADD = ทำการขาย/ชำระเงิน (§4) · ไม่มี = ดูสินค้า/สต็อกได้แต่ปุ่มชำระเงินปิด
+  allowed?: AllowedActions
 }) {
   const router = useRouter()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -436,7 +441,8 @@ export function PosTerminal({
             <button
               type="button"
               className="btn btn-primary btn-block btn-lg"
-              disabled={lines.length === 0 || !validDiscount || hasOverStock}
+              disabled={lines.length === 0 || !validDiscount || hasOverStock || !allowed.includes("ADD")}
+              title={!allowed.includes("ADD") ? "คุณไม่มีสิทธิ์ทำการขาย" : undefined}
               onClick={() => {
                 setFieldErrors({})
                 setReceivedText("")
@@ -445,6 +451,7 @@ export function PosTerminal({
             >
               <IconWallet size={18} aria-hidden /> ชำระเงิน
             </button>
+            {!allowed.includes("ADD") ? <span className="field-hint">คุณมีสิทธิ์ดูอย่างเดียว — ทำการขายไม่ได้</span> : null}
             {hasOverStock ? (
               <span className="field-hint error">มีรายการที่เกินสต็อกคงเหลือ — แก้ไขก่อนชำระเงิน</span>
             ) : null}

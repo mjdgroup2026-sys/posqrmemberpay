@@ -8,7 +8,8 @@ export const metadata = { title: "รับสินค้าเข้า" }
 
 export default async function StockInPage() {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId } = await requirePageAccess("STOCK_IN")
+  const { storeId, granted } = await requirePageAccess("STOCK_IN")
+  const canAdd = granted.STOCK_IN?.includes("ADD") ?? false
 
   const [products, transactions] = await Promise.all([listProductOptions(storeId), listTransactions(storeId, 50)])
   const history = transactions.filter((t) => t.type === "IN").slice(0, 12)
@@ -30,7 +31,7 @@ export default async function StockInPage() {
           <h2 className="t-h2" style={{ marginBottom: 16 }}>
             บันทึกรายการ
           </h2>
-          <StockMoveForm products={products} action={stockIn} mode="in" />
+          {canAdd ? <StockMoveForm products={products} action={stockIn} mode="in" /> : <div className="alert-banner info">คุณมีสิทธิ์ดูการรับสินค้าเข้าอย่างเดียว — บันทึกรายการไม่ได้ (ติดต่อเจ้าของร้านเพื่อขอสิทธิ์)</div>}
         </section>
 
         <section className="card-ui">

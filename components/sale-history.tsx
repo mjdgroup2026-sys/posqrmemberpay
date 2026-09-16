@@ -1,5 +1,6 @@
 "use client"
 
+import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
 import { useState, useTransition } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
@@ -18,6 +19,8 @@ import {
 } from "@/components/ui/dialog"
 
 type Props = {
+  /// สิทธิ์บน POS_HISTORY — DELETE = กด void ได้
+  allowed?: AllowedActions
   sales: SaleListItem[]
   from: string
   to: string
@@ -25,7 +28,7 @@ type Props = {
   search: string
 }
 
-export function SaleHistory({ sales, from, to, status, search }: Props) {
+export function SaleHistory({ sales, from, to, status, search, allowed = FULL_ACCESS }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [isNavigating, startNavigation] = useTransition()
@@ -215,7 +218,7 @@ export function SaleHistory({ sales, from, to, status, search }: Props) {
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDetail(sale)}>
                           รายละเอียด
                         </button>
-                        {sale.canVoid ? (
+                        {sale.canVoid && allowed.includes("DELETE") ? (
                           <button
                             type="button"
                             className="btn btn-danger btn-sm"

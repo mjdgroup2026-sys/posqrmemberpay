@@ -8,7 +8,7 @@ export const metadata = { title: "จัดการ QR Code" }
 
 export default async function QrCodesPage() {
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId } = await requirePageAccess("MO_SETUP")
+  const { storeId, granted } = await requirePageAccess("MO_SETUP")
   const rows = await listQrCodes(storeId)
   const base = publicBaseUrl()
 
@@ -32,5 +32,5 @@ export default async function QrCodesPage() {
     }),
   )
 
-  return <QrManager cards={cards} />
+  return <QrManager cards={cards} allowed={granted.MO_SETUP ?? []} />
 }

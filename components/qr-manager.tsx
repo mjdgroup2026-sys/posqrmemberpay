@@ -1,5 +1,6 @@
 "use client"
 
+import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -24,7 +25,7 @@ export type QrCard = {
   imageDataUrl: string | null
 }
 
-export function QrManager({ cards }: { cards: QrCard[] }) {
+export function QrManager({ cards, allowed = FULL_ACCESS }: { cards: QrCard[]; allowed?: AllowedActions }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [type, setType] = useState<"STATIC" | "DYNAMIC">("STATIC")
@@ -91,7 +92,7 @@ export function QrManager({ cards }: { cards: QrCard[] }) {
           <button
             type="button"
             className="btn btn-subtle"
-            disabled={pending || missingCount === 0}
+            disabled={pending || missingCount === 0 || !allowed.includes("ADD")}
             title={missingCount === 0 ? "ทุกโต๊ะมี QR อยู่แล้ว" : undefined}
             onClick={() => {
               const formData = new FormData()
@@ -162,14 +163,16 @@ export function QrManager({ cards }: { cards: QrCard[] }) {
             )}
 
             <div className="row no-print" style={{ gap: 6, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={pending}
-                onClick={() => generate(card.tableId)}
-              >
-                {card.qrId ? "สร้างใบใหม่" : "สร้าง QR"}
-              </button>
+              {allowed.includes("ADD") ? (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={pending}
+                  onClick={() => generate(card.tableId)}
+                >
+                  {card.qrId ? "สร้างใบใหม่" : "สร้าง QR"}
+                </button>
+              ) : null}
 
               {card.imageDataUrl ? (
                 <a
@@ -183,22 +186,26 @@ export function QrManager({ cards }: { cards: QrCard[] }) {
 
               {card.qrId ? (
                 <>
-                  <button
-                    type="button"
-                    className="btn btn-subtle btn-sm"
-                    disabled={pending}
-                    onClick={() => reprint(card.qrId!)}
-                  >
-                    บันทึกพิมพ์ซ้ำ
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-danger btn-sm"
-                    disabled={pending}
-                    onClick={() => invalidate(card.qrId!)}
-                  >
-                    ยกเลิกใบนี้
-                  </button>
+                  {allowed.includes("EDIT") ? (
+                    <button
+                      type="button"
+                      className="btn btn-subtle btn-sm"
+                      disabled={pending}
+                      onClick={() => reprint(card.qrId!)}
+                    >
+                      บันทึกพิมพ์ซ้ำ
+                    </button>
+                  ) : null}
+                  {allowed.includes("DELETE") ? (
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={pending}
+                      onClick={() => invalidate(card.qrId!)}
+                    >
+                      ยกเลิกใบนี้
+                    </button>
+                  ) : null}
                 </>
               ) : null}
             </div>
