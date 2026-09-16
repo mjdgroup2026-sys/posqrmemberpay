@@ -1770,7 +1770,8 @@ enum ResourceKey {
 > **แบ่งเป็น 3 PR เหมือน Phase 14 (ตัดสินใจ 2026-09-16)**: **15a = ก** (ทำได้ทันที ไม่พึ่งของภายนอก — ✅ **ขึ้น production แล้ว
 > 2026-09-16, PR #6**) → **15b = ก+** (ต้องเลือกผู้ให้บริการตรวจสลิป + API key ก่อน) →
 > **15c = ข** (ต้อง credential SCB ต่อร้าน / ผล partner program) · **15b โค้ด+เทสเสร็จ 2026-09-16 ด้วยผู้ให้บริการจำลอง (mock)
-> — เปิดใช้จริงเมื่อได้ API key** · **15c โค้ด+เทสเสร็จ 2026-09-16 — ทดสอบจริงได้ด้วยร้าน default (ย้าย credential จาก env เข้าฐาน)**
+> — เปิดใช้จริงเมื่อได้ API key** · **15c ขึ้น production แล้ว 2026-09-16 (PR #12) — ทดสอบจริงได้ด้วยร้าน default (ย้าย credential จาก env เข้าฐาน)**
+> · **Phase 15 ปิดครบทั้งสามก้อนแล้ว** — ที่เหลือคือขั้นเปิดใช้ซึ่งต้องการ API key (15b) และการย้าย credential + สลับ URL ในพอร์ทัล SCB (15c)
 >
 > **การตัดสินใจตอนทำ 15a (ล็อกแล้ว 2026-09-16)**:
 > 1. `StoreSettings.promptPayId` **ย้ายคอลัมน์** ไป `StorePaymentConfig.promptPayId` (migration backfill แล้วค่อย DROP —
@@ -1821,7 +1822,7 @@ enum ResourceKey {
       EasySlip — ขอราคาเทียบก่อน) → เทียบ 4 เงื่อนไข: ผู้รับตรงบัญชีร้าน · ยอด ≥ บิล · รหัสอ้างอิงไม่เคยใช้
       (`Sale.paymentReference` unique) · เวลาไม่เกิน N นาที → `closeSessionWithPayment()` ตัวเดิม ·
       API ล่ม → ตกไปปิดมือแบบ ก
-#### ✅ 15c — ข SCB Biller ต่อร้าน — โค้ด+เทสเสร็จ 2026-09-16 (branch `feat/phase-15c-scb-per-store` — รอ merge)
+#### ✅ 15c — ข SCB Biller ต่อร้าน — ขึ้น production แล้ว 2026-09-16 (PR #12 · ร้าน default ยังใช้ env ผ่าน fallback — รอย้าย credential + ทดสอบ 1 บาท)
 > **การตัดสินใจ (ล็อกแล้ว 2026-09-16)**:
 > 1. credential อยู่ใน `StorePaymentConfig.scb*` — `scbApiKeyEnc`/`scbApiSecretEnc` เข้ารหัส **AES-256-GCM** ด้วย env ใหม่ `PAYMENT_CONFIG_KEY`
 >    (`lib/secret-box.ts` · รูปแบบ `v1.<iv>.<tag>.<ct>` base64url · ถอดไม่ได้ = ถือว่าไม่มี ห้ามเดา · **เปลี่ยนกุญแจ = ทุกร้านกรอกใหม่**) ·

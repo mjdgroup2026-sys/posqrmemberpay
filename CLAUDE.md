@@ -484,7 +484,7 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 เจ้าของเลือกโหมด ก+ ได้เมื่อตั้ง `SLIP_PROVIDER` · ไม่มี migration ไม่มี env บังคับ — **ใช้จริงเมื่อได้ API key (EasySlip/SlipOK free tier)
 แล้วทดสอบด้วยสลิปจริง 1 บาท** · dev ตั้ง `SLIP_PROVIDER=mock` ใน `.env` แล้ววาง payload `MOCK|…` ในช่องทดสอบใต้ QR
 
-**🔨 Phase 15c SCB ต่อร้าน โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-15c-scb-per-store` — รอ merge)**: `StorePaymentConfig.scb*`
+**✅ Phase 15c SCB ต่อร้าน ขึ้น production แล้ว (2026-09-16, PR #12 · backup `posmobileorderdb-20260916-173448.dump` · `PAYMENT_CONFIG_KEY` ตั้งบน VPS แล้ว · ร้าน default ยังใช้ env SCB_* ผ่าน fallback จนกว่าจะย้าย)**: `StorePaymentConfig.scb*`
 เข้ารหัส (`lib/secret-box.ts` + env `PAYMENT_CONFIG_KEY`) · `scb.ts` รับ credential เป็นพารามิเตอร์ · `lib/scb-store.ts` เลือกของร้าน (verified)
 → env fallback · webhook ต่อร้าน `/scb/store/[token]` + ตัวจัดการร่วม `lib/scb-webhook.ts` · ฟอร์ม SCB ในตั้งค่าร้าน + ปุ่มทดสอบ 1 บาท ·
 เทส 15 ใหม่ · migration additive ซ้อมแล้ว diff สะอาด · **ตอน deploy**: ตั้ง `PAYMENT_CONFIG_KEY` บน VPS ก่อน · ร้าน default ยังใช้ env
