@@ -464,7 +464,7 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 ผู้ดูแลตั้งโหมด SCB ที่ `/admin/stores/[id]` · migration ตั้ง `default` = `SCB_BILLER` ร้านอื่น = `PROMPTPAY_DIRECT` ·
 ซ้อมบนสำเนา production แล้ว diff สะอาด · **15b (ตรวจสลิป) / 15c (SCB ต่อร้าน) รอเจ้าของระบบเลือก provider/credential**
 
-**🔨 Phase 16 RBAC เต็ม โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-16-mobile-order-rbac` — รอ merge)**: resource `MO_*` 5 ตัว
+**✅ Phase 16 RBAC เต็ม ขึ้น production แล้ว (2026-09-16, PR #8 · CI run 35067809235 · backup `posmobileorderdb-20260916-141727.dump` · migration 2 ไฟล์ applied)**: resource `MO_*` 5 ตัว
 ครอบทุกหน้า/action ของ Mobile Order · preset "พนักงานเสิร์ฟ" · 2 migrations (เพิ่ม enum / backfill สิทธิ์ + ผูก STAFF ที่ไม่มีบทบาท) ·
 ซ้อมบนสำเนา production แล้ว diff สะอาด · ไม่มี env ใหม่ · ไม่ซ่อนปุ่มรายสิทธิ์ใน UI (เหมือน F1–F9 ที่มีอยู่ — ด่านจริงคือ server)
 
