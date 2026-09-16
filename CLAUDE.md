@@ -446,7 +446,7 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 (ไม่ใช่แค่ `/api/health`) · ⚠️ **SSH เข้า VPS จาก Claude Code ถูก auto mode ปฏิเสธ** (จัดเป็น production access) — ขั้น backup/ตรวจ
 ในคอนเทนเนอร์ต้องให้เจ้าของระบบรันเองผ่าน `! ssh posmobileorder …` (ใช้คำสั่งที่**ไม่มี single quote** ไม่งั้น bash ของ `!` ฟ้อง EOF)
 
-**🔨 Phase 15a โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-15a-payment-config` — รอ merge)**: `Store.paymentMode` +
+**✅ Phase 15a ขึ้น production แล้ว (2026-09-16, PR #6 · CI run 35062832243 · backup `posmobileorderdb-20260916-131403.dump` · ตรวจแล้ว `default` = `SCB_BILLER`, `store_payment_config` 0 แถวตามคาด)**: `Store.paymentMode` +
 `StorePaymentConfig` (ย้าย `promptPayId` มาจาก `StoreSettings` — migration backfill แล้ว DROP) · `getStorePaymentProfile()`
 แทน `isQrPaymentAvailable()`/env `PROMPTPAY_ID` · การ์ด "การรับเงินจากลูกค้า" ใน `/mobile-order/settings` (OWNER) ·
 ผู้ดูแลตั้งโหมด SCB ที่ `/admin/stores/[id]` · migration ตั้ง `default` = `SCB_BILLER` ร้านอื่น = `PROMPTPAY_DIRECT` ·
