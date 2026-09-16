@@ -472,7 +472,7 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 ครอบทุกหน้า/action ของ Mobile Order · preset "พนักงานเสิร์ฟ" · 2 migrations (เพิ่ม enum / backfill สิทธิ์ + ผูก STAFF ที่ไม่มีบทบาท) ·
 ซ้อมบนสำเนา production แล้ว diff สะอาด · ไม่มี env ใหม่ · ไม่ซ่อนปุ่มรายสิทธิ์ใน UI (เหมือน F1–F9 ที่มีอยู่ — ด่านจริงคือ server)
 
-**🔨 Phase 15b ตรวจสลิปอัตโนมัติ โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-15b-slip-verification` — รอ merge)**: `lib/slip-provider/`
+**✅ Phase 15b ตรวจสลิปอัตโนมัติ ขึ้น production แล้ว (2026-09-16, PR #10 — โค้ดรออยู่แบบปิด ยังไม่ตั้ง `SLIP_PROVIDER` บน VPS)**: `lib/slip-provider/`
 (mock/easyslip/slipok) · `lib/slip-settle.ts` ด่าน 4 ชั้น · `submitPaymentSlip` + `components/customer/slip-upload.tsx` (jsqr ฝั่งเบราว์เซอร์) ·
 เจ้าของเลือกโหมด ก+ ได้เมื่อตั้ง `SLIP_PROVIDER` · ไม่มี migration ไม่มี env บังคับ — **ใช้จริงเมื่อได้ API key (EasySlip/SlipOK free tier)
 แล้วทดสอบด้วยสลิปจริง 1 บาท** · dev ตั้ง `SLIP_PROVIDER=mock` ใน `.env` แล้ววาง payload `MOCK|…` ในช่องทดสอบใต้ QR

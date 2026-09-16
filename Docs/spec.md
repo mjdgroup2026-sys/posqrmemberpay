@@ -1798,7 +1798,7 @@ enum ResourceKey {
       `pay/promptpay` ฝั่งลูกค้าใช้โหมดของร้านเจ้าของ QR · `isScbConfigured()` ยังอ่าน env (15c เลิก)
 - [x] ผู้ดูแลแพลตฟอร์มตั้งโหมดให้ร้านที่ `/admin/stores/[id]` (`setStorePaymentMode`)
 
-#### ✅ 15b — ก+ ตรวจสลิปอัตโนมัติ — โค้ด+เทสเสร็จ 2026-09-16 (branch `feat/phase-15b-slip-verification` — รอ merge · ใช้จริงเมื่อได้ API key)
+#### ✅ 15b — ก+ ตรวจสลิปอัตโนมัติ — ขึ้น production แล้ว 2026-09-16 (PR #10 · โค้ดรออยู่แบบปิด — เปิดใช้จริงเมื่อได้ API key แล้วตั้ง `SLIP_PROVIDER` บน VPS)
 > **การตัดสินใจ (ล็อกแล้ว 2026-09-16)**:
 > 1. **interface กลาง `lib/slip-provider/`** สลับผู้ให้บริการด้วย env `SLIP_PROVIDER=mock|easyslip|slipok` + `SLIP_API_KEY` (+ `SLIP_API_BRANCH_ID`
 >    เฉพาะ SlipOK) — adapter ของ EasySlip/SlipOK เขียนตามเอกสารสาธารณะ **ยังไม่ได้ทดสอบกับ key จริง** ต้องลองด้วยสลิปจริง 1 บาทตอนเปิดใช้
