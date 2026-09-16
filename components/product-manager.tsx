@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { createProduct, updateProduct, deleteProduct } from "@/app/actions/products"
 import { formatBaht, formatNumber } from "@/lib/format"
 import type { ProductListItem } from "@/lib/queries"
-import type { FieldErrors } from "@/lib/types"
+import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconEdit, IconPlus, IconSearch, IconSpinner, IconTrash } from "@/components/icons"
 import {
   Dialog,
@@ -35,9 +35,11 @@ type Props = {
   search: string
   category: string
   onlyLow: boolean
+  /// สิทธิ์ของผู้ใช้บน PRODUCTS (§4) — ซ่อนปุ่มที่ทำไม่ได้ · ด่านจริงอยู่ที่ action
+  allowed?: AllowedActions
 }
 
-export function ProductManager({ products, categories, search, category, onlyLow }: Props) {
+export function ProductManager({ products, categories, search, category, onlyLow, allowed = FULL_ACCESS }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [isNavigating, startNavigation] = useTransition()
@@ -116,16 +118,18 @@ export function ProductManager({ products, categories, search, category, onlyLow
           <p className="t-eyebrow">คลังสินค้า</p>
           <h1 className="t-h1">สินค้า</h1>
         </div>
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => {
-            setFieldErrors({})
-            setCreating(true)
-          }}
-        >
-          <IconPlus size={17} aria-hidden /> เพิ่มสินค้า
-        </button>
+        {allowed.includes("ADD") ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              setFieldErrors({})
+              setCreating(true)
+            }}
+          >
+            <IconPlus size={17} aria-hidden /> เพิ่มสินค้า
+          </button>
+        ) : null}
       </div>
 
       <section className="card-ui">
@@ -236,25 +240,29 @@ export function ProductManager({ products, categories, search, category, onlyLow
                     </td>
                     <td style={{ padding: "12px 24px", textAlign: "right" }}>
                       <span className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm btn-icon"
-                          aria-label={`แก้ไข ${p.name}`}
-                          onClick={() => {
-                            setFieldErrors({})
-                            setEditing(p)
-                          }}
-                        >
-                          <IconEdit size={16} aria-hidden />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-danger btn-sm btn-icon"
-                          aria-label={`ลบ ${p.name}`}
-                          onClick={() => setDeleting(p)}
-                        >
-                          <IconTrash size={16} aria-hidden />
-                        </button>
+                        {allowed.includes("EDIT") ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm btn-icon"
+                            aria-label={`แก้ไข ${p.name}`}
+                            onClick={() => {
+                              setFieldErrors({})
+                              setEditing(p)
+                            }}
+                          >
+                            <IconEdit size={16} aria-hidden />
+                          </button>
+                        ) : null}
+                        {allowed.includes("DELETE") ? (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm btn-icon"
+                            aria-label={`ลบ ${p.name}`}
+                            onClick={() => setDeleting(p)}
+                          >
+                            <IconTrash size={16} aria-hidden />
+                          </button>
+                        ) : null}
                       </span>
                     </td>
                   </tr>

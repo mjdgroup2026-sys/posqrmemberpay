@@ -125,6 +125,8 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    ได้ MO เต็ม ยกเว้น "แคชเชียร์" ได้ระดับพนักงานเสิร์ฟ+ · ⚠️ `ALTER TYPE … ADD VALUE` ต้องแยกไฟล์ migration จากที่ใช้ค่าใหม่
    (PostgreSQL ห้ามใช้ในทรานแซคชันเดียวกัน) · ⚠️ `full` เป็น reserved word ใน SQL — เคยทำ migration พังแล้ว `migrate resolve --applied`
    ทับไปทั้งที่ยังไม่ได้รัน ต้องดูผลจริงก่อน resolve เสมอ (ตรงกับกับดักใน CLAUDE.md)
+   · **ปุ่มใน UI ซ่อนตามสิทธิ์ด้วย** (§4): client component รับ `allowed?: AllowedActions` / `can*` จาก `lib/types.ts` (ค่าเริ่มต้น `FULL_ACCESS`)
+   หน้าเป็นคนส่ง `granted[RESOURCE]` จาก `requirePageAccess()` — เพิ่มปุ่มใหม่ต้องครอบด้วย `allowed.includes(...)` ให้ตรงกับ action ที่ guard
 8. **(Phase 6+) บิลจาก MJD Mobile Order ต้องออกเป็น `Sale` ปกติเสมอ** (`channel = MOBILE_ORDER` +
    `tableSessionId`) ห้ามสร้างตารางบิลแยก เพื่อให้ Dashboard/Reports/`/pos/history`/`CashierClosing` ใช้ query
    เดิมได้ครบโดยไม่ต้องเขียน logic ซ้ำ

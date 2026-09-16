@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { saveMenuItem, deleteMenuItem, toggleMenuItemActive } from "@/app/actions/menu"
 import { formatBaht, formatNumber } from "@/lib/format"
 import type { ManagedMenuItem } from "@/lib/queries"
-import type { FieldErrors } from "@/lib/types"
+import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconPlus, IconSpinner, IconTrash } from "@/components/icons"
 import {
   Dialog,
@@ -28,7 +28,7 @@ const EMPTY_DRAFT = {
   groups: [] as GroupDraft[],
 }
 
-export function MenuAdmin({ items }: { items: ManagedMenuItem[] }) {
+export function MenuAdmin({ items, allowed = FULL_ACCESS }: { items: ManagedMenuItem[]; allowed?: AllowedActions }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
@@ -137,10 +137,12 @@ export function MenuAdmin({ items }: { items: ManagedMenuItem[] }) {
             เมนูที่ลูกค้าเห็นตอนสแกน QR — ปิดใช้งานเพื่อซ่อนชั่วคราวโดยไม่เสียประวัติการขาย
           </p>
         </div>
+        {allowed.includes("ADD") ? (
         <button type="button" className="btn btn-primary" onClick={startCreate}>
           <IconPlus size={17} aria-hidden />
           เพิ่มเมนู
         </button>
+        ) : null}
       </div>
 
       <section className="card-ui">
@@ -198,31 +200,37 @@ export function MenuAdmin({ items }: { items: ManagedMenuItem[] }) {
                     </td>
                     <td style={{ padding: "12px 24px", textAlign: "right" }}>
                       <span className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
-                        <button
-                          type="button"
-                          className="btn btn-subtle btn-sm"
-                          disabled={pending}
-                          onClick={() => toggle(item)}
-                        >
-                          {item.isActive ? "ปิดขาย" : "เปิดขาย"}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-subtle btn-sm"
-                          disabled={pending}
-                          onClick={() => startEdit(item)}
-                        >
-                          แก้ไข
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-danger btn-sm"
-                          disabled={pending || item.orderedCount > 0}
-                          title={item.orderedCount > 0 ? "เคยถูกสั่งแล้ว ลบไม่ได้ — ให้ปิดขายแทน" : undefined}
-                          onClick={() => setRemoving(item)}
-                        >
-                          <IconTrash size={15} aria-hidden />
-                        </button>
+                        {allowed.includes("EDIT") ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-subtle btn-sm"
+                              disabled={pending}
+                              onClick={() => toggle(item)}
+                            >
+                              {item.isActive ? "ปิดขาย" : "เปิดขาย"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-subtle btn-sm"
+                              disabled={pending}
+                              onClick={() => startEdit(item)}
+                            >
+                              แก้ไข
+                            </button>
+                          </>
+                        ) : null}
+                        {allowed.includes("DELETE") ? (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            disabled={pending || item.orderedCount > 0}
+                            title={item.orderedCount > 0 ? "เคยถูกสั่งแล้ว ลบไม่ได้ — ให้ปิดขายแทน" : undefined}
+                            onClick={() => setRemoving(item)}
+                          >
+                            <IconTrash size={15} aria-hidden />
+                          </button>
+                        ) : null}
                       </span>
                     </td>
                   </tr>

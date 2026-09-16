@@ -19,10 +19,13 @@ export function NotificationBoard({
   notifications,
   awaitingCallback = [],
   paidBills = [],
+  canAcknowledge = true,
 }: {
   notifications: NotificationCard[]
   awaitingCallback?: PaymentAwaitingCallback[]
   paidBills?: CustomerPaidBill[]
+  /// MO_NOTIFICATIONS:EDIT — ไม่มี = ดูอย่างเดียว
+  canAcknowledge?: boolean
 }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
@@ -115,7 +118,9 @@ export function NotificationBoard({
           ) : null}
         </span>
 
-        {urgent ? (
+        {urgent && !canAcknowledge ? (
+          <span className="t-caption">รอพนักงานที่มีสิทธิ์กดรับทราบ</span>
+        ) : urgent ? (
           <button
             type="button"
             className={isCall ? "btn btn-danger btn-block btn-sm" : "btn btn-primary btn-block btn-sm"}
@@ -147,7 +152,7 @@ export function NotificationBoard({
             การรับทราบเป็นแค่ป้ายซ้อนทับ ไม่เปลี่ยนสถานะของโต๊ะ
           </p>
         </div>
-        {waiting.length > 0 ? (
+        {waiting.length > 0 && canAcknowledge ? (
           <button
             type="button"
             className="btn btn-subtle"

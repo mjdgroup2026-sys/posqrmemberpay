@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { redirect } from "next/navigation"
 import { getBillingView } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { BillingForm } from "@/components/billing-form"
@@ -7,7 +8,9 @@ export const metadata = { title: "ปิดบิล" }
 
 export default async function BillingPage({ params }: PageProps<"/mobile-order/tables/[tableId]/billing">) {
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId } = await requirePageAccess("MO_TABLES")
+  const { storeId, granted } = await requirePageAccess("MO_TABLES")
+  // ปิดบิล = MO_TABLES:EDIT — มีแค่ VIEW ให้ดูยอดได้แต่กดยืนยันไม่ได้ (action ก็ปฏิเสธซ้ำ)
+  if (!granted.MO_TABLES?.includes("EDIT")) redirect("/access-denied?resource=MO_TABLES")
   const { tableId } = await params
   const bill = await getBillingView(storeId, tableId)
 

@@ -20,7 +20,7 @@ type Column = {
 /// กระดาน 3 คอลัมน์ของครัว — ใช้เฉพาะร้านที่เปิด `hasKDS` เท่านั้น
 /// ร้านที่ปิดไว้ถูกกันตั้งแต่ที่หน้า (app/(staff)/(app)/mobile-order/kitchen/page.tsx)
 /// จึงไม่ต้องมีสาขาโหมดไม่มี KDS ในนี้อีก
-export function KitchenDisplay({ tickets }: { tickets: KitchenTicket[] }) {
+export function KitchenDisplay({ tickets, canEdit = true }: { tickets: KitchenTicket[]; canEdit?: boolean }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
 
@@ -160,7 +160,7 @@ export function KitchenDisplay({ tickets }: { tickets: KitchenTicket[] }) {
                     </ul>
 
                     <div className="row" style={{ gap: 8 }}>
-                      {action ? (
+                      {action && canEdit ? (
                         <button
                           type="button"
                           className={action.className}

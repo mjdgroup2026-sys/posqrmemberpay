@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createCategory, updateCategory, deleteCategory } from "@/app/actions/categories"
 import { formatDate, formatNumber } from "@/lib/format"
-import type { FieldErrors } from "@/lib/types"
+import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconEdit, IconPlus, IconSpinner, IconTrash } from "@/components/icons"
 import {
   Dialog,
@@ -33,7 +33,7 @@ export type CategoryRow = {
   productCount: number
 }
 
-export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
+export function CategoryManager({ categories, allowed = FULL_ACCESS }: { categories: CategoryRow[]; allowed?: AllowedActions }) {
   const router = useRouter()
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<CategoryRow | null>(null)
@@ -103,16 +103,18 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
             หมวดหมู่เป็นข้อมูลหลักที่ฟอร์มสินค้าเลือกใช้ — ลบไม่ได้ถ้ายังมีสินค้าผูกอยู่
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => {
-            setFieldErrors({})
-            setCreating(true)
-          }}
-        >
-          <IconPlus size={17} aria-hidden /> เพิ่มหมวดหมู่
-        </button>
+        {allowed.includes("ADD") ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              setFieldErrors({})
+              setCreating(true)
+            }}
+          >
+            <IconPlus size={17} aria-hidden /> เพิ่มหมวดหมู่
+          </button>
+        ) : null}
       </div>
 
       <section className="card-ui">
@@ -145,27 +147,31 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
                     </td>
                     <td style={{ padding: "12px 24px", textAlign: "right" }}>
                       <span className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm btn-icon"
-                          aria-label={`แก้ไข ${c.name}`}
-                          onClick={() => {
-                            setFieldErrors({})
-                            setEditing(c)
-                          }}
-                        >
-                          <IconEdit size={16} aria-hidden />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-danger btn-sm btn-icon"
-                          aria-label={`ลบ ${c.name}`}
-                          disabled={c.productCount > 0}
-                          title={c.productCount > 0 ? "ลบไม่ได้ — ยังมีสินค้าผูกอยู่" : undefined}
-                          onClick={() => setDeleting(c)}
-                        >
-                          <IconTrash size={16} aria-hidden />
-                        </button>
+                        {allowed.includes("EDIT") ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm btn-icon"
+                            aria-label={`แก้ไข ${c.name}`}
+                            onClick={() => {
+                              setFieldErrors({})
+                              setEditing(c)
+                            }}
+                          >
+                            <IconEdit size={16} aria-hidden />
+                          </button>
+                        ) : null}
+                        {allowed.includes("DELETE") ? (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm btn-icon"
+                            aria-label={`ลบ ${c.name}`}
+                            disabled={c.productCount > 0}
+                            title={c.productCount > 0 ? "ลบไม่ได้ — ยังมีสินค้าผูกอยู่" : undefined}
+                            onClick={() => setDeleting(c)}
+                          >
+                            <IconTrash size={16} aria-hidden />
+                          </button>
+                        ) : null}
                       </span>
                     </td>
                   </tr>

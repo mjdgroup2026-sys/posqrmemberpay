@@ -1,5 +1,6 @@
 "use client"
 
+import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -29,7 +30,21 @@ const ITEM_STATUS: Record<OrderItemRow["status"], { label: string; chip: string 
   CANCELLED: { label: "ยกเลิกแล้ว", chip: "chip-neutral" },
 }
 
-export function TableDetail({ detail }: { detail: TableDetailData }) {
+export function TableDetail({
+  detail,
+  allowed = FULL_ACCESS,
+  canAcknowledge = true,
+  canKitchen = true,
+}: {
+  detail: TableDetailData
+  /// สิทธิ์บน MO_TABLES: EDIT ปิดบิล/กดเสิร์ฟ/พิมพ์ทิกเก็ต · DELETE ยกเลิกโต๊ะ/รายการ
+  allowed?: AllowedActions
+  /// MO_NOTIFICATIONS:EDIT
+  canAcknowledge?: boolean
+  /// MO_KITCHEN:EDIT — กดเสิร์ฟ/พิมพ์ทิกเก็ตได้อีกทาง (action รับได้ทั้งสองสิทธิ์)
+  canKitchen?: boolean
+}) {
+  const canServe = allowed.includes("EDIT") || canKitchen
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [cancellingItem, setCancellingItem] = useState<OrderItemRow | null>(null)
@@ -126,21 +141,25 @@ export function TableDetail({ detail }: { detail: TableDetailData }) {
             <span className="dot" />
             ยอดรวม ฿<span className="num">{formatBaht(detail.total)}</span>
           </span>
-          <Link href={`/mobile-order/tables/${detail.tableId}/billing`} className="btn btn-primary">
-            <IconReceipt size={17} aria-hidden />
-            ปิดบิล / รับชำระเงิน
-          </Link>
-          <button
-            type="button"
-            className="btn btn-danger"
-            disabled={pending}
-            onClick={() => {
-              setTableReason("")
-              setCancellingTable(true)
-            }}
-          >
-            ยกเลิกโต๊ะ
-          </button>
+          {allowed.includes("EDIT") ? (
+            <Link href={`/mobile-order/tables/${detail.tableId}/billing`} className="btn btn-primary">
+              <IconReceipt size={17} aria-hidden />
+              ปิดบิล / รับชำระเงิน
+            </Link>
+          ) : null}
+          {allowed.includes("DELETE") ? (
+            <button
+              type="button"
+              className="btn btn-danger"
+              disabled={pending}
+              onClick={() => {
+                setTableReason("")
+                setCancellingTable(true)
+              }}
+            >
+              ยกเลิกโต๊ะ
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -152,14 +171,16 @@ export function TableDetail({ detail }: { detail: TableDetailData }) {
                 {n.type === "CALL_STAFF" ? "ลูกค้าเรียกพนักงาน" : "ลูกค้าขอเช็กบิล"}
                 {n.reason ? ` · ${n.reason}` : ""} · {formatDateTime(n.createdAt)}
               </span>
-              <button
-                type="button"
-                className="btn btn-danger btn-sm"
-                disabled={pending}
-                onClick={() => acknowledge(n.id)}
-              >
-                รับทราบ
-              </button>
+              {canAcknowledge ? (
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
+                  disabled={pending}
+                  onClick={() => acknowledge(n.id)}
+                >
+                  รับทราบ
+                </button>
+              ) : null}
             </div>
           ))}
         </section>
@@ -191,15 +212,17 @@ export function TableDetail({ detail }: { detail: TableDetailData }) {
                   <IconReceipt size={15} aria-hidden />
                   ทิกเก็ต PDF
                 </a>
-                <button
-                  type="button"
-                  className="btn btn-subtle btn-sm"
-                  disabled={pending}
-                  onClick={() => reprint(order.id)}
-                  title="ส่งเข้าเครื่องพิมพ์ครัวที่ต่อ LAN (ต้องตั้ง KITCHEN_PRINTER_HOST)"
-                >
-                  ส่งเข้าเครื่องพิมพ์
-                </button>
+                {canServe ? (
+                  <button
+                    type="button"
+                    className="btn btn-subtle btn-sm"
+                    disabled={pending}
+                    onClick={() => reprint(order.id)}
+                    title="ส่งเข้าเครื่องพิมพ์ครัวที่ต่อ LAN (ต้องตั้ง KITCHEN_PRINTER_HOST)"
+                  >
+                    ส่งเข้าเครื่องพิมพ์
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -243,7 +266,7 @@ export function TableDetail({ detail }: { detail: TableDetailData }) {
 
                   <div className="row" style={{ gap: 6 }}>
                     {/* ปุ่มยกเลิกโผล่เฉพาะตอนยังรอครัวรับ — server ก็ปฏิเสธซ้ำอีกชั้นด้วย conditional update */}
-                    {item.status === "AWAITING_KITCHEN" ? (
+                    {item.status === "AWAITING_KITCHEN" && allowed.includes("DELETE") ? (
                       <button
                         type="button"
                         className="btn btn-danger btn-sm"
@@ -258,7 +281,7 @@ export function TableDetail({ detail }: { detail: TableDetailData }) {
                     ) : null}
 
                     {/* ร้านที่ไม่มี KDS ข้ามจากรอครัวรับไป "เสิร์ฟแล้ว" ได้เลย */}
-                    {item.status === "READY" || (!detail.hasKDS && item.status === "AWAITING_KITCHEN") ? (
+                    {canServe && (item.status === "READY" || (!detail.hasKDS && item.status === "AWAITING_KITCHEN")) ? (
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"
