@@ -1611,7 +1611,7 @@ enum ResourceKey {
 > 7. `TrialClaim` **ไม่อยู่ใน `STORE_SCOPED_MODELS`** โดยตั้งใจ — ต้องเห็นข้ามร้านเพื่อกันใช้สิทธิ์ซ้ำ · เขียน/อ่านเฉพาะใน `claimTrial()` และ
 >    `lib/admin-queries.ts`
 
-#### ✅ 14c — ร้านหลายสาขา (`Brand`) — โค้ด+เทสเสร็จ 2026-09-16 (branch `feat/phase-14c-brand` — รอ merge)
+#### ✅ 14c — ร้านหลายสาขา (`Brand`) — ขึ้น production แล้ว 2026-09-16 (PR #4)
 > รายละเอียดอยู่ในหัวข้อ "ร้านหลายสาขา" ด้านล่าง · **การตัดสินใจเพิ่มตอนเริ่มทำ (ล็อกแล้ว 2026-09-16)**:
 > 1. **1 บัญชี = 1 แบรนด์** — ลดคำถาม "แบรนด์ไหน" ในทุกฟอร์ม (schema รองรับหลายแบรนด์ต่อคนอยู่ แต่ action `createBrand` ปฏิเสธใบที่สอง)
 > 2. **ตรรกะสิทธิ์ย้ายไป `lib/store-context.ts` (`loadStoreContext()`)** — ทั้ง `lib/session.ts` และ mock ของเทสเรียกตัวเดียวกัน
@@ -1631,12 +1631,13 @@ enum ResourceKey {
 > 7. **`lib/brand-queries.ts` + `app/actions/brand.ts` = ที่ค้นข้ามร้านแห่งที่ 4** (กติกาข้อ 5) — ขอบเขตคือ `brand.ownerId = userId` เสมอ
 > 8. migration `20260916100000_add_brand_and_subscription_batch` additive ล้วน ไม่มี backfill (ร้านเดิม `brandId = NULL`) ·
 >    เทส `__tests__/integration/brand.test.ts` 21 เทสครอบทุกข้อในร่าง + concurrent ยืนยันใบ 5 ครั้งผ่าน 1 · `resetDb()` เพิ่ม `subscription_batch`/`brand`
-> 9. **ตอน deploy**: ไม่มี env ใหม่ · migration ไม่แตะแถวเดิม แต่ยังต้อง `pg_dump` + ซ้อมบนสำเนาตามกติกา
+> 9. **deploy แล้ว 2026-09-16**: backup `posmobileorderdb-20260916-113807.dump` → ซ้อม migrate deploy บนสำเนา (diff สะอาด) → merge PR #4
+>    → CI migrate + สลับ green → blue → ตรวจ `.next/server/app/(staff)/(app)/brand` ในคอนเทนเนอร์มีจริง · ไม่มี env ใหม่
 
 ---
 
 **ร่างเดิมของ 14b/14c (คงไว้เป็นสัญญา ลงรายละเอียดเพิ่มตอนเริ่มแต่ละก้อน):**
-- [x] **ร้านหลายสาขา (`Brand`)** — ✅ **โค้ด+เทสเสร็จ 2026-09-16 (14c)** · ตัดสินใจ 2026-09-14: **1 สาขา = 1 `Store` เสมอ** (เมนู/โต๊ะ/QR/tier/รายงาน
+- [x] **ร้านหลายสาขา (`Brand`)** — ✅ **ขึ้น production แล้ว 2026-09-16 (14c, PR #4)** · ตัดสินใจ 2026-09-14: **1 สาขา = 1 `Store` เสมอ** (เมนู/โต๊ะ/QR/tier/รายงาน
       แยกกันโดยธรรมชาติ สาขาเล็กจ่าย S สาขาใหญ่จ่าย L) · `Brand` เป็นแค่ชั้นบาง ๆ ครอบด้านบนเพื่อลดงานซ้ำของเจ้าของ
       **ไม่ใช่ที่เก็บข้อมูลขาย** — ห้ามย้าย `Table`/`MenuItem`/`Sale` ขึ้นไปอยู่ระดับ Brand
       - Schema: `Brand` (`id`, `name`, `ownerId` FK → User, `createdAt`) · `Store.brandId String?` (optional —

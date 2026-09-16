@@ -26,7 +26,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 - **Phase 14–16 (onboarding / รับเงินต่อร้าน / RBAC เต็ม)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
   · **Phase 13 (multi-tenant) merge + migrate production แล้ว 2026-09-15** (PR #1) · **Phase 14 แบ่งเป็น 3 PR:
   14a Onboarding (production แล้ว 2026-09-15, PR #2) → 14b Subscription (production แล้ว 2026-09-15, PR #3) →
-  14c Brand (โค้ด+เทสเสร็จ 2026-09-16, branch `feat/phase-14c-brand` รอ merge)**
+  14c Brand (production แล้ว 2026-09-16, PR #4)** — **Phase 14 ปิดครบทั้งสามก้อนแล้ว**
   — ต้องทำตามลำดับ ห้ามข้าม และ migration ที่แตะข้อมูลจริงต้อง `pg_dump` + ซ้อมบนสำเนาก่อนเสมอเหมือนที่ทำกับ Phase 13
 
 ## 📧 ระบบอีเมล (ต่อ Resend แล้วใน Phase 5)
@@ -427,7 +427,7 @@ ledger + ยืนยัน/ถอย/เติมวัน/ตั้งเพ�
 · `CRON_SECRET` ตั้งแล้ว cron ทำงานแล้ว · `PLATFORM_PROMPTPAY_ID` **ยังเว้นว่างโดยตั้งใจ** (เจ้าของสั่ง hold รอเลขจริง —
 หน้า `/billing` และ `/brand/billing` สร้างคำขอได้แต่ไม่มี QR จนกว่าจะเติมค่าแล้ว recreate คอนเทนเนอร์)
 
-**🔨 Phase 14c Brand โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-14c-brand` — รอ merge)**: `Brand` (1 บัญชี = 1 แบรนด์ ·
+**✅ Phase 14c Brand ขึ้น production แล้ว (2026-09-16, PR #4)**: `Brand` (1 บัญชี = 1 แบรนด์ ·
 `Store.brandId?` · เจ้าของแบรนด์ = OWNER ทุกสาขาอัตโนมัติผ่าน `lib/store-context.ts`) · `/brand` สร้าง/เปลี่ยนชื่อแบรนด์
 ดึงร้านที่ตัวเองเป็นเจ้าของเข้า (ย้ายระหว่างแบรนด์ยังไม่ทำ) · คัดลอกเมนูข้ามสาขา (`lib/menu-copy.ts` — สำเนาอิสระ
 MenuItem + Modifier ข้ามชื่อซ้ำ ไม่ติด featured · ใช้ทั้งบน `/brand` และตอนสร้างสาขาใหม่ที่ `/onboarding?brand=1`) ·
@@ -435,6 +435,10 @@ MenuItem + Modifier ข้ามชื่อซ้ำ ไม่ติด feature
 `/brand/billing` ใบจ่ายรวม `SubscriptionBatch` (`BAT-XXXXXX`) → ผู้ดูแลยืนยันทั้งใบที่ `/admin/batches/[id]` ·
 ตัวสลับร้านจัดกลุ่มตามแบรนด์ (`<optgroup>`) · migration `add_brand_and_subscription_batch` additive ล้วน ไม่มี backfill
 (ร้านเดิมทุกร้าน `brandId = NULL`) · เทส `__tests__/integration/brand.test.ts` 21 เทส (รวม concurrent ยืนยันใบ)
+· **deploy จริง 2026-09-16**: backup `posmobileorderdb-20260916-113807.dump` → ซ้อมบนสำเนาในเครื่อง → merge → CI run 35056401544
+migrate deploy ผ่าน + สลับ green → blue · ยืนยันโค้ดใหม่ในคอนเทนเนอร์ด้วย `ls .next/server/app/(staff)/(app)/brand` แล้ว
+(ไม่ใช่แค่ `/api/health`) · ⚠️ **SSH เข้า VPS จาก Claude Code ถูก auto mode ปฏิเสธ** (จัดเป็น production access) — ขั้น backup/ตรวจ
+ในคอนเทนเนอร์ต้องให้เจ้าของระบบรันเองผ่าน `! ssh posmobileorder …` (ใช้คำสั่งที่**ไม่มี single quote** ไม่งั้น bash ของ `!` ฟ้อง EOF)
 
 **ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 15–16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
