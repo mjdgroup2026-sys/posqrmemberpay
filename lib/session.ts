@@ -3,13 +3,12 @@ import { cache } from "react"
 import { cookies, headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import type { PlanTier, StoreRole, StoreStatus } from "@/generated/prisma/client"
 import { isPlanActive } from "@/lib/subscription"
+import { loadStoreContext, type StoreContext, type StoreContextResult } from "@/lib/store-context"
 
 export async function getSession() {
   return auth.api.getSession({ headers: await headers() })
 }
-
 /// เรียกเป็นบรรทัดแรกของ Server Action ที่แตะข้อมูล "ของตัวผู้ใช้" (โปรไฟล์/รหัสผ่าน) — ไม่ใช่ของร้าน
 /// action ที่แตะข้อมูลร้านต้องใช้ `requireStore()` แทน (Phase 13)
 export async function requireUser() {
@@ -24,95 +23,15 @@ export async function requireUser() {
 /// ต้องตรวจกับ StoreMember ทุกคำขอ ห้าม cache ข้ามคำขอ (ถอดพนักงานแล้วต้องมีผลทันที)
 export const ACTIVE_STORE_COOKIE = "activeStoreId"
 
-export type StoreMembershipSummary = {
-  storeId: string
-  slug: string
-  name: string
-  status: StoreStatus
-  role: StoreRole
-}
-
-/// แพ็กเกจของร้าน (Phase 14b) — ค่า denormalized บน Store อ่านมาพร้อมกันในคำขอเดียว
-export type StorePlan = {
-  tier: PlanTier | null
-  tableLimit: number
-  /// null = ยังไม่มีแพ็กเกจ (ร้านใหม่ที่ยังไม่รับสิทธิ์ทดลอง/จ่าย) → ขายไม่ได้
-  expiresAt: Date | null
-}
-
-export type StoreContext = {
-  user: { id: string; name: string; email: string; isPlatformAdmin: boolean }
-  storeId: string
-  store: { id: string; slug: string; name: string; status: StoreStatus }
-  plan: StorePlan
-  role: StoreRole
-  /// บทบาท matrix สิทธิ์ F1–F9 ในร้านนี้ (null = ยังไม่กำหนด) — OWNER ไม่ใช้ค่านี้
-  permissionRoleId: string | null
-  /// ร้านทั้งหมดที่ผู้ใช้อยู่ — ไว้ให้ตัวสลับร้านใน topbar
-  memberships: StoreMembershipSummary[]
-}
-
-export type StoreContextResult =
-  | { ok: true; context: StoreContext }
-  | { ok: false; reason: "UNAUTHENTICATED" | "NO_STORE" | "STORE_SUSPENDED"; memberships: StoreMembershipSummary[] }
+/// type ทั้งหมดของ context อยู่ที่ lib/store-context.ts (ไม่แตะ server-only) — re-export ให้ผู้เรียกเดิม import จากที่นี่ได้ต่อ
+export type { StoreContext, StoreContextResult, StoreMembershipSummary, StorePlan } from "@/lib/store-context"
 
 /// อ่าน "ผู้ใช้ + ร้านที่ทำงานอยู่ + บทบาทในร้านนั้น" จาก DB — `cache()` ทำให้เรียกกี่ครั้งในคำขอเดียว
-/// ก็ยิง query ครั้งเดียว แต่ไม่ข้ามคำขอ
+/// ก็ยิง query ครั้งเดียว แต่ไม่ข้ามคำขอ · ตรรกะจริงอยู่ที่ loadStoreContext() (ใช้ร่วมกับ mock ของเทส)
 export const resolveStoreContext = cache(async (): Promise<StoreContextResult> => {
   const session = await getSession()
-  if (!session?.user) return { ok: false, reason: "UNAUTHENTICATED", memberships: [] }
-
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      isPlatformAdmin: true,
-      storeMemberships: {
-        orderBy: { createdAt: "asc" },
-        select: {
-          storeId: true,
-          role: true,
-          roleId: true,
-          store: {
-            select: { id: true, slug: true, name: true, status: true, planTier: true, tableLimit: true, planExpiresAt: true },
-          },
-        },
-      },
-    },
-  })
-  if (!user) return { ok: false, reason: "UNAUTHENTICATED", memberships: [] }
-
-  const memberships: StoreMembershipSummary[] = user.storeMemberships.map((m) => ({
-    storeId: m.storeId,
-    slug: m.store.slug,
-    name: m.store.name,
-    status: m.store.status,
-    role: m.role,
-  }))
-  if (user.storeMemberships.length === 0) return { ok: false, reason: "NO_STORE", memberships }
-
-  // cookie ชี้ร้านที่ไม่ได้เป็นสมาชิก → ไม่เชื่อ ตกไปใช้ร้านแรก (ไม่ใช่ error เพื่อไม่ให้ค้างหน้าเปล่า)
   const wanted = (await cookies()).get(ACTIVE_STORE_COOKIE)?.value
-  const membership = user.storeMemberships.find((m) => m.storeId === wanted) ?? user.storeMemberships[0]
-
-  if (membership.store.status === "SUSPENDED") {
-    return { ok: false, reason: "STORE_SUSPENDED", memberships }
-  }
-
-  return {
-    ok: true,
-    context: {
-      user: { id: user.id, name: user.name, email: user.email, isPlatformAdmin: user.isPlatformAdmin },
-      storeId: membership.storeId,
-      store: { id: membership.store.id, slug: membership.store.slug, name: membership.store.name, status: membership.store.status },
-      plan: { tier: membership.store.planTier, tableLimit: membership.store.tableLimit, expiresAt: membership.store.planExpiresAt },
-      role: membership.role,
-      permissionRoleId: membership.roleId,
-      memberships,
-    },
-  }
+  return loadStoreContext(prisma, session?.user?.id ?? null, wanted)
 })
 
 /// เรียกเป็นบรรทัดแรกของทุก Server Action ที่แตะข้อมูลร้าน (แทน requireUser() ตั้งแต่ Phase 13)

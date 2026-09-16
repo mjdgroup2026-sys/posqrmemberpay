@@ -149,6 +149,7 @@ model User {
   updatedAt       DateTime @updatedAt
 
   storeMemberships          StoreMember[]
+  ownedBrands               Brand[]           @relation("BrandOwner")
   sessions                  Session[]
   accounts                  Account[]
   sales                     Sale[]            @relation("SaleCashier")
@@ -734,9 +735,12 @@ model Store {
   planExpiresAt     DateTime?
   /// ระดับเตือนหมดอายุที่ส่งอีเมลไปแล้ว (0/7/3/1) — กันส่งซ้ำ รีเซ็ตเป็น 0 เมื่อต่ออายุ
   expiryNoticeLevel Int         @default(0)
+  /// แบรนด์ที่สาขานี้อยู่ใต้ (Phase 14c) — null = ร้านสาขาเดียว ไม่ต้องมี Brand
+  brandId           String?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
+  brand             Brand?              @relation(fields: [brandId], references: [id], onDelete: SetNull)
   settings          StoreSettings?
   subscriptions     StoreSubscription[]
   members           StoreMember[]
@@ -757,11 +761,30 @@ model Store {
   paymentIntents    PaymentIntent[]
   invites           StoreInvite[]
 
+  @@index([brandId])
   @@map("store")
 }
 
 /// ผู้ใช้ 1 คนอยู่ได้หลายร้าน — ห้ามเพิ่ม storeId ลงตาราง user ของ Better Auth
 /// ต้องมี OWNER อย่างน้อย 1 คนต่อร้านเสมอ (บังคับที่ action ไม่ใช่ DB)
+/// ร้านหลายสาขา (Phase 14c) — ชั้นบาง ๆ ครอบ Store หลายตัวเพื่อลดงานซ้ำของเจ้าของ **ไม่ใช่ที่เก็บข้อมูลขาย**
+/// ห้ามย้าย Table/MenuItem/Sale ขึ้นมาระดับนี้ · เจ้าของ Brand = OWNER ของทุก Store ใต้ Brand โดยอัตโนมัติ
+/// (บังคับที่ lib/store-context.ts แม้ไม่มีแถว StoreMember) · พนักงานยังผูกรายสาขาผ่าน StoreMember เหมือนเดิม
+model Brand {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner   User                @relation("BrandOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  stores  Store[]
+  batches SubscriptionBatch[]
+
+  @@index([ownerId])
+  @@map("brand")
+}
+
 model StoreMember {
   id        String    @id @default(cuid())
   userId    String
@@ -905,17 +928,49 @@ model StoreSubscription {
   reversesId       String?                   @unique
   note             String?
   createdById      String?
+  /// ใบจ่ายรวมของแบรนด์ (Phase 14c) — แถวในใบเดียวกันยืนยัน/ยกเลิกพร้อมกันทั้งชุดเท่านั้น
+  /// ห้ามยืนยัน/ยกเลิกรายแถวผ่าน confirmSubscription/cancelPendingRequest (ทั้งสองตัวปฏิเสธแถวที่มี batchId)
+  batchId          String?
   createdAt        DateTime                  @default(now())
 
   store    Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
   plan     SubscriptionPlan?  @relation(fields: [planId], references: [id])
   reverses StoreSubscription? @relation("SubscriptionReversal", fields: [reversesId], references: [id])
   reversal StoreSubscription? @relation("SubscriptionReversal")
+  batch    SubscriptionBatch? @relation(fields: [batchId], references: [id])
 
   @@index([storeId])
   @@index([status])
   @@index([periodEnd])
+  @@index([batchId])
   @@map("store_subscription")
+}
+
+/// ใบจ่ายค่าใช้งานรวมหลายสาขา (Phase 14c) — หัวใบถือเลขอ้างอิงธนาคารแทนแถวลูก (paymentReference ของแถวลูกเป็น null)
+/// เพราะ StoreSubscription.paymentReference unique ต่อแถว แต่โอนครั้งเดียวครอบหลายสาขา · ยืนยัน = ทรานแซคชันเดียว
+/// ทั้งใบ (แถวลูกทุกแถวต้องยัง PENDING ครบ ไม่งั้น rollback ทั้งหมด) · append-only เหมือน StoreSubscription
+model SubscriptionBatch {
+  id               String             @id @default(cuid())
+  brandId          String
+  /// เลขอ้างอิงให้ใส่ในบันทึกโอน (BAT-XXXXXX) — คนละชุดกับ SUB-XXXXXX ของแถวลูก
+  requestRef       String             @unique
+  amount           Decimal            @db.Decimal(10, 2)
+  status           SubscriptionStatus @default(PENDING)
+  paymentReference String?            @unique
+  paidAt           DateTime?
+  confirmedById    String?
+  voidedAt         DateTime?
+  voidedById       String?
+  note             String?
+  createdById      String?
+  createdAt        DateTime           @default(now())
+
+  brand Brand               @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  items StoreSubscription[]
+
+  @@index([brandId])
+  @@index([status])
+  @@map("subscription_batch")
 }
 
 /// สิทธิ์ทดลองผูกกับเลขพร้อมเพย์ (SHA-256 ของเลขที่ normalize แล้ว ไม่เก็บเลขดิบ) — 1 เลข = ทดลองได้ครั้งเดียวตลอดกาล

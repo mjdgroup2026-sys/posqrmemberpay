@@ -8,12 +8,14 @@ import { prisma } from "@/lib/prisma"
 import { requirePlatformAdmin, storeErrorMessage } from "@/lib/session"
 import { computeRenewalPeriod, subscriptionRequestRef, TIER_SPEC, type PlanTierValue } from "@/lib/subscription"
 import {
+  confirmBatchSchema,
   confirmSubscriptionSchema,
   firstIssueMessage,
   grantCustomDaysSchema,
   planCodeSchema,
   publishPlanSchema,
   setTableLimitSchema,
+  voidBatchSchema,
   voidSubscriptionSchema,
   zodToFieldErrors,
 } from "@/lib/validation"
@@ -77,12 +79,16 @@ export async function confirmSubscription(formData: FormData): Promise<ActionRes
 
   try {
     const storeId = await prisma.$transaction(async (tx) => {
+      // แถวในใบจ่ายรวม (Phase 14c) ยืนยันรายแถวไม่ได้ — ต้องผ่าน confirmSubscriptionBatch ทั้งใบ
+      const head = await tx.storeSubscription.findUnique({ where: { id }, select: { batchId: true } })
+      if (head?.batchId) throw new AdminBillingAbort("รายการนี้อยู่ในใบจ่ายรวมของแบรนด์ — ต้องยืนยันทั้งใบที่หน้าใบจ่ายรวม")
+
       // ★ ด่านจริง — สองคนกดยืนยันพร้อมกัน ผ่านได้แค่ 1 (อีกคน count = 0)
       const now = new Date()
       let closed: { count: number }
       try {
         closed = await tx.storeSubscription.updateMany({
-          where: { id, status: "PENDING" },
+          where: { id, status: "PENDING", batchId: null },
           data: { status: "PAID", paymentReference, paidAt: now, confirmedById: adminId },
         })
       } catch (error) {
@@ -157,8 +163,9 @@ export async function voidSubscription(formData: FormData): Promise<ActionResult
 
       const now = new Date()
       if (row.status === "PENDING") {
+        if (row.batchId) throw new AdminBillingAbort("รายการนี้อยู่ในใบจ่ายรวมที่ยังรอยืนยัน — ยกเลิกทั้งใบที่หน้าใบจ่ายรวม")
         const closed = await tx.storeSubscription.updateMany({
-          where: { id, status: "PENDING" },
+          where: { id, status: "PENDING", batchId: null },
           data: { status: "VOID", voidedAt: now, voidedById: adminId, note: `ผู้ดูแลยกเลิก: ${reason}` },
         })
         if (closed.count === 0) throw new AdminBillingAbort("รายการเพิ่งถูกยืนยันไป กรุณาโหลดใหม่")
@@ -211,6 +218,123 @@ export async function voidSubscription(formData: FormData): Promise<ActionResult
   } catch (error) {
     if (error instanceof AdminBillingAbort) return { ok: false, error: error.reason }
     console.error("[admin-billing] voidSubscription:", error)
+    return { ok: false, error: "ยกเลิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
+}
+
+/// ยืนยันใบจ่ายรวมของแบรนด์ (Phase 14c) — **ทั้งใบหรือไม่เลย** ในทรานแซคชันเดียว:
+/// หัวใบ PENDING → PAID ด้วย updateMany (★ ด่านกันกดพร้อมกัน) · แถวลูกทุกแถวต้องยัง PENDING ครบ (นับก่อน-หลังต้องเท่ากัน
+/// ไม่งั้น throw → rollback) · แล้วอัปเดต Store รายสาขาเหมือน confirmSubscription (stack ต่อท้าย + เช็คเพดานโต๊ะ)
+/// เลขอ้างอิงธนาคารอยู่ที่หัวใบ (unique) — แถวลูก paymentReference เป็น null โดยตั้งใจ
+export async function confirmSubscriptionBatch(formData: FormData): Promise<ActionResult> {
+  let adminId: string
+  try {
+    adminId = (await requirePlatformAdmin()).id
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+
+  const parsed = confirmBatchSchema.safeParse({ batchId: formData.get("batchId"), paymentReference: formData.get("paymentReference") })
+  if (!parsed.success) {
+    return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
+  }
+  const { batchId, paymentReference } = parsed.data
+
+  try {
+    const storeIds = await prisma.$transaction(async (tx) => {
+      const now = new Date()
+      let head: { count: number }
+      try {
+        head = await tx.subscriptionBatch.updateMany({
+          where: { id: batchId, status: "PENDING" },
+          data: { status: "PAID", paymentReference, paidAt: now, confirmedById: adminId },
+        })
+      } catch (error) {
+        if ((error as { code?: string }).code === "P2002") {
+          throw new AdminBillingAbort("เลขอ้างอิงธนาคารนี้ถูกใช้ยืนยันใบอื่นไปแล้ว — ตรวจสอบว่าไม่ได้ยืนยันซ้ำ")
+        }
+        throw error
+      }
+      if (head.count === 0) throw new AdminBillingAbort("ใบจ่ายรวมนี้ไม่ได้อยู่ในสถานะรอยืนยัน (ถูกยืนยันหรือยกเลิกไปแล้ว)")
+
+      const rows = await tx.storeSubscription.findMany({
+        where: { batchId },
+        select: { id: true, storeId: true, tier: true, tableLimit: true, days: true, store: { select: { name: true, planExpiresAt: true } } },
+      })
+      if (rows.length === 0) throw new AdminBillingAbort("ใบจ่ายรวมนี้ไม่มีรายการสาขา")
+
+      // ★ ทั้งใบหรือไม่เลย — ถ้ามีแถวใดไม่ใช่ PENDING (ถูกถอยรายแถวไปก่อน) จำนวนจะไม่ครบ → rollback ทั้งหมด
+      const closed = await tx.storeSubscription.updateMany({
+        where: { batchId, status: "PENDING" },
+        data: { status: "PAID", paidAt: now, confirmedById: adminId },
+      })
+      if (closed.count !== rows.length) {
+        throw new AdminBillingAbort("มีรายการในใบนี้ที่ไม่ได้อยู่ในสถานะรอยืนยัน — ยืนยันครึ่งใบไม่ได้ ให้ยกเลิกใบแล้วขอใหม่")
+      }
+
+      for (const row of rows) {
+        const tableCount = await tx.table.count({ where: { storeId: row.storeId } })
+        if (tableCount > row.tableLimit) {
+          throw new AdminBillingAbort(
+            `ยืนยันไม่ได้ — สาขา ${row.store.name} มี ${tableCount} โต๊ะ เกินเพดาน ${row.tableLimit} ของแพ็กเกจ ให้ร้านลบโต๊ะก่อนหรือยกเลิกใบ`,
+          )
+        }
+        const { start, end } = computeRenewalPeriod(now, row.store.planExpiresAt, row.days)
+        await tx.storeSubscription.update({ where: { id: row.id }, data: { periodStart: start, periodEnd: end } })
+        await tx.store.update({
+          where: { id: row.storeId },
+          data: { planTier: row.tier, tableLimit: row.tableLimit, planExpiresAt: end, expiryNoticeLevel: 0 },
+        })
+      }
+      return rows.map((r) => r.storeId)
+    })
+
+    for (const storeId of storeIds) revalidateAdminBilling(storeId)
+    revalidatePath(`/admin/batches/${batchId}`)
+    revalidatePath("/brand")
+    revalidatePath("/brand/billing")
+    return { ok: true, message: `ยืนยันใบจ่ายรวมแล้ว — แพ็กเกจของ ${storeIds.length} สาขามีผลทันที` }
+  } catch (error) {
+    if (error instanceof AdminBillingAbort) return { ok: false, error: error.reason }
+    console.error("[admin-billing] confirmSubscriptionBatch:", error)
+    return { ok: false, error: "ยืนยันไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
+}
+
+/// ผู้ดูแลยกเลิกใบจ่ายรวมที่ยังรอยืนยัน — ทั้งใบ · ใบที่ PAID แล้วถอยรายสาขาผ่าน voidSubscription (แถวลูก) ตามปกติ
+export async function voidSubscriptionBatch(formData: FormData): Promise<ActionResult> {
+  let adminId: string
+  try {
+    adminId = (await requirePlatformAdmin()).id
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+
+  const parsed = voidBatchSchema.safeParse({ batchId: formData.get("batchId"), reason: formData.get("reason") })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
+  const { batchId, reason } = parsed.data
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const now = new Date()
+      const head = await tx.subscriptionBatch.updateMany({
+        where: { id: batchId, status: "PENDING" },
+        data: { status: "VOID", voidedAt: now, voidedById: adminId, note: `ผู้ดูแลยกเลิก: ${reason}` },
+      })
+      if (head.count === 0) throw new AdminBillingAbort("ใบจ่ายรวมนี้ไม่ได้อยู่ในสถานะรอยืนยัน — ใบที่จ่ายแล้วให้ถอยรายสาขาแทน")
+      await tx.storeSubscription.updateMany({
+        where: { batchId, status: "PENDING" },
+        data: { status: "VOID", voidedAt: now, voidedById: adminId, note: `ผู้ดูแลยกเลิกใบจ่ายรวม: ${reason}` },
+      })
+    })
+    revalidateAdminBilling()
+    revalidatePath(`/admin/batches/${batchId}`)
+    revalidatePath("/brand")
+    revalidatePath("/brand/billing")
+    return { ok: true, message: "ยกเลิกใบจ่ายรวมแล้ว" }
+  } catch (error) {
+    if (error instanceof AdminBillingAbort) return { ok: false, error: error.reason }
+    console.error("[admin-billing] voidSubscriptionBatch:", error)
     return { ok: false, error: "ยกเลิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 }

@@ -131,7 +131,16 @@ export function normalizePromptPayId(raw: string): string | null {
 /// เลขอ้างอิงคำขอชำระค่าใช้งานให้ร้านใส่ในบันทึกโอน — สั้น อ่านง่าย ไม่มี 0/O 1/I
 const REF_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 export function subscriptionRequestRef(randomBytes: Uint8Array): string {
-  let out = "SUB-"
+  return refWithPrefix("SUB-", randomBytes)
+}
+
+/// เลขอ้างอิงใบจ่ายรวมของแบรนด์ (Phase 14c) — คนละ prefix กับแถวลูก ผู้ดูแลจะได้รู้ทันทีว่าเป็นใบรวม
+export function batchRequestRef(randomBytes: Uint8Array): string {
+  return refWithPrefix("BAT-", randomBytes)
+}
+
+function refWithPrefix(prefix: string, randomBytes: Uint8Array): string {
+  let out = prefix
   for (let i = 0; i < 6; i += 1) out += REF_ALPHABET[randomBytes[i] % REF_ALPHABET.length]
   return out
 }

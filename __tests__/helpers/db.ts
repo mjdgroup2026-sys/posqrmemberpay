@@ -107,6 +107,8 @@ export async function resetDb(): Promise<void> {
       '"role_permission", "role",',
       // คำเชิญเข้าร้าน (Phase 14a) อ้าง store + user · ค่าใช้งาน (Phase 14b) — trial_claim ไม่มี FK แต่ต้องล้างด้วย
       '"store_invite", "store_subscription", "trial_claim",',
+      // แบรนด์ + ใบจ่ายรวม (Phase 14c) — brand อ้าง user, subscription_batch อ้าง brand
+      '"subscription_batch", "brand",',
       // ร้านและสมาชิก (Phase 13) — ล้างท้ายสุดเพราะทุกตารางข้างบนอ้างมาที่นี่
       '"store_member", "store"',
       "RESTART IDENTITY CASCADE",

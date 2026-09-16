@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { requirePlatformAdmin } from "@/lib/session"
-import { listPendingSubscriptionsForAdmin, listStoresWithPlanForAdmin, type AdminStoreFilter } from "@/lib/admin-queries"
+import { listPendingBatchesForAdmin, listPendingSubscriptionsForAdmin, listStoresWithPlanForAdmin, type AdminStoreFilter } from "@/lib/admin-queries"
 import { remainingDays } from "@/lib/subscription"
 import { formatBaht, formatDate, formatDateTime } from "@/lib/format"
 import { AdminStoreStatusButton } from "@/components/admin-store-status-button"
@@ -34,7 +34,11 @@ export default async function AdminStoresPage({ searchParams }: PageProps<"/admi
 
   const params = await searchParams
   const filter: AdminStoreFilter = isFilter(params.filter) ? params.filter : "all"
-  const [stores, pendings] = await Promise.all([listStoresWithPlanForAdmin(filter), listPendingSubscriptionsForAdmin()])
+  const [stores, pendings, pendingBatches] = await Promise.all([
+    listStoresWithPlanForAdmin(filter),
+    listPendingSubscriptionsForAdmin(),
+    listPendingBatchesForAdmin(),
+  ])
   const now = new Date()
   const active = stores.filter((s) => s.status === "ACTIVE").length
   const totalSales = stores.reduce((sum, s) => sum + s.totalSales, 0)
@@ -56,12 +60,25 @@ export default async function AdminStoresPage({ searchParams }: PageProps<"/admi
         </Link>
       </div>
 
-      {pendings.length > 0 ? (
+      {pendings.length > 0 || pendingBatches.length > 0 ? (
         <section className="card-ui card-pad" style={{ borderColor: "var(--brand)" }}>
           <h2 className="t-h2">
-            รอยืนยันเงินเข้า <span className="num">{pendings.length}</span> รายการ
+            รอยืนยันเงินเข้า <span className="num">{pendings.length + pendingBatches.length}</span> รายการ
           </h2>
           <ul style={{ listStyle: "none", margin: "10px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+            {/* ใบจ่ายรวมของแบรนด์ (Phase 14c) — ยืนยันทั้งใบที่หน้าใบ ไม่ใช่รายสาขา */}
+            {pendingBatches.map((b) => (
+              <li key={b.id} className="row" style={{ justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <span>
+                  <strong>แบรนด์ {b.brandName}</strong> · ใบจ่ายรวม {b.storeCount} สาขา · <span className="num">{b.requestRef}</span> ·{" "}
+                  <span className="num">{formatBaht(b.amount)}</span>
+                  <span className="t-caption"> · ขอเมื่อ {formatDateTime(b.createdAt)}</span>
+                </span>
+                <Link href={`/admin/batches/${b.id}`} className="btn btn-primary btn-sm">
+                  ไปยืนยันทั้งใบ
+                </Link>
+              </li>
+            ))}
             {pendings.map((p) => (
               <li key={p.id} className="row" style={{ justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                 <span>

@@ -1525,7 +1525,7 @@ enum ResourceKey {
 > แยกรอบตามกติกา (pg_dump + ซ้อมบนสำเนา): **14a Onboarding** (กำลังทำ) → **14b Subscription** → **14c Brand**
 > · 14b/14c แตะเงินจึงต้องมีเทส concurrent · 14c พึ่ง 14b (จ่ายรวม batch)
 > · **14a ขึ้น production แล้ว 2026-09-15 (PR #2)** — `SIGNUP_OPEN=true` ตั้งบน VPS แล้ว
-> · **14b โค้ด+เทสเสร็จ 2026-09-15** บน branch `feat/phase-14b-subscription` — migration `add_store_subscription` (additive + backfill
+> · **14b ขึ้น production แล้ว 2026-09-15 (PR #3)** — migration `add_store_subscription` (additive + backfill
 >   ร้านเดิม + seed แพ็กเกจ) · env ใหม่ตอน deploy: `PLATFORM_PROMPTPAY_ID`, `CRON_SECRET` + รัน `ops/install-cron.sh` ใหม่
 
 #### ✅ 14a — Onboarding: สมัครเอง / สร้างร้าน / เชิญพนักงาน / ผู้ดูแลแพลตฟอร์ม (ไม่แตะเงิน)
@@ -1591,7 +1591,7 @@ enum ResourceKey {
 - [x] เติม `tenant-isolation.test.ts`: `listPendingInvites` ในตาราง query · `revokeInvite` ด้วย id ของร้าน B →
       `ok:false` · `inviteMember`/`acceptInvite`/`createStore`/`setStoreStatus` ในรายการที่ไม่มี foreign id
 
-#### ✅ 14b — ค่าใช้งานแบบต่ออายุ (Store Subscription) — โค้ด+เทสเสร็จ 2026-09-15 (branch `feat/phase-14b-subscription` — รอ merge)
+#### ✅ 14b — ค่าใช้งานแบบต่ออายุ (Store Subscription) — ขึ้น production แล้ว 2026-09-15 (PR #3)
 > กติกา/schema/ตารางราคา/หน้าจอ/เทส อยู่ในหัวข้อ "ค่าใช้งานแบบต่ออายุ" ด้านล่าง · **การตัดสินใจเพิ่มตอนเริ่มทำ (ล็อกแล้ว 2026-09-15)**:
 > 1. **ร้านที่มีอยู่ก่อน migration** (ร้าน `default` และร้านที่สร้างไว้ก่อน deploy 14b) → backfill เป็นแถว `StoreSubscription`
 >    `kind=CUSTOM, paymentMethod=FREE, amount=0, periodEnd=2099-12-31, note="ร้านเดิมก่อนระบบค่าใช้งาน"` + `tableLimit=120` (XL)
@@ -1611,13 +1611,32 @@ enum ResourceKey {
 > 7. `TrialClaim` **ไม่อยู่ใน `STORE_SCOPED_MODELS`** โดยตั้งใจ — ต้องเห็นข้ามร้านเพื่อกันใช้สิทธิ์ซ้ำ · เขียน/อ่านเฉพาะใน `claimTrial()` และ
 >    `lib/admin-queries.ts`
 
-#### 14c — ร้านหลายสาขา (`Brand`) — PR สุดท้ายของ Phase 14
-> รายละเอียดอยู่ในหัวข้อ "ร้านหลายสาขา" ด้านล่าง (ยังไม่เริ่ม — พึ่ง 14b)
+#### ✅ 14c — ร้านหลายสาขา (`Brand`) — โค้ด+เทสเสร็จ 2026-09-16 (branch `feat/phase-14c-brand` — รอ merge)
+> รายละเอียดอยู่ในหัวข้อ "ร้านหลายสาขา" ด้านล่าง · **การตัดสินใจเพิ่มตอนเริ่มทำ (ล็อกแล้ว 2026-09-16)**:
+> 1. **1 บัญชี = 1 แบรนด์** — ลดคำถาม "แบรนด์ไหน" ในทุกฟอร์ม (schema รองรับหลายแบรนด์ต่อคนอยู่ แต่ action `createBrand` ปฏิเสธใบที่สอง)
+> 2. **ตรรกะสิทธิ์ย้ายไป `lib/store-context.ts` (`loadStoreContext()`)** — ทั้ง `lib/session.ts` และ mock ของเทสเรียกตัวเดียวกัน
+>    เจ้าของแบรนด์ได้ OWNER ทุกสาขา (`memberships[].viaBrand = true`) แม้มีแถว `StoreMember` เป็น STAFF ก็ยังได้ OWNER ·
+>    `switchActiveStore` ใช้ตัวเดียวกันตรวจ · `StoreContext.brand = { id, name, isOwner } | null`
+> 3. **ดึงร้านเข้าแบรนด์ได้เฉพาะร้านที่ตัวเองเป็น OWNER ด้วยแถว `StoreMember`** และยังไม่มี `brandId` (`updateMany where brandId: null`
+>    = ด่านกันสองแบรนด์แย่งร้านเดียวกัน) · ไม่มี detach/ย้ายแบรนด์ในเฟสนี้ · ลบแบรนด์ = `Store.brandId` SET NULL สาขาไม่หาย
+> 4. **ใบจ่ายรวม = model `SubscriptionBatch` แยกหัวใบ** (ไม่ใช่แค่คอลัมน์ `batchId`) เพราะ `StoreSubscription.paymentReference` unique
+>    ต่อแถว แต่โอนครั้งเดียวครอบหลายสาขา → เลขธนาคารอยู่ที่หัวใบ แถวลูกเป็น null · เลขอ้างอิงใบ `BAT-XXXXXX` (แถวลูกยังมี `SUB-` ของตัวเอง)
+>    · แถวที่มี `batchId` ยืนยัน/ยกเลิกรายแถวไม่ได้ (ทั้ง `confirmSubscription`, `voidSubscription` ตอน PENDING, `cancelPendingRequest`)
+>    · ยืนยัน = updateMany หัวใบ where PENDING + นับแถวลูกที่ปิดได้ต้องครบ ไม่งั้น rollback ทั้งใบ · ใบ PAID ถอยรายสาขาผ่าน `voidSubscription` เดิม
+> 5. **คัดลอกเมนู = `MenuItem` + `ModifierGroup`/`ModifierOption` เท่านั้น** — `Category` ในร่างเดิมเป็นหมวดของ**สินค้าคลัง** (`Product`)
+>    ไม่เกี่ยวกับเมนู จึงไม่คัดลอก · คัดลอกเฉพาะ `isActive` · ชื่อซ้ำที่ปลายทาง "ข้าม" (เรียกซ้ำได้) · `isFeatured` ไม่ติดไป (เพดาน 6 เป็นของแต่ละสาขา)
+>    · `imageUrl` คัดลอกเป็นข้อความ ไม่ก๊อปปี้ไฟล์ · ใช้ได้ทั้ง `copyMenuFromStore` (ปลายทาง = ร้านที่ทำงานอยู่) และ `createStore` (`copyMenuFromStoreId`
+>    แทนเมนูตัวอย่าง 3 รายการ) — ต้นทางต้องเป็นร้านที่ผู้ใช้เป็น OWNER (นับที่ได้จากแบรนด์ด้วย)
+> 6. **รายงานรวม `/brand/reports`** วน `getSalesReport()` + `getOpenSessionCount()` ต่อ storeId แล้วรวมในโค้ด — ไม่มี query ข้ามร้านใหม่ตามร่าง
+> 7. **`lib/brand-queries.ts` + `app/actions/brand.ts` = ที่ค้นข้ามร้านแห่งที่ 4** (กติกาข้อ 5) — ขอบเขตคือ `brand.ownerId = userId` เสมอ
+> 8. migration `20260916100000_add_brand_and_subscription_batch` additive ล้วน ไม่มี backfill (ร้านเดิม `brandId = NULL`) ·
+>    เทส `__tests__/integration/brand.test.ts` 21 เทสครอบทุกข้อในร่าง + concurrent ยืนยันใบ 5 ครั้งผ่าน 1 · `resetDb()` เพิ่ม `subscription_batch`/`brand`
+> 9. **ตอน deploy**: ไม่มี env ใหม่ · migration ไม่แตะแถวเดิม แต่ยังต้อง `pg_dump` + ซ้อมบนสำเนาตามกติกา
 
 ---
 
 **ร่างเดิมของ 14b/14c (คงไว้เป็นสัญญา ลงรายละเอียดเพิ่มตอนเริ่มแต่ละก้อน):**
-- [ ] **ร้านหลายสาขา (`Brand`)** — ตัดสินใจ 2026-09-14: **1 สาขา = 1 `Store` เสมอ** (เมนู/โต๊ะ/QR/tier/รายงาน
+- [x] **ร้านหลายสาขา (`Brand`)** — ✅ **โค้ด+เทสเสร็จ 2026-09-16 (14c)** · ตัดสินใจ 2026-09-14: **1 สาขา = 1 `Store` เสมอ** (เมนู/โต๊ะ/QR/tier/รายงาน
       แยกกันโดยธรรมชาติ สาขาเล็กจ่าย S สาขาใหญ่จ่าย L) · `Brand` เป็นแค่ชั้นบาง ๆ ครอบด้านบนเพื่อลดงานซ้ำของเจ้าของ
       **ไม่ใช่ที่เก็บข้อมูลขาย** — ห้ามย้าย `Table`/`MenuItem`/`Sale` ขึ้นไปอยู่ระดับ Brand
       - Schema: `Brand` (`id`, `name`, `ownerId` FK → User, `createdAt`) · `Store.brandId String?` (optional —

@@ -43,4 +43,6 @@ export {
   Ban as IconBan,
   Copy as IconCopy,
   UserPlus as IconUserPlus,
+  // Phase 14c — ร้านหลายสาขา (Brand)
+  Building2 as IconBrand,
 } from "lucide-react"

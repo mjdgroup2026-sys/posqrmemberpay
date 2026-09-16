@@ -16,6 +16,7 @@ import {
   storeErrorMessage,
   type StoreContext,
 } from "@/lib/session"
+import { loadStoreContext } from "@/lib/store-context"
 import { publicBaseUrl } from "@/lib/urls"
 import {
   firstIssueMessage,
@@ -58,12 +59,13 @@ export async function switchActiveStore(formData: FormData): Promise<ActionResul
   const parsed = storeSwitchSchema.safeParse({ storeId: formData.get("storeId") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  const membership = await prisma.storeMember.findUnique({
-    where: { userId_storeId: { userId, storeId: parsed.data.storeId } },
-    select: { store: { select: { name: true, status: true } } },
-  })
-  if (!membership) return { ok: false, error: "คุณไม่ได้เป็นสมาชิกของร้านนี้" }
-  if (membership.store.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ถูกระงับการใช้งาน" }
+  // ตรรกะเดียวกับ requireStore(): StoreMember หรือสาขาใต้แบรนด์ที่ตัวเองเป็นเจ้าของ (Phase 14c) — ไม่เขียนซ้ำที่นี่
+  // ดูจากรายการ memberships ที่ loadStoreContext() คำนวณให้ (คืนมาทั้งกรณี ok และไม่ ok)
+  const access = await loadStoreContext(prisma, userId, parsed.data.storeId)
+  const memberships = access.ok ? access.context.memberships : access.memberships
+  const target = memberships.find((m) => m.storeId === parsed.data.storeId)
+  if (!target) return { ok: false, error: "คุณไม่ได้เป็นสมาชิกของร้านนี้" }
+  if (target.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ถูกระงับการใช้งาน" }
 
   const jar = await cookies()
   jar.set(ACTIVE_STORE_COOKIE, parsed.data.storeId, {
@@ -75,7 +77,7 @@ export async function switchActiveStore(formData: FormData): Promise<ActionResul
   })
 
   revalidatePath("/", "layout")
-  return { ok: true, message: `สลับไปร้าน ${membership.store.name} แล้ว` }
+  return { ok: true, message: `สลับไปร้าน ${target.name} แล้ว` }
 }
 
 /// เปลี่ยนบทบาทระดับร้าน (OWNER ↔ STAFF) — เฉพาะเจ้าของร้าน

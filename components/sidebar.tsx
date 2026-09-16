@@ -23,6 +23,7 @@ import {
   IconShield,
   IconCard,
   IconMenu,
+  IconBrand,
 } from "@/components/icons"
 import type { ResourceKey } from "@/lib/permissions"
 
@@ -76,6 +77,7 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
       { href: "/users", label: "ผู้ใช้งาน", Icon: IconUsers, resource: "USERS" },
       { href: "/roles", label: "บทบาทและสิทธิ์", Icon: IconLock, resource: "USERS" },
       { href: "/billing", label: "ค่าใช้งาน", Icon: IconCard, ownerOnly: true },
+      { href: "/brand", label: "แบรนด์ / หลายสาขา", Icon: IconBrand, ownerOnly: true },
       { href: "/settings", label: "ตั้งค่า", Icon: IconSettings },
     ],
   },
@@ -90,7 +92,7 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
 
 /// href ที่มีเส้นทางลูก (เช่น /pos กับ /pos/history) ต้องเทียบแบบตรงตัว
 /// ไม่งั้นเมนูแม่จะสว่างค้างตอนอยู่หน้าลูก
-const EXACT_MATCH = new Set(["/", "/pos", "/admin/stores"])
+const EXACT_MATCH = new Set(["/", "/pos", "/admin/stores", "/brand"])
 
 export function Sidebar({
   lowStockCount,
