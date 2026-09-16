@@ -5,6 +5,8 @@ import { hashInviteToken } from "@/lib/invite-token"
 import { isPlanActive } from "@/lib/subscription"
 import { inviteTokenSchema } from "@/lib/validation"
 import { toNumber } from "@/lib/format"
+import { decodeStoreScb, getStoreScb } from "@/lib/scb-store"
+import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { businessDayRange, businessDateOnly } from "@/lib/day"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import type { PaymentMethodValue } from "@/lib/types"
@@ -1998,5 +2000,41 @@ export async function getPaymentConfig(storeId: string): Promise<PaymentConfigVi
     accountName: config?.accountName ?? null,
     bankAccountNumber: config?.bankAccountNumber ?? null,
     updatedAt: config?.updatedAt ?? null,
+  }
+}
+
+// ───────────────────── SCB ต่อร้าน (Phase 15c) ─────────────────────
+
+/// decodeStoreScb() ใช้แค่เช็คว่าถอดรหัสได้ครบ (กุญแจไม่เปลี่ยน) · activeSource = แหล่ง credential ที่ใช้ปิดบิลอัตโนมัติจริง
+export type ScbConfigView = {
+  configured: boolean
+  decryptable: boolean
+  environment: "production" | "sandbox" | null
+  apiKeyTail: string | null
+  billerId: string | null
+  ref3Prefix: string | null
+  webhookToken: string | null
+  verifiedAt: Date | null
+  testStartedAt: Date | null
+  /// ร้านนี้ปิดบิลอัตโนมัติผ่าน SCB ได้จากแหล่งไหน (หลังผ่านการทดสอบ) — null = ยังไม่ได้
+  activeSource: "store" | "env" | null
+}
+
+/// SCB ของร้าน (Phase 15c) — หน้าตั้งค่าร้าน (OWNER) · ไม่คืน secret
+export async function getScbConfig(storeId: string): Promise<ScbConfigView> {
+  const row = await forStore(storeId).storePaymentConfig.findUnique({ where: { storeId } })
+  const decoded = decodeStoreScb(row)
+  const active = await getStoreScb(storeId)
+  return {
+    configured: Boolean(row?.scbApiKeyEnc && row?.scbBillerId),
+    decryptable: decoded !== null,
+    environment: row?.scbApiBase ? (row.scbApiBase === SCB_SANDBOX_BASE ? "sandbox" : "production") : null,
+    apiKeyTail: decoded ? `…${decoded.creds.key.slice(-4)}` : null,
+    billerId: row?.scbBillerId ?? null,
+    ref3Prefix: row?.scbRef3Prefix ?? null,
+    webhookToken: row?.scbWebhookToken ?? null,
+    verifiedAt: row?.scbVerifiedAt ?? null,
+    testStartedAt: row?.scbTestStartedAt ?? null,
+    activeSource: active?.source ?? null,
   }
 }

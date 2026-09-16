@@ -5,15 +5,16 @@ import { forStore } from "@/lib/db"
 import { requireOwner, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { normalizePromptPayId } from "@/lib/subscription"
 import { isSlipVerificationConfigured } from "@/lib/slip-provider"
+import { getStoreScb } from "@/lib/scb-store"
 import { firstIssueMessage, paymentConfigSchema, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
 /// ตั้งค่ารับเงินของร้าน (Phase 15a) — เฉพาะเจ้าของร้าน · เงินเข้าบัญชีร้านโดยตรงทุกโหมด
 ///
 /// เจ้าของเลือกได้ PROMPTPAY_DIRECT (ก) และ PROMPTPAY_SLIP (ก+ — เมื่อแพลตฟอร์มตั้ง SLIP_PROVIDER แล้ว, Phase 15b) ·
-/// SCB_BILLER ตั้งได้เฉพาะผู้ดูแลแพลตฟอร์ม (app/actions/admin.ts) เพราะ 15a ยังใช้ credential SCB จาก env
-/// ของแพลตฟอร์ม — ปล่อยให้ร้านเลือกเอง = ลูกค้าของร้านนั้นจ่ายเข้าบัญชี SCB ของร้าน default
-/// · ร้านที่ผู้ดูแลตั้งเป็น SCB_BILLER ไว้แล้ว บันทึกเลขพร้อมเพย์ต่อได้ (เป็น fallback ตอนธนาคารล่ม) แต่เปลี่ยนโหมดเองไม่ได้
+/// SCB_BILLER (ข — Phase 15c): เจ้าของเลือกเองได้เมื่อ credential SCB **ของร้าน** ผ่านการทดสอบแล้ว (scbVerifiedAt) ·
+/// ร้านที่ใช้ env ของแพลตฟอร์ม (ร้าน default) ยังต้องให้ผู้ดูแลตั้ง (app/actions/admin.ts) และเปลี่ยนโหมดเองไม่ได้
+/// · ร้านโหมด SCB บันทึกเลขพร้อมเพย์ต่อได้ (เป็น fallback ตอนธนาคารล่ม)
 
 function revalidatePaymentPages() {
   revalidatePath("/mobile-order/settings")
@@ -62,10 +63,17 @@ export async function updatePaymentConfig(formData: FormData): Promise<ActionRes
       return { ok: false, error: "ระบบตรวจสลิปอัตโนมัติยังไม่เปิดให้ใช้ — เลือกพร้อมเพย์ตรงไปก่อน", fieldErrors: { paymentMode: "ยังไม่เปิดให้ใช้" } }
     }
     if (paymentMode === "SCB_BILLER" || store.paymentMode === "SCB_BILLER") {
-      return {
-        ok: false,
-        error: "โหมดรับเงินผ่าน SCB ตั้งโดยผู้ดูแลระบบเท่านั้น — ติดต่อผู้ดูแลเพื่อเปิด/ปิด",
-        fieldErrors: { paymentMode: "ติดต่อผู้ดูแลระบบ" },
+      // เปลี่ยนเข้า/ออกโหมด SCB เองได้เฉพาะร้านที่มี credential ของตัวเองผ่านการทดสอบแล้ว — ร้านที่พึ่ง env ต้องให้ผู้ดูแล
+      const scb = await getStoreScb(ctx.storeId)
+      if (!scb || scb.source !== "store") {
+        return {
+          ok: false,
+          error:
+            paymentMode === "SCB_BILLER"
+              ? "เปิดโหมด SCB ได้เมื่อกรอก credential SCB ของร้านและผ่าน “ทดสอบการเชื่อมต่อ” แล้ว (หรือให้ผู้ดูแลระบบตั้งให้)"
+              : "โหมด SCB ของร้านนี้ตั้งโดยผู้ดูแลระบบ — ติดต่อผู้ดูแลเพื่อเปลี่ยน",
+          fieldErrors: { paymentMode: "ยังเปลี่ยนไม่ได้" },
+        }
       }
     }
   }

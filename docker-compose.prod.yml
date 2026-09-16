@@ -64,6 +64,8 @@ x-app-base: &app-base
     # ส่วนหนึ่งของ URL ปลายทาง callback — ต้องตรงกับที่ลงทะเบียนไว้ในพอร์ทัล SCB เป๊ะ ๆ
     # ไม่ตั้ง = endpoint ตอบ 503 (ปิดบิลด้วยมือยังทำได้ตามปกติ)
     SCB_WEBHOOK_SECRET: ${SCB_WEBHOOK_SECRET:-}
+    # กุญแจเข้ารหัส credential SCB ต่อร้าน (Phase 15c) — 32 ไบต์ base64url · ไม่ตั้ง = ร้านผูก SCB เองไม่ได้ (fail closed) · ห้าม rotate โดยไม่มีแผน
+    PAYMENT_CONFIG_KEY: ${PAYMENT_CONFIG_KEY:-}
     # นโยบายการสมัครสมาชิกเอง (lib/signup-allowlist.ts) — ไม่ตั้งอะไรเลย = สมัครไม่ได้สักคน (fail closed)
     # Phase 14a: SIGNUP_OPEN=true เปิดให้ใครก็สมัครได้ (ผู้สมัครใหม่ได้แค่ร้านเปล่าของตัวเอง ไม่เข้าหลังร้านใคร)
     # ⚠️ compose ส่ง env ให้คอนเทนเนอร์เฉพาะที่ประกาศตรงนี้ — ตั้งใน .env อย่างเดียวไม่ถึงแอป

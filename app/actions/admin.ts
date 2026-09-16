@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache"
 // eslint-disable-next-line no-restricted-imports
 import { prisma } from "@/lib/prisma"
 import { requirePlatformAdmin, storeErrorMessage } from "@/lib/session"
-import { isScbConfigured } from "@/lib/payment-provider/scb"
+import { isStoreScbReady } from "@/lib/scb-store"
 import { isSlipVerificationConfigured } from "@/lib/slip-provider"
 import { adminPaymentModeSchema, firstIssueMessage, storeStatusSchema } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
@@ -56,8 +56,8 @@ export async function setStorePaymentMode(formData: FormData): Promise<ActionRes
   if (paymentMode === "PROMPTPAY_SLIP" && !isSlipVerificationConfigured()) {
     return { ok: false, error: "ยังไม่ได้ตั้ง SLIP_PROVIDER/SLIP_API_KEY ใน env — ตั้งครบก่อนจึงเปิดโหมดตรวจสลิปได้" }
   }
-  if (paymentMode === "SCB_BILLER" && !isScbConfigured()) {
-    return { ok: false, error: "ยังไม่ได้ตั้ง SCB_API_* / SCB_BILLER_ID ใน env — ตั้งครบก่อนจึงเปิดโหมดนี้ให้ร้านได้" }
+  if (paymentMode === "SCB_BILLER" && !(await isStoreScbReady(storeId))) {
+    return { ok: false, error: "ร้านนี้ยังไม่มี credential SCB ที่ใช้ได้ (ของร้านต้องผ่านการทดสอบ หรือแพลตฟอร์มต้องตั้ง env SCB_* ครบ)" }
   }
 
   const result = await prisma.store.updateMany({ where: { id: storeId, paymentMode: { not: paymentMode } }, data: { paymentMode } })

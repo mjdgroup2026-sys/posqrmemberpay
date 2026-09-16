@@ -6,7 +6,7 @@ import { remainingDays, TIER_SPEC } from "@/lib/subscription"
 import { formatBaht, formatDate, formatDateTime } from "@/lib/format"
 import { AdminStoreStatusButton } from "@/components/admin-store-status-button"
 import { AdminPaymentModeForm } from "@/components/admin-payment-mode-form"
-import { isScbConfigured } from "@/lib/payment-provider/scb"
+import { isStoreScbReady } from "@/lib/scb-store"
 import { isSlipVerificationConfigured } from "@/lib/slip-provider"
 import { ConfirmSubscriptionForm, GrantCustomDaysForm, SetTableLimitForm, VoidSubscriptionButton } from "@/components/admin-billing-controls"
 import { IconBack, IconShield } from "@/components/icons"
@@ -100,7 +100,7 @@ export default async function AdminStoreDetailPage({ params }: PageProps<"/admin
           ปัจจุบัน: <strong>{store.paymentMode}</strong> · โหมด SCB ใช้ SCB_BILLER_ID จาก env ของแพลตฟอร์ม — เปิดให้เฉพาะร้านที่ Biller ID นั้นเป็นของร้านจริง
           (15c จะย้ายเป็น credential ต่อร้าน)
         </p>
-        <AdminPaymentModeForm storeId={store.id} current={store.paymentMode} scbReady={isScbConfigured()} slipReady={isSlipVerificationConfigured()} />
+        <AdminPaymentModeForm storeId={store.id} current={store.paymentMode} scbReady={await isStoreScbReady(store.id)} slipReady={isSlipVerificationConfigured()} />
       </section>
 
       {pendingRows.length > 0 ? (

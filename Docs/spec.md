@@ -1770,7 +1770,7 @@ enum ResourceKey {
 > **แบ่งเป็น 3 PR เหมือน Phase 14 (ตัดสินใจ 2026-09-16)**: **15a = ก** (ทำได้ทันที ไม่พึ่งของภายนอก — ✅ **ขึ้น production แล้ว
 > 2026-09-16, PR #6**) → **15b = ก+** (ต้องเลือกผู้ให้บริการตรวจสลิป + API key ก่อน) →
 > **15c = ข** (ต้อง credential SCB ต่อร้าน / ผล partner program) · **15b โค้ด+เทสเสร็จ 2026-09-16 ด้วยผู้ให้บริการจำลอง (mock)
-> — เปิดใช้จริงเมื่อได้ API key** · 15c ยังไม่เริ่ม
+> — เปิดใช้จริงเมื่อได้ API key** · **15c โค้ด+เทสเสร็จ 2026-09-16 — ทดสอบจริงได้ด้วยร้าน default (ย้าย credential จาก env เข้าฐาน)**
 >
 > **การตัดสินใจตอนทำ 15a (ล็อกแล้ว 2026-09-16)**:
 > 1. `StoreSettings.promptPayId` **ย้ายคอลัมน์** ไป `StorePaymentConfig.promptPayId` (migration backfill แล้วค่อย DROP —
@@ -1821,12 +1821,38 @@ enum ResourceKey {
       EasySlip — ขอราคาเทียบก่อน) → เทียบ 4 เงื่อนไข: ผู้รับตรงบัญชีร้าน · ยอด ≥ บิล · รหัสอ้างอิงไม่เคยใช้
       (`Sale.paymentReference` unique) · เวลาไม่เกิน N นาที → `closeSessionWithPayment()` ตัวเดิม ·
       API ล่ม → ตกไปปิดมือแบบ ก
-#### ⏭️ 15c — ข SCB Biller ต่อร้าน (ยังไม่เริ่ม — รอ credential/partner program)
-- [ ] **ข — SCB Biller ID ของร้าน**: token cache ต่อร้าน, `inquireBillPayment` ใช้ credential ของร้านเจ้าของ intent,
-      webhook URL ต่อร้าน `/api/payments/webhook/scb/[storeWebhookToken]` · **ปุ่ม "ทดสอบการเชื่อมต่อ"** ออก QR
+#### ✅ 15c — ข SCB Biller ต่อร้าน — โค้ด+เทสเสร็จ 2026-09-16 (branch `feat/phase-15c-scb-per-store` — รอ merge)
+> **การตัดสินใจ (ล็อกแล้ว 2026-09-16)**:
+> 1. credential อยู่ใน `StorePaymentConfig.scb*` — `scbApiKeyEnc`/`scbApiSecretEnc` เข้ารหัส **AES-256-GCM** ด้วย env ใหม่ `PAYMENT_CONFIG_KEY`
+>    (`lib/secret-box.ts` · รูปแบบ `v1.<iv>.<tag>.<ct>` base64url · ถอดไม่ได้ = ถือว่าไม่มี ห้ามเดา · **เปลี่ยนกุญแจ = ทุกร้านกรอกใหม่**) ·
+>    `scbApiBase` (production/sandbox) · `scbBillerId` · `scbRef3Prefix` · `scbWebhookToken` (unique, สุ่มครั้งแรก) · `scbVerifiedAt` ·
+>    `scbTestRef1`/`scbTestStartedAt` · migration additive ไม่มี backfill
+> 2. **`lib/payment-provider/scb.ts` รับ `ScbCredentials` เป็นพารามิเตอร์ทุกฟังก์ชัน ไม่มี default จาก env** · token cache แยกตาม
+>    application key · `scbCredentialsFromEnv()` = ของแพลตฟอร์ม (ต้องครบ 5 ค่า) · `lib/scb-store.ts` `getStoreScb(storeId)` เป็นจุดเดียว
+>    ที่ตัดสินว่าเรียกธนาคารในนามใคร: **ของร้านที่ผ่านการทดสอบแล้ว** → ไม่งั้น env ของแพลตฟอร์ม (fallback ร้าน default) → ไม่งั้น null
+>    · `allowUnverified` ใช้ได้เฉพาะปุ่มทดสอบ
+> 3. **webhook 2 ปลายทางใช้ตัวจัดการเดียว `lib/scb-webhook.ts`**: เดิม `/scb/[secret]` (แพลตฟอร์ม รับทุกร้าน — ยังทำงานคู่กันจนกว่า
+>    ร้าน default จะย้ายเสร็จ) และใหม่ `/scb/store/[token]` ซึ่ง**บังคับ intent.storeId = ร้านเจ้าของ token** (webhook ร้าน A ปิดบิล
+>    ร้าน B ไม่ได้ — ปฏิเสธก่อนถามธนาคาร) · `verifyAndSettleIntent` ถามธนาคารด้วย credential ของร้านเจ้าของ intent
+> 4. **ทดสอบการเชื่อมต่อ**: `startScbConnectionTest` ออก QR 1 บาทด้วย credential ของร้าน (ref1 ขึ้นต้น `T` 12 ตัว เก็บที่ `scbTestRef1`
+>    ไม่ใช่ PaymentIntent เพราะไม่มีโต๊ะ) → callback เข้า URL ต่อร้าน → `inquireBillPayment` ด้วย credential ของร้าน → ยอด ≥ 1 →
+>    ประทับ `scbVerifiedAt` (updateMany where scbTestRef1) · หน้าตั้งค่าโพล `getScbTestStatus` ไม่เกิน 2 นาที · **ผ่านแล้วเท่านั้น**
+>    เจ้าของถึงเลือกโหมด `SCB_BILLER` เองได้ (`updatePaymentConfig`) · แก้ credential ตัวใดตัวหนึ่ง = ต้องทดสอบใหม่
+> 5. ร้านที่ผู้ดูแลตั้ง SCB ให้ด้วย env (default) ยังเปลี่ยนโหมดเองไม่ได้จนกว่าจะมีของตัวเองที่ verified · ผู้ดูแลตั้งโหมดได้เมื่อ
+>    `isStoreScbReady(storeId)` (ของร้าน verified หรือ env ครบ) · ถอด SCB ออก = กลับเป็นพร้อมเพย์ตรงทันที
+> 6. sandbox ของ SCB ไม่ยิง callback → ปุ่มทดสอบยืนยันได้จริงเฉพาะ production · **แผนพิสูจน์ด้วยเงินจริง**: deploy (fallback env
+>    ทำให้ร้าน default ไม่สะดุด) → กรอก credential ของ default ในหน้าตั้งค่า → ลงทะเบียน URL ต่อร้านในพอร์ทัล SCB (คู่ Biller ID + ref3
+>    prefix เดิม) → ทดสอบ 1 บาท → ผ่านแล้วค่อยถอด `SCB_*` ออกจาก env · partner program ของ SCB ยังไม่มีคำตอบ — ถ้าได้ค่อยตัดการถือ
+>    credential ทิ้ง
+> 7. เทส `payment-scb-store.test.ts` 11 (เข้ารหัสไม่มี plaintext · คงค่าเดิมเมื่อเว้นว่าง · STAFF/ไม่มีกุญแจ · เลือก credential ·
+>    ทดสอบผ่าน/ไม่ผ่าน · ถอด · **token A + intent B ปฏิเสธโดยไม่ถามธนาคาร** · token ปลอม/ร้านระงับ) + unit `secret-box.test.ts` 4 ·
+>    `__tests__/setup.ts` ตั้ง default `PAYMENT_CONFIG_KEY`/`SCB_*` ให้เทส (แทน .env.test/CI) · **ตอน deploy**: ตั้ง
+>    `PAYMENT_CONFIG_KEY` ใน `.env` บน VPS + ประกาศใน compose แล้ว · ไม่มี backfill
+- [x] **ข — SCB Biller ID ของร้าน**: token cache ต่อร้าน, `inquireBillPayment` ใช้ credential ของร้านเจ้าของ intent,
+      webhook URL ต่อร้าน `/api/payments/webhook/scb/store/[token]` · **ปุ่ม "ทดสอบการเชื่อมต่อ"** ออก QR
       1 บาทให้เจ้าของจ่ายแล้วรอ callback ≤ 2 นาที — **ผ่านแล้วเท่านั้นถึงเปิดปิดบิลอัตโนมัติ** · ระหว่างนี้ติดต่อ SCB
       เรื่อง partner program (แอปเดียวของเรา ผูกหลาย Biller ID) ถ้าได้จะตัดการถือ credential ของร้านทิ้ง
-- [ ] `isScbConfigured()` เลิกอ่าน env → อ่าน credential ของร้านเจ้าของ intent · ผู้ดูแลไม่ต้องเป็นคนตั้งโหมดอีก
+- [x] `isScbConfigured()` = env ของแพลตฟอร์มเท่านั้น (fallback) · "ร้านนี้พร้อมไหม" ถาม `isStoreScbReady()` · ผู้ดูแลไม่ต้องตั้งโหมดให้ร้านที่ verified แล้ว
 - [ ] เทส: สลิปซ้ำไม่ปิดบิลซ้ำ · สลิปโอนเข้าบัญชีร้านอื่นถูกปฏิเสธ · ยอดขาดถูกส่งให้พนักงาน · webhook ร้าน A ปิดบิล
       ร้าน B ไม่ได้
 

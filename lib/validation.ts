@@ -619,3 +619,21 @@ export const adminPaymentModeSchema = z.object({
   storeId: requiredId("ไม่พบร้านที่ต้องการตั้งค่า"),
   paymentMode: z.enum(["PROMPTPAY_DIRECT", "PROMPTPAY_SLIP", "SCB_BILLER"], { error: "กรุณาเลือกวิธีรับเงิน" }),
 })
+
+// ───────────────────── SCB Open API ต่อร้าน (Phase 15c) ─────────────────────
+
+/// key/secret เว้นว่างได้เมื่อแก้ค่าอื่นโดยไม่พิมพ์ซ้ำ (action จะคงค่าเดิมที่เข้ารหัสไว้)
+export const scbCredentialsSchema = z.object({
+  environment: z.enum(["production", "sandbox"], { error: "กรุณาเลือกสภาพแวดล้อมของ SCB" }),
+  apiKey: z.string().trim().max(200, "API key ยาวเกินไป").default(""),
+  apiSecret: z.string().trim().max(200, "API secret ยาวเกินไป").default(""),
+  billerId: z
+    .string({ error: "กรุณากรอก Biller ID" })
+    .trim()
+    .regex(/^\d{10,20}$/, "Biller ID ต้องเป็นตัวเลข 10–20 หลัก"),
+  ref3Prefix: z
+    .string({ error: "กรุณากรอก ref3 prefix" })
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{2,8}$/, "ref3 prefix ต้องเป็น A-Z/0-9 ยาว 2–8 ตัว ตามที่ SCB กำหนดให้"),
+})
