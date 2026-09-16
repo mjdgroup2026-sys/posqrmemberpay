@@ -8,7 +8,7 @@ import { toNumber } from "@/lib/format"
 import { businessDayRange, businessDateOnly } from "@/lib/day"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import type { PaymentMethodValue } from "@/lib/types"
-import type { PermissionAction as PermissionActionValue, Prisma, ResourceKey } from "@/generated/prisma/client"
+import type { PaymentMode, PermissionAction as PermissionActionValue, Prisma, ResourceKey } from "@/generated/prisma/client"
 
 function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
@@ -1961,7 +1961,7 @@ export async function getBillingOverview(storeId: string): Promise<BillingOvervi
     db.table.count(),
     db.storeSubscription.findFirst({ where: { status: "PENDING" }, orderBy: { createdAt: "desc" }, select: SUBSCRIPTION_SELECT }),
     db.storeSubscription.count({ where: { kind: "TRIAL" } }),
-    db.storeSettings.findUnique({ where: { storeId }, select: { promptPayId: true } }),
+    db.storePaymentConfig.findUnique({ where: { storeId }, select: { promptPayId: true } }),
   ])
   return {
     tier: store.planTier,
@@ -1971,5 +1971,32 @@ export async function getBillingOverview(storeId: string): Promise<BillingOvervi
     pending: pending ? toSubscriptionRow(pending) : null,
     trialAvailable: store.planExpiresAt === null && trialRows === 0,
     promptPayIdSet: Boolean(settings?.promptPayId),
+  }
+}
+
+// ───────────────────── บัญชีรับเงินของร้าน (Phase 15a) ─────────────────────
+
+export type PaymentConfigView = {
+  paymentMode: PaymentMode
+  promptPayId: string | null
+  accountName: string | null
+  bankAccountNumber: string | null
+  updatedAt: Date | null
+}
+
+/// ตั้งค่ารับเงินของร้าน — หน้า /mobile-order/settings (OWNER) · โหมดอยู่บน Store, บัญชีอยู่ที่ StorePaymentConfig
+export async function getPaymentConfig(storeId: string): Promise<PaymentConfigView> {
+  const db = forStore(storeId)
+  const [store, config] = await Promise.all([
+    // Store ไม่อยู่ใน STORE_SCOPED_MODELS (มันคือร้านเอง) — อ่านด้วย id ตรง
+    db.store.findUniqueOrThrow({ where: { id: storeId }, select: { paymentMode: true } }),
+    db.storePaymentConfig.findUnique({ where: { storeId } }),
+  ])
+  return {
+    paymentMode: store.paymentMode,
+    promptPayId: config?.promptPayId ?? null,
+    accountName: config?.accountName ?? null,
+    bankAccountNumber: config?.bankAccountNumber ?? null,
+    updatedAt: config?.updatedAt ?? null,
   }
 }

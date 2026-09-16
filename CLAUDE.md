@@ -39,7 +39,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 | `RESEND_API_KEY` | key จาก resend.com — **เว้นว่าง = dev พิมพ์ลิงก์ลง console, production throw** |
 | `MAIL_FROM` | ต้องอยู่ใต้โดเมนที่ verify ไว้: `MJD Mobile Order <no-reply@mail.jayjayservices.com>` |
 | `MAIL_REPLY_TO` | ไม่บังคับ |
-| `PLATFORM_PROMPTPAY_ID` | พร้อมเพย์ของ "แพลตฟอร์ม" ที่ร้านโอนค่าใช้งานเข้า (Phase 14b) — คนละตัวกับ `PROMPTPAY_ID` ของร้าน · เว้นว่าง = หน้า `/billing` ไม่มี QR ให้สแกน |
+| `PLATFORM_PROMPTPAY_ID` | พร้อมเพย์ของ "แพลตฟอร์ม" ที่ร้านโอนค่าใช้งานเข้า (Phase 14b) — **คนละเรื่องกับเลขพร้อมเพย์รับเงินลูกค้าของร้าน ซึ่งตั้งแต่ Phase 15a อยู่ในฐานข้อมูล (`StorePaymentConfig`) ไม่ใช่ env** (env `PROMPTPAY_ID` เดิมถอดออกแล้ว) · เว้นว่าง = หน้า `/billing` ไม่มี QR ให้สแกน |
 | `CRON_SECRET` | secret ใน path `GET /api/cron/plan-expiry/<secret>` ที่ `ops/plan-expiry-cron.sh` ยิงวันละครั้ง (09:10) ส่งอีเมลเตือน 7/3/1 วัน · ≥ 16 ตัว · เว้นว่าง = 401 (แบนเนอร์ในแอปยังขึ้น) |
 | `SIGNUP_OPEN` | `true` = ใครก็สมัครได้ (Phase 14a) · ไม่ตั้ง = allowlist `SIGNUP_ALLOWED_*` เดิม / ปิดสมัคร (fail closed) — **production ต้องตั้งเป็น `true` ตอน deploy 14a** · 🔥 **env ใหม่ทุกตัวต้องประกาศใน `environment:` ของ `docker-compose.prod.yml` ด้วย** ตั้งใน `.env` บน VPS อย่างเดียวไม่ถึงคอนเทนเนอร์ (compose ไม่ใช้ `env_file`) |
 
@@ -96,6 +96,12 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    (`supersededById`) ห้าม UPDATE · `Store.planTier/tableLimit/planExpiresAt` เป็นค่า denormalized ที่**ต้องอัปเดตใน
    ทรานแซคชันเดียวกับแถว PAID เสมอ** · ยืนยันจ่ายด้วย `updateMany where status: PENDING` และเพดานโต๊ะนับใต้
    `pg_advisory_xact_lock(720_002, hashtext(storeId))` (`lib/table-limit.ts`) — ทั้งคู่มีเทส concurrent
+10. **(Phase 15a) วิธีรับเงินจากลูกค้าเป็น "ของร้าน"** — อ่านจาก `Store.paymentMode` + `StorePaymentConfig` ผ่าน
+   `getStorePaymentProfile(storeId)` ใน `lib/payment-methods.ts` **เท่านั้น** (`qrAvailable` = โชว์ปุ่ม QR ได้ไหม ·
+   `autoSettle` = ธนาคารปิดบิลให้เอง) · ห้ามเช็ค `isScbConfigured()`/เลขพร้อมเพย์ตรง ๆ ในหน้าใด · `buildPromptPayPayload()`
+   ต้องได้เลขผู้รับเป็นพารามิเตอร์เสมอ ไม่มี default จาก env — ก่อน 15a ทุกร้านออก QR ของร้าน `default` (ลูกค้าร้านอื่น
+   จ่ายเข้าบัญชีผิดร้าน) · โหมด `SCB_BILLER` ตั้งได้เฉพาะผู้ดูแลแพลตฟอร์ม (`setStorePaymentMode`) จนกว่า 15c จะย้าย credential
+   เป็นต่อร้าน · `PROMPTPAY_SLIP` เลือกไม่ได้จนกว่า 15b
 8. **(Phase 6+) บิลจาก MJD Mobile Order ต้องออกเป็น `Sale` ปกติเสมอ** (`channel = MOBILE_ORDER` +
    `tableSessionId`) ห้ามสร้างตารางบิลแยก เพื่อให้ Dashboard/Reports/`/pos/history`/`CashierClosing` ใช้ query
    เดิมได้ครบโดยไม่ต้องเขียน logic ซ้ำ
@@ -440,7 +446,13 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 (ไม่ใช่แค่ `/api/health`) · ⚠️ **SSH เข้า VPS จาก Claude Code ถูก auto mode ปฏิเสธ** (จัดเป็น production access) — ขั้น backup/ตรวจ
 ในคอนเทนเนอร์ต้องให้เจ้าของระบบรันเองผ่าน `! ssh posmobileorder …` (ใช้คำสั่งที่**ไม่มี single quote** ไม่งั้น bash ของ `!` ฟ้อง EOF)
 
-**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 15–16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**🔨 Phase 15a โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-15a-payment-config` — รอ merge)**: `Store.paymentMode` +
+`StorePaymentConfig` (ย้าย `promptPayId` มาจาก `StoreSettings` — migration backfill แล้ว DROP) · `getStorePaymentProfile()`
+แทน `isQrPaymentAvailable()`/env `PROMPTPAY_ID` · การ์ด "การรับเงินจากลูกค้า" ใน `/mobile-order/settings` (OWNER) ·
+ผู้ดูแลตั้งโหมด SCB ที่ `/admin/stores/[id]` · migration ตั้ง `default` = `SCB_BILLER` ร้านอื่น = `PROMPTPAY_DIRECT` ·
+ซ้อมบนสำเนา production แล้ว diff สะอาด · **15b (ตรวจสลิป) / 15c (SCB ต่อร้าน) รอเจ้าของระบบเลือก provider/credential**
+
+**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 15b–15c, 16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildPromptPayPayload, isPromptPayConfigured } from "@/lib/promptpay"
+import { buildPromptPayPayload } from "@/lib/promptpay"
 
 /// ค่า CRC ในเทสนี้คำนวณจากตัวเลข payload ที่ประกอบขึ้นมาเอง (ไม่ได้ hardcode จากที่อื่น)
 /// จุดสำคัญที่ต้องกันไว้คือ **โครงและลำดับของ tag** — สลับที่แล้วแอปธนาคารบางตัวสแกนไม่ผ่าน
@@ -35,21 +35,6 @@ describe("PromptPay payload (Phase 10)", () => {
   it("เลขผู้รับเงินที่ยาวไม่ถูกต้องต้องถูกปฏิเสธ ไม่ใช่สร้าง QR ที่โอนผิดบัญชี", () => {
     expect(buildPromptPayPayload(100, "12345")).toBeNull()
     expect(buildPromptPayPayload(100, "081234567890123456")).toBeNull()
-  })
-
-  it("isPromptPayConfigured อ่านจาก env และปฏิเสธค่าที่ใช้ไม่ได้", () => {
-    const original = process.env.PROMPTPAY_ID
-    try {
-      delete process.env.PROMPTPAY_ID
-      expect(isPromptPayConfigured()).toBe(false)
-      process.env.PROMPTPAY_ID = "12345"
-      expect(isPromptPayConfigured()).toBe(false)
-      process.env.PROMPTPAY_ID = "0812345678"
-      expect(isPromptPayConfigured()).toBe(true)
-    } finally {
-      if (original === undefined) delete process.env.PROMPTPAY_ID
-      else process.env.PROMPTPAY_ID = original
-    }
   })
 
   it("เบอร์โทร 10 หลักถูกแปลงเป็นรูปแบบ 0066 ตามสเปกและใส่จำนวนเงินครบ", () => {

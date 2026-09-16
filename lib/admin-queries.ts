@@ -1,6 +1,7 @@
 import "server-only"
 import { prisma } from "@/lib/prisma"
 import { toNumber } from "@/lib/format"
+import type { PaymentMode } from "@/generated/prisma/client"
 
 /// ชั้นอ่านข้อมูลของ "ผู้ดูแลแพลตฟอร์ม" (Phase 14a) — ค้นข้ามทุกร้านโดยตั้งใจ
 ///
@@ -129,6 +130,8 @@ export type AdminStoreDetail = {
   ownerEmails: string[]
   promptPayIdSet: boolean
   trialClaimed: boolean
+  /// วิธีรับเงิน (Phase 15a) — SCB_BILLER ตั้งได้เฉพาะผู้ดูแล
+  paymentMode: PaymentMode
 }
 
 export async function getStoreForAdmin(storeId: string): Promise<AdminStoreDetail | null> {
@@ -143,7 +146,8 @@ export async function getStoreForAdmin(storeId: string): Promise<AdminStoreDetai
       planTier: true,
       tableLimit: true,
       planExpiresAt: true,
-      settings: { select: { promptPayId: true } },
+      paymentMode: true,
+      paymentConfig: { select: { promptPayId: true } },
       _count: { select: { tables: true, members: true } },
       members: { where: { role: "OWNER" }, select: { user: { select: { email: true } } } },
     },
@@ -162,8 +166,9 @@ export async function getStoreForAdmin(storeId: string): Promise<AdminStoreDetai
     tableCount: store._count.tables,
     memberCount: store._count.members,
     ownerEmails: store.members.map((m) => m.user.email),
-    promptPayIdSet: Boolean(store.settings?.promptPayId),
+    promptPayIdSet: Boolean(store.paymentConfig?.promptPayId),
     trialClaimed,
+    paymentMode: store.paymentMode,
   }
 }
 

@@ -617,8 +617,6 @@ model StoreSettings {
   hasKDS               Boolean  @default(false)
   serviceChargePercent Decimal  @default(0) @db.Decimal(5, 2)
   crmEnabled           Boolean  @default(false)
-  /// เลขพร้อมเพย์ของร้าน (normalize เป็นตัวเลขล้วน) — ใช้รับสิทธิ์ทดลอง (Phase 14b) · Phase 15 ย้ายเข้า StorePaymentConfig
-  promptPayId          String?
   updatedAt            DateTime @updatedAt
   updatedById          String?
 
@@ -737,6 +735,9 @@ model Store {
   expiryNoticeLevel Int         @default(0)
   /// แบรนด์ที่สาขานี้อยู่ใต้ (Phase 14c) — null = ร้านสาขาเดียว ไม่ต้องมี Brand
   brandId           String?
+  /// วิธีรับเงินจากลูกค้าของร้านนี้ (Phase 15) — เงินเข้าบัญชีร้านโดยตรงทุกระดับ ไม่มี gateway โอนต่อ
+  /// SCB_BILLER ตั้งได้เฉพาะผู้ดูแลแพลตฟอร์ม (15a ยังใช้ credential SCB จาก env ของแพลตฟอร์ม — 15c ย้ายเป็นต่อร้าน)
+  paymentMode       PaymentMode @default(PROMPTPAY_DIRECT)
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
@@ -760,9 +761,38 @@ model Store {
   customers         Member[]
   paymentIntents    PaymentIntent[]
   invites           StoreInvite[]
+  paymentConfig     StorePaymentConfig?
 
   @@index([brandId])
   @@map("store")
+}
+
+/// วิธีรับเงินของร้าน (Phase 15) — 3 ระดับ:
+///   PROMPTPAY_DIRECT  ก  — QR พร้อมเพย์ของร้านที่สร้างเอง · พนักงานกดยืนยัน (ค่าเริ่มต้นทุกร้าน)
+///   PROMPTPAY_SLIP    ก+ — เหมือน ก แต่ลูกค้าแนบสลิปแล้วระบบตรวจ/ปิดบิลเอง (15b — ยังเลือกไม่ได้)
+///   SCB_BILLER        ข  — ธนาคารออก QR พก ref1 → callback ปิดบิลอัตโนมัติ (15c ต่อร้าน · 15a = env ของแพลตฟอร์ม)
+enum PaymentMode {
+  PROMPTPAY_DIRECT
+  PROMPTPAY_SLIP
+  SCB_BILLER
+}
+
+/// บัญชีรับเงินของร้าน (Phase 15a) — แยกจาก StoreSettings เพราะเป็นข้อมูลการเงินที่แก้ได้เฉพาะ OWNER
+/// และ 15b/15c จะเติมช่องเทียบผู้รับสลิป / credential SCB (เข้ารหัส) ลงตารางนี้ · promptPayId ย้ายมาจาก StoreSettings
+/// (normalize เป็นตัวเลขล้วน) และยังเป็นตัวผูกสิทธิ์ทดลอง 7 วัน (TrialClaim เก็บ hash ของค่านี้)
+model StorePaymentConfig {
+  id                String   @id @default(cuid())
+  storeId           String   @unique
+  promptPayId       String?
+  /// ชื่อบัญชี/เลขบัญชีไว้เทียบผู้รับตอนตรวจสลิป (15b) — ตอนนี้แค่เก็บ
+  accountName       String?
+  bankAccountNumber String?
+  updatedAt         DateTime @updatedAt
+  updatedById       String?
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@map("store_payment_config")
 }
 
 /// ผู้ใช้ 1 คนอยู่ได้หลายร้าน — ห้ามเพิ่ม storeId ลงตาราง user ของ Better Auth

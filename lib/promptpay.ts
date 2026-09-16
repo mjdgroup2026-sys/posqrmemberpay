@@ -4,11 +4,13 @@
 /// ที่ทุกแอปธนาคารไทยอ่านได้ ส่วน "การยืนยันว่าจ่ายแล้ว" ต่างหากที่ต้องพึ่ง provider
 /// (ดู app/api/payments/webhook/route.ts และปุ่มยืนยันด้วยมือในหน้าปิดบิล)
 ///
-/// ตั้งค่าเลขผู้รับเงินด้วย env `PROMPTPAY_ID`:
+/// เลขผู้รับเงินส่งเข้ามาเป็นพารามิเตอร์เสมอ (Phase 15a — เป็นของร้าน อยู่ที่ StorePaymentConfig.promptPayId ·
+/// ค่าใช้งานของแพลตฟอร์มใช้ env PLATFORM_PROMPTPAY_ID) — **ไม่มี default จาก env** เพื่อไม่ให้ร้านไหนเผลอออก QR
+/// ด้วยเลขของคนอื่น (env PROMPTPAY_ID เดิมเลิกใช้แล้ว):
 ///   - เบอร์โทร 10 หลัก เช่น 0812345678
 ///   - เลขบัตรประชาชน 13 หลัก
 ///   - เลขนิติบุคคล 13 หลัก
-/// ไม่ตั้ง = ยังสร้าง QR ไม่ได้ หน้าชำระเงินจะบอกให้ใช้วิธีอื่นแทน
+/// ไม่มีเลข = คืน null → หน้าชำระเงินบอกให้ใช้วิธีอื่นแทน
 
 const PAYLOAD_FORMAT = "00"
 const POINT_OF_INITIATION = "01"
@@ -51,12 +53,8 @@ function crc16(input: string): string {
   return crc.toString(16).toUpperCase().padStart(4, "0")
 }
 
-export function isPromptPayConfigured(): boolean {
-  return Boolean(process.env.PROMPTPAY_ID && normalizeTarget(process.env.PROMPTPAY_ID))
-}
-
-/// คืน payload string ที่เอาไป render เป็น QR ได้ทันที — คืน null ถ้ายังไม่ได้ตั้งค่า PROMPTPAY_ID
-export function buildPromptPayPayload(amount: number, promptPayId = process.env.PROMPTPAY_ID): string | null {
+/// คืน payload string ที่เอาไป render เป็น QR ได้ทันที — คืน null ถ้าเลขผู้รับว่าง/ใช้ไม่ได้
+export function buildPromptPayPayload(amount: number, promptPayId: string | null | undefined): string | null {
   if (!promptPayId) return null
   const target = normalizeTarget(promptPayId)
   if (!target) return null
