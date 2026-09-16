@@ -40,6 +40,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 | `RESEND_API_KEY` | key จาก resend.com — **เว้นว่าง = dev พิมพ์ลิงก์ลง console, production throw** |
 | `MAIL_FROM` | ต้องอยู่ใต้โดเมนที่ verify ไว้: `MJD Mobile Order <no-reply@mail.jayjayservices.com>` |
 | `MAIL_REPLY_TO` | ไม่บังคับ |
+| `SLIP_PROVIDER` / `SLIP_API_KEY` / `SLIP_API_BRANCH_ID` / `SLIP_MAX_AGE_MINUTES` | ตรวจสลิปอัตโนมัติ (Phase 15b โหมด ก+) — `mock` (dev/เทสเท่านั้น **ห้ามบน production**) · `easyslip` · `slipok` (+ branch id) · ไม่ตั้ง = ร้านเลือกโหมด `PROMPTPAY_SLIP` ไม่ได้ ระบบเหมือนเดิม · key เป็นของแพลตฟอร์ม โควตารวมทุกร้าน |
 | `PLATFORM_PROMPTPAY_ID` | พร้อมเพย์ของ "แพลตฟอร์ม" ที่ร้านโอนค่าใช้งานเข้า (Phase 14b) — **คนละเรื่องกับเลขพร้อมเพย์รับเงินลูกค้าของร้าน ซึ่งตั้งแต่ Phase 15a อยู่ในฐานข้อมูล (`StorePaymentConfig`) ไม่ใช่ env** (env `PROMPTPAY_ID` เดิมถอดออกแล้ว) · เว้นว่าง = หน้า `/billing` ไม่มี QR ให้สแกน |
 | `CRON_SECRET` | secret ใน path `GET /api/cron/plan-expiry/<secret>` ที่ `ops/plan-expiry-cron.sh` ยิงวันละครั้ง (09:10) ส่งอีเมลเตือน 7/3/1 วัน · ≥ 16 ตัว · เว้นว่าง = 401 (แบนเนอร์ในแอปยังขึ้น) |
 | `SIGNUP_OPEN` | `true` = ใครก็สมัครได้ (Phase 14a) · ไม่ตั้ง = allowlist `SIGNUP_ALLOWED_*` เดิม / ปิดสมัคร (fail closed) — **production ต้องตั้งเป็น `true` ตอน deploy 14a** · 🔥 **env ใหม่ทุกตัวต้องประกาศใน `environment:` ของ `docker-compose.prod.yml` ด้วย** ตั้งใน `.env` บน VPS อย่างเดียวไม่ถึงคอนเทนเนอร์ (compose ไม่ใช้ `env_file`) |
@@ -102,7 +103,10 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    `autoSettle` = ธนาคารปิดบิลให้เอง) · ห้ามเช็ค `isScbConfigured()`/เลขพร้อมเพย์ตรง ๆ ในหน้าใด · `buildPromptPayPayload()`
    ต้องได้เลขผู้รับเป็นพารามิเตอร์เสมอ ไม่มี default จาก env — ก่อน 15a ทุกร้านออก QR ของร้าน `default` (ลูกค้าร้านอื่น
    จ่ายเข้าบัญชีผิดร้าน) · โหมด `SCB_BILLER` ตั้งได้เฉพาะผู้ดูแลแพลตฟอร์ม (`setStorePaymentMode`) จนกว่า 15c จะย้าย credential
-   เป็นต่อร้าน · `PROMPTPAY_SLIP` เลือกไม่ได้จนกว่า 15b
+   เป็นต่อร้าน · `PROMPTPAY_SLIP` (15b) เลือกได้เมื่อตั้ง `SLIP_PROVIDER` — ตรวจสลิปผ่าน `verifySlipAndSettle()` ใน `lib/slip-settle.ts`
+   **ด่าน 4 ชั้นห้ามข้าม** (ผู้รับ = บัญชีร้านแบบปิดบางหลัก · ยอด ≥ บิล · `Sale.paymentReference = "SLIP:<transRef>"` unique · ไม่เก่ากว่า
+   `SLIP_MAX_AGE_MINUTES`) · ไม่ผ่าน = ไม่ปิดบิล แจ้งพนักงานผ่าน Notification · ลูกค้าอ่าน QR สลิปในเบราว์เซอร์ (`jsqr`) ส่งเฉพาะ payload
+   ไม่อัปโหลดรูป · adapter EasySlip/SlipOK ยังไม่เคยทดสอบกับ key จริง
 11. **(Phase 16) หน้า/action ของ MJD Mobile Order อยู่ใต้ matrix สิทธิ์แล้ว** — resource `MO_TABLES` (ผังโต๊ะ/รายละเอียด/ปิดบิล ·
    ADD เปิด/รวมโต๊ะ · EDIT ปิดบิล/ยืนยันชำระ/เสิร์ฟด้วยมือ · DELETE ยกเลิกโต๊ะ/รายการ), `MO_KITCHEN` (EDIT = เริ่มทำ/เสร็จ/เสิร์ฟ),
    `MO_NOTIFICATIONS` (EDIT = รับทราบ), `MO_MENU`, `MO_SETUP` (จัดการโต๊ะ + QR) · action ใช้ `requireStoreAccess([res, act], …)`
@@ -468,7 +472,12 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 ครอบทุกหน้า/action ของ Mobile Order · preset "พนักงานเสิร์ฟ" · 2 migrations (เพิ่ม enum / backfill สิทธิ์ + ผูก STAFF ที่ไม่มีบทบาท) ·
 ซ้อมบนสำเนา production แล้ว diff สะอาด · ไม่มี env ใหม่ · ไม่ซ่อนปุ่มรายสิทธิ์ใน UI (เหมือน F1–F9 ที่มีอยู่ — ด่านจริงคือ server)
 
-**ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · **Phase 15b–15c** (รอเลือก provider ตรวจสลิป / credential SCB) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**🔨 Phase 15b ตรวจสลิปอัตโนมัติ โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-15b-slip-verification` — รอ merge)**: `lib/slip-provider/`
+(mock/easyslip/slipok) · `lib/slip-settle.ts` ด่าน 4 ชั้น · `submitPaymentSlip` + `components/customer/slip-upload.tsx` (jsqr ฝั่งเบราว์เซอร์) ·
+เจ้าของเลือกโหมด ก+ ได้เมื่อตั้ง `SLIP_PROVIDER` · ไม่มี migration ไม่มี env บังคับ — **ใช้จริงเมื่อได้ API key (EasySlip/SlipOK free tier)
+แล้วทดสอบด้วยสลิปจริง 1 บาท** · dev ตั้ง `SLIP_PROVIDER=mock` ใน `.env` แล้ววาง payload `MOCK|…` ในช่องทดสอบใต้ QR
+
+**ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · **Phase 15c** (SCB ต่อร้าน — รอ credential/partner program) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**

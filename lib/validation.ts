@@ -234,6 +234,12 @@ export type CartLineInput = z.infer<typeof cartLineSchema>
 
 // ───────────────────── ชำระเงิน (Phase 10) ─────────────────────
 
+/// ลูกค้าแนบสลิป (Phase 15b) — payload คือข้อความที่อ่านได้จาก mini-QR บนสลิป (เบราว์เซอร์ถอดให้ ไม่ส่งรูป)
+export const submitSlipSchema = z.object({
+  qrToken: requiredId("ไม่พบ QR Code ของโต๊ะนี้"),
+  payload: z.string({ error: "ไม่พบข้อมูลจากสลิป" }).trim().min(20, "อ่าน QR บนสลิปไม่ได้ กรุณาลองใหม่").max(1000, "ข้อมูลสลิปยาวผิดปกติ"),
+})
+
 export const confirmPaymentSchema = z.object({
   sessionId: requiredId("ไม่พบโต๊ะที่ต้องการปิดบิล"),
   paymentMethod: z.enum(["PROMPTPAY", "CARD", "CASH", "TRANSFER"], {

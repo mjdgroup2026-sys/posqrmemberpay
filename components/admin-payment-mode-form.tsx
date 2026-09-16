@@ -12,11 +12,11 @@ type Mode = "PROMPTPAY_DIRECT" | "PROMPTPAY_SLIP" | "SCB_BILLER"
 
 const LABEL: Record<Mode, string> = {
   PROMPTPAY_DIRECT: "พร้อมเพย์ตรง (พนักงานกดยืนยัน)",
-  PROMPTPAY_SLIP: "พร้อมเพย์ + ตรวจสลิป (15b — ยังไม่เปิด)",
+  PROMPTPAY_SLIP: "พร้อมเพย์ + ตรวจสลิปอัตโนมัติ",
   SCB_BILLER: "SCB Biller — ปิดบิลอัตโนมัติ (env ของแพลตฟอร์ม)",
 }
 
-export function AdminPaymentModeForm({ storeId, current, scbReady }: { storeId: string; current: Mode; scbReady: boolean }) {
+export function AdminPaymentModeForm({ storeId, current, scbReady, slipReady }: { storeId: string; current: Mode; scbReady: boolean; slipReady: boolean }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [mode, setMode] = useState<Mode>(current)
@@ -48,9 +48,9 @@ export function AdminPaymentModeForm({ storeId, current, scbReady }: { storeId: 
       <IconWallet size={16} aria-hidden />
       <select className="select" value={mode} onChange={(e) => setMode(e.target.value as Mode)} disabled={pending} style={{ minWidth: 260 }}>
         {(Object.keys(LABEL) as Mode[]).map((m) => (
-          <option key={m} value={m} disabled={m === "PROMPTPAY_SLIP" || (m === "SCB_BILLER" && !scbReady)}>
+          <option key={m} value={m} disabled={(m === "PROMPTPAY_SLIP" && !slipReady) || (m === "SCB_BILLER" && !scbReady)}>
             {LABEL[m]}
-            {m === "SCB_BILLER" && !scbReady ? " — ยังไม่ตั้ง env" : ""}
+            {(m === "SCB_BILLER" && !scbReady) || (m === "PROMPTPAY_SLIP" && !slipReady) ? " — ยังไม่ตั้ง env" : ""}
           </option>
         ))}
       </select>

@@ -468,6 +468,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "requestBill",
     "registerMember",
     "startCustomerPayment",
+    // Phase 15b: ลูกค้าแนบสลิป — ร้านมาจาก qrToken เช่นกัน (เทสอยู่ที่ payment-slip.test.ts)
+    "submitPaymentSlip",
     // Phase 14c: ขอบเขตคือ brand.ownerId ไม่ใช่ storeId (เทสสิทธิ์ข้ามแบรนด์อยู่ที่ brand.test.ts) ·
     // ฝั่งแพลตฟอร์มทำงานข้ามร้านโดยตั้งใจ
     "renameBrand",

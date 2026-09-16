@@ -45,4 +45,6 @@ export {
   UserPlus as IconUserPlus,
   // Phase 14c — ร้านหลายสาขา (Brand)
   Building2 as IconBrand,
+  // Phase 15b — แนบสลิป
+  Camera as IconCamera,
 } from "lucide-react"
