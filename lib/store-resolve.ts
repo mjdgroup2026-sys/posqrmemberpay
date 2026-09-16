@@ -89,3 +89,24 @@ export async function listPendingInvitesForEmail(email: string): Promise<Pending
     expiresAt: r.expiresAt,
   }))
 }
+
+/// callback ของ SCB แบบต่อร้าน (Phase 15c) — URL มี token ของร้าน หาร้านจาก StorePaymentConfig.scbWebhookToken (unique)
+export async function findStoreByScbWebhookToken(token: string): Promise<ResolvedStore | null> {
+  if (!token) return null
+  const config = await prisma.storePaymentConfig.findUnique({
+    where: { scbWebhookToken: token },
+    select: { store: { select: { id: true, slug: true, status: true, planExpiresAt: true } } },
+  })
+  if (!config) return null
+  return { storeId: config.store.id, slug: config.store.slug, status: config.store.status, planExpiresAt: config.store.planExpiresAt }
+}
+
+/// ทดสอบการเชื่อมต่อ SCB (Phase 15c) — ref1 ของ QR 1 บาทที่รอ callback อยู่ unique ทั้งระบบเหมือน PaymentIntent.ref1
+export async function findStoreByScbTestRef1(ref1: string): Promise<ResolvedStore | null> {
+  const config = await prisma.storePaymentConfig.findUnique({
+    where: { scbTestRef1: ref1 },
+    select: { store: { select: { id: true, slug: true, status: true, planExpiresAt: true } } },
+  })
+  if (!config) return null
+  return { storeId: config.store.id, slug: config.store.slug, status: config.store.status, planExpiresAt: config.store.planExpiresAt }
+}

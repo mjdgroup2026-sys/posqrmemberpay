@@ -11,7 +11,11 @@ import "server-only"
 /// `lib/promptpay.ts` ยังไม่ถูกลบและยังใช้อยู่ — เป็น fallback ให้ร้านที่รับเข้าพร้อมเพย์ส่วนตัว
 /// แล้วให้พนักงานกดยืนยันเอง (ดู `isScbConfigured()` ที่หน้า pay/promptpay ใช้ตัดสินใจ)
 ///
-/// env ที่ต้องตั้ง:
+/// Phase 15c: ทุกฟังก์ชันรับ `ScbCredentials` เป็นพารามิเตอร์ — ของร้าน (StorePaymentConfig ถอดรหัสแล้ว, ดู lib/scb-store.ts)
+/// หรือของแพลตฟอร์มจาก env (`scbCredentialsFromEnv()` — fallback ให้ร้าน default ที่ยังไม่ย้าย credential เข้าฐาน)
+/// · token cache แยกตาม application key จึงมีหลายร้านพร้อมกันได้
+///
+/// env ของแพลตฟอร์ม (fallback):
 ///   SCB_API_BASE     — sandbox: https://api-sandbox.partners.scb/partners/sandbox
 ///   SCB_API_KEY      — application key (ใช้เป็น resourceOwnerId ด้วย)
 ///   SCB_API_SECRET   — application secret
@@ -35,21 +39,36 @@ type TokenData = { accessToken: string; expiresIn: number }
 
 type QrCreateData = { qrRawData?: string; qrImage?: string }
 
-/// token cache ระดับโมดูล — SCB ให้ token อายุ 30 นาที ขอใหม่ทุกครั้งที่ลูกค้าเปิดหน้าจ่ายเงิน
-/// จะกินโควตาฟรี ๆ และเพิ่ม latency ให้หน้าที่ลูกค้ากำลังรออยู่
-let cachedToken: { value: string; expiresAtMs: number } | null = null
+/// credential ครบชุดสำหรับเรียก SCB ในนามร้านหนึ่ง — ไม่มี default จาก env ในฟังก์ชันใด ผู้เรียกต้องส่งมาเสมอ
+export type ScbCredentials = {
+  base: string
+  key: string
+  secret: string
+  billerId: string
+  ref3Prefix: string
+}
 
-function readEnv(): { base: string; key: string; secret: string } | null {
+export const SCB_PRODUCTION_BASE = "https://api.partners.scb/partners/v1"
+export const SCB_SANDBOX_BASE = "https://api-sandbox.partners.scb/partners/sandbox"
+
+/// token cache ต่อ application key — SCB ให้ token อายุ 30 นาที ขอใหม่ทุกครั้งที่ลูกค้าเปิดหน้าจ่ายเงิน
+/// จะกินโควตาฟรี ๆ และเพิ่ม latency ให้หน้าที่ลูกค้ากำลังรออยู่ · แยกตาม key เพราะแต่ละร้านมีชุดของตัวเอง (15c)
+const cachedTokens = new Map<string, { value: string; expiresAtMs: number }>()
+
+/// credential ของแพลตฟอร์มจาก env — ครบ 5 ค่าถึงจะใช้ได้ (ขาด biller id ก็สร้าง QR ไม่ได้)
+export function scbCredentialsFromEnv(): ScbCredentials | null {
   const base = process.env.SCB_API_BASE
   const key = process.env.SCB_API_KEY
   const secret = process.env.SCB_API_SECRET
-  if (!base || !key || !secret) return null
-  return { base: base.replace(/\/+$/, ""), key, secret }
+  const billerId = process.env.SCB_BILLER_ID
+  const ref3Prefix = process.env.SCB_REF3_PREFIX
+  if (!base || !key || !secret || !billerId || !ref3Prefix) return null
+  return { base: base.replace(/\/+$/, ""), key, secret, billerId, ref3Prefix }
 }
 
-/// ร้านพร้อมใช้เส้นทาง SCB หรือยัง — ขาด biller id ก็สร้าง QR ไม่ได้ ถือว่ายังไม่พร้อม
+/// แพลตฟอร์มตั้ง env SCB ครบไหม (fallback ของร้าน default) — "ร้านนี้พร้อม SCB ไหม" ให้ถาม lib/scb-store.ts แทน
 export function isScbConfigured(): boolean {
-  return Boolean(readEnv() && process.env.SCB_BILLER_ID)
+  return scbCredentialsFromEnv() !== null
 }
 
 /// SCB บังคับให้ทุกคำขอมี requestUId ที่ไม่ซ้ำ ใช้ไล่ล็อกฝั่งธนาคารเวลาเปิดเคส
@@ -86,13 +105,11 @@ async function readEnvelope<T>(response: Response, label: string): Promise<ScbRe
   return { ok: true, data: body.data }
 }
 
-/// ขอ access token (cache ไว้จนใกล้หมดอายุ)
-export async function getAccessToken(): Promise<ScbResult<string>> {
-  const env = readEnv()
-  if (!env) return { ok: false, error: "ยังไม่ได้ตั้งค่า SCB_API_BASE / SCB_API_KEY / SCB_API_SECRET" }
-
-  if (cachedToken && cachedToken.expiresAtMs > Date.now()) {
-    return { ok: true, data: cachedToken.value }
+/// ขอ access token (cache ไว้จนใกล้หมดอายุ — ต่อ application key)
+export async function getAccessToken(env: ScbCredentials): Promise<ScbResult<string>> {
+  const cached = cachedTokens.get(env.key)
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return { ok: true, data: cached.value }
   }
 
   let response: Response
@@ -113,16 +130,17 @@ export async function getAccessToken(): Promise<ScbResult<string>> {
   const { accessToken, expiresIn } = parsed.data
   if (!accessToken) return { ok: false, error: "ธนาคารไม่ได้ส่ง accessToken กลับมา" }
 
-  cachedToken = {
+  cachedTokens.set(env.key, {
     value: accessToken,
     expiresAtMs: Date.now() + Math.max(expiresIn * 1000 - TOKEN_SAFETY_WINDOW_MS, 0),
-  }
+  })
   return { ok: true, data: accessToken }
 }
 
-/// ล้าง cache — ใช้ในเทส และเผื่อกรณีธนาคารเพิกถอน token กลางคัน
-export function resetTokenCache(): void {
-  cachedToken = null
+/// ล้าง cache — ใช้ในเทส · ตอนร้านเปลี่ยน credential · และเผื่อกรณีธนาคารเพิกถอน token กลางคัน
+export function resetTokenCache(key?: string): void {
+  if (key) cachedTokens.delete(key)
+  else cachedTokens.clear()
 }
 
 /// ref1/ref2/ref3 ของ SCB รับเฉพาะ A-Z และ 0-9 ยาวไม่เกิน 20 ตัว (ไม่มีขีด ไม่มีตัวพิมพ์เล็ก)
@@ -139,26 +157,19 @@ export type CreateQrInput = {
 }
 
 /// สร้าง QR ผ่าน SCB แล้วคืน payload EMVCo ดิบ (เอาไป render เป็นรูปด้วย `qrcode` เองเหมือนเดิม)
-export async function createQrCode(input: CreateQrInput): Promise<ScbResult<string>> {
-  const env = readEnv()
-  if (!env) return { ok: false, error: "ยังไม่ได้ตั้งค่าคีย์ของ SCB" }
-
-  const billerId = process.env.SCB_BILLER_ID
-  if (!billerId) return { ok: false, error: "ยังไม่ได้ตั้งค่า SCB_BILLER_ID" }
+export async function createQrCode(env: ScbCredentials, input: CreateQrInput): Promise<ScbResult<string>> {
+  const { billerId, ref3Prefix } = env
 
   // ref3 ต้องเป็น "prefix + ค่า" (เช่น SCB1234) ไม่ใช่ prefix เปล่า ๆ ตามสเปก QR 30
   // prefix ตัวนี้ยังเป็นตัวกำหนดว่า callback จะถูกส่งมาที่ URL ไหนด้วย — SCB ลงทะเบียน
   // ปลายทาง payment confirmation เป็นคู่ (Biller ID, ref3 prefix) ตั้งผิดคือ callback ไม่มาเลย
-  const ref3Prefix = process.env.SCB_REF3_PREFIX
-  if (!ref3Prefix) return { ok: false, error: "ยังไม่ได้ตั้งค่า SCB_REF3_PREFIX" }
-
   if (!REF_PATTERN.test(input.ref1)) {
     return { ok: false, error: "ref1 ต้องเป็น A-Z หรือ 0-9 ยาวไม่เกิน 20 ตัว" }
   }
 
   const ref3 = `${ref3Prefix}${input.ref1}`.slice(0, 20)
 
-  const token = await getAccessToken()
+  const token = await getAccessToken(env)
   if (!token.ok) return token
 
   let response: Response
@@ -213,24 +224,21 @@ const EVENT_CODE_THAI_QR_TAG30 = "00300100"
 /// ⚠️ SCB **ไม่ได้เซ็นหรือแนบ credential ใด ๆ มากับ payment confirmation** (ยืนยันจากเอกสาร
 /// qr-payment/payment-confirmation) แปลว่าใครก็ตามที่เดา URL ถูกก็ยิง JSON ปลอมมาปิดบิลได้ฟรี
 /// จึงห้ามเชื่อ payload ที่ยิงเข้ามาเด็ดขาด ต้องถามกลับมาที่ธนาคารด้วยฟังก์ชันนี้ก่อนปิดบิลเสมอ
-export async function inquireBillPayment(params: {
-  /// วันที่ของรายการในรูป yyyy-MM-dd (โซนเวลาไทย) — ธนาคารบังคับให้ระบุ
-  transactionDate: string
-  ref1: string
-}): Promise<ScbResult<BillPaymentTransaction>> {
-  const env = readEnv()
-  if (!env) return { ok: false, error: "ยังไม่ได้ตั้งค่าคีย์ของ SCB" }
-
-  const billerId = process.env.SCB_BILLER_ID
-  if (!billerId) return { ok: false, error: "ยังไม่ได้ตั้งค่า SCB_BILLER_ID" }
-
-  const token = await getAccessToken()
+export async function inquireBillPayment(
+  env: ScbCredentials,
+  params: {
+    /// วันที่ของรายการในรูป yyyy-MM-dd (โซนเวลาไทย) — ธนาคารบังคับให้ระบุ
+    transactionDate: string
+    ref1: string
+  },
+): Promise<ScbResult<BillPaymentTransaction>> {
+  const token = await getAccessToken(env)
   if (!token.ok) return token
 
   const query = new URLSearchParams({
     eventCode: EVENT_CODE_THAI_QR_TAG30,
     transactionDate: params.transactionDate,
-    billerId,
+    billerId: env.billerId,
     reference1: params.ref1,
   })
 

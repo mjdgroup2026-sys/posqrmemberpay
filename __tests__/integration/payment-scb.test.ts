@@ -123,7 +123,11 @@ describe.skipIf(!dbReady)("payment confirmation ของ SCB (Phase 10)", () =>
     expect(reloadedTable?.status).toBe("EMPTY")
 
     // ตรวจว่าถามกลับไปที่ธนาคารจริง ด้วยวันที่จาก payload ไม่ใช่วันที่ของเครื่อง server
-    expect(inquireMock).toHaveBeenCalledWith({ transactionDate: "2026-09-07", ref1: intent.ref1 })
+    // Phase 15c: ถามธนาคารด้วย credential ของร้านเจ้าของ intent — ร้านทดสอบไม่มีของตัวเอง จึงเป็น env ของแพลตฟอร์ม
+    expect(inquireMock).toHaveBeenCalledWith(
+      expect.objectContaining({ billerId: process.env.SCB_BILLER_ID }),
+      { transactionDate: "2026-09-07", ref1: intent.ref1 },
+    )
   })
 
   it("ธนาคารยิง callback ซ้ำด้วย transactionId เดิม → ไม่สร้างบิลซ้ำ และยังตอบสำเร็จ", async () => {

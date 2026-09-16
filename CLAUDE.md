@@ -41,6 +41,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 | `MAIL_FROM` | ต้องอยู่ใต้โดเมนที่ verify ไว้: `MJD Mobile Order <no-reply@mail.jayjayservices.com>` |
 | `MAIL_REPLY_TO` | ไม่บังคับ |
 | `SLIP_PROVIDER` / `SLIP_API_KEY` / `SLIP_API_BRANCH_ID` / `SLIP_MAX_AGE_MINUTES` | ตรวจสลิปอัตโนมัติ (Phase 15b โหมด ก+) — `mock` (dev/เทสเท่านั้น **ห้ามบน production**) · `easyslip` · `slipok` (+ branch id) · ไม่ตั้ง = ร้านเลือกโหมด `PROMPTPAY_SLIP` ไม่ได้ ระบบเหมือนเดิม · key เป็นของแพลตฟอร์ม โควตารวมทุกร้าน |
+| `PAYMENT_CONFIG_KEY` | (Phase 15c) กุญแจ AES-256-GCM เข้ารหัส credential SCB ที่ร้านกรอกเอง — 32 ไบต์ base64url · ไม่ตั้ง = ร้านผูก SCB เองไม่ได้ (fail closed) แต่ร้าน `default` ยังใช้ `SCB_*` env เป็น fallback · **เปลี่ยนกุญแจ = credential ทุกร้านถอดไม่ออก** ห้าม rotate โดยไม่มีแผน |
 | `PLATFORM_PROMPTPAY_ID` | พร้อมเพย์ของ "แพลตฟอร์ม" ที่ร้านโอนค่าใช้งานเข้า (Phase 14b) — **คนละเรื่องกับเลขพร้อมเพย์รับเงินลูกค้าของร้าน ซึ่งตั้งแต่ Phase 15a อยู่ในฐานข้อมูล (`StorePaymentConfig`) ไม่ใช่ env** (env `PROMPTPAY_ID` เดิมถอดออกแล้ว) · เว้นว่าง = หน้า `/billing` ไม่มี QR ให้สแกน |
 | `CRON_SECRET` | secret ใน path `GET /api/cron/plan-expiry/<secret>` ที่ `ops/plan-expiry-cron.sh` ยิงวันละครั้ง (09:10) ส่งอีเมลเตือน 7/3/1 วัน · ≥ 16 ตัว · เว้นว่าง = 401 (แบนเนอร์ในแอปยังขึ้น) |
 | `SIGNUP_OPEN` | `true` = ใครก็สมัครได้ (Phase 14a) · ไม่ตั้ง = allowlist `SIGNUP_ALLOWED_*` เดิม / ปิดสมัคร (fail closed) — **production ต้องตั้งเป็น `true` ตอน deploy 14a** · 🔥 **env ใหม่ทุกตัวต้องประกาศใน `environment:` ของ `docker-compose.prod.yml` ด้วย** ตั้งใน `.env` บน VPS อย่างเดียวไม่ถึงคอนเทนเนอร์ (compose ไม่ใช้ `env_file`) |
@@ -107,6 +108,12 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    **ด่าน 4 ชั้นห้ามข้าม** (ผู้รับ = บัญชีร้านแบบปิดบางหลัก · ยอด ≥ บิล · `Sale.paymentReference = "SLIP:<transRef>"` unique · ไม่เก่ากว่า
    `SLIP_MAX_AGE_MINUTES`) · ไม่ผ่าน = ไม่ปิดบิล แจ้งพนักงานผ่าน Notification · ลูกค้าอ่าน QR สลิปในเบราว์เซอร์ (`jsqr`) ส่งเฉพาะ payload
    ไม่อัปโหลดรูป · adapter EasySlip/SlipOK ยังไม่เคยทดสอบกับ key จริง
+   · **(Phase 15c) SCB ต่อร้าน**: `lib/payment-provider/scb.ts` **รับ `ScbCredentials` ทุกฟังก์ชัน ไม่มี default จาก env** ·
+   `getStoreScb(storeId)` ใน `lib/scb-store.ts` เป็นจุดเดียวที่ตัดสินว่าเรียกธนาคารในนามใคร (ของร้านที่ `scbVerifiedAt` แล้ว →
+   env ของแพลตฟอร์ม → null) · credential ในฐานเข้ารหัสด้วย `lib/secret-box.ts` ห้าม log/คืนออกไปเป็นข้อความธรรมดา ·
+   webhook ต่อร้าน `/api/payments/webhook/scb/store/[token]` **บังคับ intent ต้องเป็นของร้านเจ้าของ token** (ตัวจัดการร่วม
+   `lib/scb-webhook.ts` กับปลายทางเดิม `/scb/[secret]` ที่ยังใช้คู่กัน) · **ห้ามเปิดโหมด SCB ด้วย credential ของร้านก่อนผ่าน
+   "ทดสอบการเชื่อมต่อ" 1 บาท** — sandbox ไม่ยิง callback จึงยืนยันได้เฉพาะ production
 11. **(Phase 16) หน้า/action ของ MJD Mobile Order อยู่ใต้ matrix สิทธิ์แล้ว** — resource `MO_TABLES` (ผังโต๊ะ/รายละเอียด/ปิดบิล ·
    ADD เปิด/รวมโต๊ะ · EDIT ปิดบิล/ยืนยันชำระ/เสิร์ฟด้วยมือ · DELETE ยกเลิกโต๊ะ/รายการ), `MO_KITCHEN` (EDIT = เริ่มทำ/เสร็จ/เสิร์ฟ),
    `MO_NOTIFICATIONS` (EDIT = รับทราบ), `MO_MENU`, `MO_SETUP` (จัดการโต๊ะ + QR) · action ใช้ `requireStoreAccess([res, act], …)`
@@ -477,7 +484,13 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 เจ้าของเลือกโหมด ก+ ได้เมื่อตั้ง `SLIP_PROVIDER` · ไม่มี migration ไม่มี env บังคับ — **ใช้จริงเมื่อได้ API key (EasySlip/SlipOK free tier)
 แล้วทดสอบด้วยสลิปจริง 1 บาท** · dev ตั้ง `SLIP_PROVIDER=mock` ใน `.env` แล้ววาง payload `MOCK|…` ในช่องทดสอบใต้ QR
 
-**ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · **Phase 15c** (SCB ต่อร้าน — รอ credential/partner program) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**🔨 Phase 15c SCB ต่อร้าน โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-15c-scb-per-store` — รอ merge)**: `StorePaymentConfig.scb*`
+เข้ารหัส (`lib/secret-box.ts` + env `PAYMENT_CONFIG_KEY`) · `scb.ts` รับ credential เป็นพารามิเตอร์ · `lib/scb-store.ts` เลือกของร้าน (verified)
+→ env fallback · webhook ต่อร้าน `/scb/store/[token]` + ตัวจัดการร่วม `lib/scb-webhook.ts` · ฟอร์ม SCB ในตั้งค่าร้าน + ปุ่มทดสอบ 1 บาท ·
+เทส 15 ใหม่ · migration additive ซ้อมแล้ว diff สะอาด · **ตอน deploy**: ตั้ง `PAYMENT_CONFIG_KEY` บน VPS ก่อน · ร้าน default ยังใช้ env
+ตามเดิมจนกว่าจะย้าย credential เข้าฐานผ่านหน้าตั้งค่า + ทดสอบ 1 บาท + สลับ URL callback ในพอร์ทัล SCB
+
+**ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**

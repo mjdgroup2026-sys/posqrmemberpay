@@ -787,13 +787,27 @@ enum PaymentMode {
 /// และ 15b/15c จะเติมช่องเทียบผู้รับสลิป / credential SCB (เข้ารหัส) ลงตารางนี้ · promptPayId ย้ายมาจาก StoreSettings
 /// (normalize เป็นตัวเลขล้วน) และยังเป็นตัวผูกสิทธิ์ทดลอง 7 วัน (TrialClaim เก็บ hash ของค่านี้)
 model StorePaymentConfig {
-  id                String   @id @default(cuid())
-  storeId           String   @unique
+  id                String    @id @default(cuid())
+  storeId           String    @unique
   promptPayId       String?
-  /// ชื่อบัญชี/เลขบัญชีไว้เทียบผู้รับตอนตรวจสลิป (15b) — ตอนนี้แค่เก็บ
+  /// ชื่อบัญชี/เลขบัญชีไว้เทียบผู้รับตอนตรวจสลิป (15b)
   accountName       String?
   bankAccountNumber String?
-  updatedAt         DateTime @updatedAt
+  /// SCB Open API ของร้าน (Phase 15c — โหมด ข) · key/secret เข้ารหัส AES-256-GCM ด้วย env PAYMENT_CONFIG_KEY (lib/secret-box.ts)
+  /// ห้ามเก็บ/log เป็นข้อความธรรมดา · null ทั้งชุด = ร้านยังไม่ผูก SCB เอง (ร้าน default ใช้ env ของแพลตฟอร์มเป็น fallback)
+  scbApiBase        String?
+  scbApiKeyEnc      String?
+  scbApiSecretEnc   String?
+  scbBillerId       String?
+  scbRef3Prefix     String?
+  /// token ใน URL callback ต่อร้าน /api/payments/webhook/scb/store/<token> — สุ่มตอนบันทึก credential ครั้งแรก
+  scbWebhookToken   String?   @unique
+  /// ทดสอบการเชื่อมต่อ: ref1 ของ QR 1 บาทที่รอ callback อยู่ (unique ทั้งระบบเหมือน PaymentIntent.ref1) + เวลาเริ่ม
+  scbTestRef1       String?   @unique
+  scbTestStartedAt  DateTime?
+  /// ผ่านการทดสอบ (callback 1 บาทเข้าจริง) เมื่อไหร่ — **null = ยังไม่เปิดปิดบิลอัตโนมัติด้วย credential ของร้าน** (บังคับตาม spec)
+  scbVerifiedAt     DateTime?
+  updatedAt         DateTime  @updatedAt
   updatedById       String?
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)

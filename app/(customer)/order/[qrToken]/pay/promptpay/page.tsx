@@ -5,6 +5,7 @@ import { findStoreByQrToken } from "@/lib/store-resolve"
 import { buildPromptPayPayload } from "@/lib/promptpay"
 import { issuePaymentIntent } from "@/lib/payment-intent"
 import { createQrCode } from "@/lib/payment-provider/scb"
+import { getStoreScb } from "@/lib/scb-store"
 import { getStorePaymentProfile } from "@/lib/payment-methods"
 import { CustomerShell, CustomerNotice } from "@/components/customer/customer-shell"
 import { PromptPayView } from "@/components/customer/promptpay-view"
@@ -30,9 +31,10 @@ export default async function PromptPayPage({ params }: PageProps<"/order/[qrTok
   const payment = await getStorePaymentProfile(status.storeId)
   let payload: string | null = null
 
-  if (payment.autoSettle) {
+  const scb = payment.autoSettle ? await getStoreScb(status.storeId) : null
+  if (scb) {
     const intent = await issuePaymentIntent(status.storeId, status.sessionId, status.total)
-    const issued = await createQrCode({ amount: status.total, ref1: intent.ref1 })
+    const issued = await createQrCode(scb.creds, { amount: status.total, ref1: intent.ref1 })
     if (issued.ok) {
       payload = issued.data
     } else {

@@ -1,12 +1,16 @@
 import { redirect } from "next/navigation"
 import {
   getPaymentConfig,
+  getScbConfig,
   getStoreSettings,
   listMenuForSettings,
   getOpenSessionCount,
 } from "@/lib/queries"
 import { getStorePaymentProfile } from "@/lib/payment-methods"
 import { isSlipVerificationConfigured } from "@/lib/slip-provider"
+import { isSecretBoxConfigured } from "@/lib/secret-box"
+import { publicBaseUrl } from "@/lib/urls"
+import { ScbConfigForm } from "@/components/scb-config-form"
 import { requireStorePage } from "@/lib/permissions"
 import { StoreSettingsForm } from "@/components/store-settings-form"
 import { PaymentConfigForm } from "@/components/payment-config-form"
@@ -17,14 +21,14 @@ export default async function StoreSettingsPage() {
   const { storeId, role } = await requireStorePage()
   // ตั้งค่าร้านเป็นของเจ้าของร้านเท่านั้น (Phase 13) — action updateStoreSettings ก็กันด้วย requireOwner()
   if (role !== "OWNER") redirect("/access-denied?resource=STORE_SETTINGS")
-  const [settings, menu, openSessionCount, paymentConfig, paymentProfile] =
-    await Promise.all([
-      getStoreSettings(storeId),
-      listMenuForSettings(storeId),
-      getOpenSessionCount(storeId),
-      getPaymentConfig(storeId),
-      getStorePaymentProfile(storeId),
-    ])
+  const [settings, menu, openSessionCount, paymentConfig, paymentProfile, scbConfig] = await Promise.all([
+    getStoreSettings(storeId),
+    listMenuForSettings(storeId),
+    getOpenSessionCount(storeId),
+    getPaymentConfig(storeId),
+    getStorePaymentProfile(storeId),
+    getScbConfig(storeId),
+  ])
 
   return (
     <>
@@ -47,7 +51,10 @@ export default async function StoreSettingsPage() {
         config={paymentConfig}
         scbAutoSettle={paymentProfile.autoSettle}
         slipReady={isSlipVerificationConfigured()}
+        scbOwnVerified={scbConfig.activeSource === "store"}
       />
+      {/* SCB Biller ของร้าน (Phase 15c) — credential เข้ารหัส + ทดสอบด้วยเงินจริง 1 บาทก่อนเปิดใช้ */}
+      <ScbConfigForm config={scbConfig} baseUrl={publicBaseUrl()} secretBoxReady={isSecretBoxConfigured()} />
     </>
   )
 }

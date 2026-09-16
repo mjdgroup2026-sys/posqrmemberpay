@@ -98,6 +98,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "admin-billing": await import("@/app/actions/admin-billing"),
       brand: await import("@/app/actions/brand"),
       "payment-config": await import("@/app/actions/payment-config"),
+      "scb-config": await import("@/app/actions/scb-config"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -391,6 +392,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["listSubscriptionHistory", (q, a) => q.listSubscriptionHistory(a.storeId)],
     ["getBillingOverview", (q, a) => q.getBillingOverview(a.storeId)],
     ["getPaymentConfig", (q, a) => q.getPaymentConfig(a.storeId)],
+    ["getScbConfig", (q, a) => q.getScbConfig(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -480,6 +482,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     // (เทสสิทธิ์/แยกร้านอยู่ที่ payment-config.test.ts)
     "updatePaymentConfig",
     "setStorePaymentMode",
+    // Phase 15c: SCB ของร้านที่ทำงานอยู่ (ไม่รับ id) — เทสอยู่ที่ payment-scb-store.test.ts
+    "updateScbCredentials",
+    "clearScbCredentials",
+    "startScbConnectionTest",
+    "getScbTestStatus",
   ]
 
   type ActionCase = [

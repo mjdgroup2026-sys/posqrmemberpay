@@ -18,19 +18,22 @@ type Props = {
   scbAutoSettle: boolean
   /// แพลตฟอร์มตั้งผู้ให้บริการตรวจสลิปแล้ว (Phase 15b) — เจ้าของเลือกโหมด ก+ ได้
   slipReady: boolean
+  /// credential SCB ของร้านผ่านการทดสอบแล้ว (Phase 15c) — เจ้าของเลือก/ออกจากโหมด ข ได้เอง
+  scbOwnVerified: boolean
 }
 
 const MODE_LABEL = {
   PROMPTPAY_DIRECT: "พร้อมเพย์ตรง — ลูกค้าสแกน QR ของร้าน พนักงานกดยืนยัน",
   PROMPTPAY_SLIP: "พร้อมเพย์ตรง + ลูกค้าแนบสลิปแล้วระบบตรวจ/ปิดบิลเอง",
-  SCB_BILLER: "รับผ่าน SCB Biller — ธนาคารยืนยันแล้วปิดบิลเอง (ผู้ดูแลระบบเป็นผู้เปิด)",
+  SCB_BILLER: "รับผ่าน SCB Biller ของร้าน — ธนาคารยืนยันแล้วปิดบิลเอง",
 } as const
 
-export function PaymentConfigForm({ config, scbAutoSettle, slipReady }: Props) {
+export function PaymentConfigForm({ config, scbAutoSettle, slipReady, scbOwnVerified }: Props) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
-  const lockedToScb = config.paymentMode === "SCB_BILLER"
+  // โหมด SCB ที่ผู้ดูแลตั้งให้ (ใช้ env ของแพลตฟอร์ม) เปลี่ยนเองไม่ได้ · ร้านที่ผ่านการทดสอบ credential ของตัวเองสลับได้
+  const lockedToScb = config.paymentMode === "SCB_BILLER" && !scbOwnVerified
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -77,13 +80,14 @@ export function PaymentConfigForm({ config, scbAutoSettle, slipReady }: Props) {
             วิธีรับเงิน
           </legend>
           {(Object.keys(MODE_LABEL) as (keyof typeof MODE_LABEL)[]).map((mode) => {
-            const disabled = (mode === "PROMPTPAY_SLIP" && !slipReady) || mode === "SCB_BILLER" || lockedToScb
+            const disabled = (mode === "PROMPTPAY_SLIP" && !slipReady) || (mode === "SCB_BILLER" && !scbOwnVerified) || lockedToScb
             return (
               <label key={mode} className="checkbox-row" style={{ opacity: disabled && config.paymentMode !== mode ? 0.6 : 1 }}>
                 <input type="radio" name="paymentMode" value={mode} defaultChecked={config.paymentMode === mode} disabled={disabled} />
                 <span>
                   {MODE_LABEL[mode]}
                   {mode === "PROMPTPAY_SLIP" && !slipReady ? " (ยังไม่เปิดให้ใช้)" : ""}
+                  {mode === "SCB_BILLER" && !scbOwnVerified ? " (ต้องผ่านการทดสอบการเชื่อมต่อด้านล่างก่อน)" : ""}
                 </span>
               </label>
             )

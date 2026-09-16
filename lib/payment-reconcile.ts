@@ -3,6 +3,7 @@ import { forStore } from "@/lib/db"
 import { closeSessionWithPayment } from "@/lib/close-session"
 import { markIntentFailed, markIntentPaid, type IntentLookup } from "@/lib/payment-intent"
 import { inquireBillPayment } from "@/lib/payment-provider/scb"
+import { getStoreScb } from "@/lib/scb-store"
 
 /// ตรวจกับธนาคารแล้วปิดบิล — เรียกจาก callback ของ SCB เท่านั้น
 ///
@@ -42,9 +43,13 @@ export async function verifyAndSettleIntent(
   intent: IntentLookup,
   transactionDate: string,
 ): Promise<SettleResult> {
+  // credential ของร้านเจ้าของ intent (Phase 15c) — ร้านผูกเองที่ผ่านการทดสอบแล้ว หรือ env ของแพลตฟอร์ม (fallback)
+  const scb = await getStoreScb(intent.storeId)
+  if (!scb) return { ok: false, reason: "ร้านนี้ไม่มี credential SCB สำหรับตรวจสอบรายการ" }
+
   // ★ ด่านที่ 1 — ถามธนาคารว่ารายการนี้เกิดขึ้นจริงไหม ห้ามเชื่อ payload ที่ยิงเข้ามา
   //   (callback ของ SCB ไม่มีลายเซ็นหรือ credential ใด ๆ ใครเดา URL ถูกก็ยิงปลอมได้)
-  const verified = await inquireBillPayment({ transactionDate, ref1: intent.ref1 })
+  const verified = await inquireBillPayment(scb.creds, { transactionDate, ref1: intent.ref1 })
   if (!verified.ok) {
     // ยังไม่ mark FAILED — อาจเป็นแค่ธนาคารตอบช้า/เน็ตสะดุด ปล่อยให้ retry รอบหน้าลองใหม่ได้
     return { ok: false, reason: verified.error }
