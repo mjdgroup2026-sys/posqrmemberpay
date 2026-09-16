@@ -1,6 +1,6 @@
 import type { PermissionAction, Prisma, ResourceKey } from "@/generated/prisma/client"
 
-/// สร้างร้านใหม่ให้ครบชุด (Phase 13) — Store + StoreSettings + บทบาทระบบ 3 บทบาท ในทรานแซคชันเดียว
+/// สร้างร้านใหม่ให้ครบชุด (Phase 13) — Store + StoreSettings + บทบาทระบบ 4 บทบาท ในทรานแซคชันเดียว
 ///
 /// ใช้ร่วมกันโดย seed, สคริปต์, เทส และ onboarding ใน Phase 14 — เพื่อให้ "ร้านที่ไม่มี settings"
 /// หรือ "ร้านที่ไม่มีบทบาทระบบ" ไม่มีทางเกิดขึ้นได้ไม่ว่าจะสร้างจากทางไหน
@@ -32,6 +32,11 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       POS_CLOSING: ["VIEW", "ADD"],
       REPORTS: ["VIEW"],
       USERS: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_TABLES: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_KITCHEN: ["VIEW", "EDIT"],
+      MO_NOTIFICATIONS: ["VIEW", "EDIT"],
+      MO_MENU: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
     },
   },
   {
@@ -49,6 +54,11 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       POS_CLOSING: ["VIEW", "ADD"],
       REPORTS: ["VIEW"],
       USERS: ["VIEW"],
+      MO_TABLES: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_KITCHEN: ["VIEW", "EDIT"],
+      MO_NOTIFICATIONS: ["VIEW", "EDIT"],
+      MO_MENU: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
     },
   },
   {
@@ -63,6 +73,25 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       POS_HISTORY: ["VIEW", "DELETE"],
       POS_CLOSING: ["VIEW", "ADD"],
       REPORTS: ["VIEW"],
+      MO_TABLES: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_KITCHEN: ["VIEW", "EDIT"],
+      MO_NOTIFICATIONS: ["VIEW", "EDIT"],
+      MO_MENU: ["VIEW"],
+      MO_SETUP: ["VIEW"],
+    },
+  },
+  // Phase 16 — พนักงานที่ทำงานเฉพาะฝั่ง Mobile Order (ไม่เห็นคลังสินค้า/POS) · migration backfill ผูกให้ STAFF
+  // ที่ยังไม่มีบทบาทตอน deploy เพราะเดิมคนกลุ่มนี้เข้าได้แค่หน้า Mobile Order อยู่แล้ว
+  {
+    name: "พนักงานเสิร์ฟ",
+    description: "รับออเดอร์ เสิร์ฟ และปิดบิลโต๊ะได้ ไม่เห็นคลังสินค้าและ POS",
+    isSystem: false,
+    permissions: {
+      MO_TABLES: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_KITCHEN: ["VIEW", "EDIT"],
+      MO_NOTIFICATIONS: ["VIEW", "EDIT"],
+      MO_MENU: ["VIEW"],
+      MO_SETUP: ["VIEW"],
     },
   },
 ]

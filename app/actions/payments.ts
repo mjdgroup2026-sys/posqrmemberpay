@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
-import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireStoreAccess } from "@/lib/permissions"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { closeSessionWithPayment, computeBillTotals } from "@/lib/close-session"
 import { toNumber } from "@/lib/format"
@@ -38,7 +39,7 @@ function revalidatePaymentPages() {
 export async function confirmMobilePayment(formData: FormData): Promise<ActionResult<{ saleNumber: string }>> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_TABLES", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }

@@ -1,12 +1,13 @@
 import Link from "next/link"
 import { getBillingView } from "@/lib/queries"
-import { requireStorePage } from "@/lib/permissions"
+import { requirePageAccess } from "@/lib/permissions"
 import { BillingForm } from "@/components/billing-form"
 
 export const metadata = { title: "ปิดบิล" }
 
 export default async function BillingPage({ params }: PageProps<"/mobile-order/tables/[tableId]/billing">) {
-  const { storeId } = await requireStorePage()
+  // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
+  const { storeId } = await requirePageAccess("MO_TABLES")
   const { tableId } = await params
   const bill = await getBillingView(storeId, tableId)
 

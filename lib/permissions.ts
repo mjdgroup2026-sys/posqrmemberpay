@@ -4,13 +4,14 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { resolveStoreContext, type StoreContext, type StorePlan } from "@/lib/session"
 import { isPlanActive } from "@/lib/subscription"
-import { storeErrorMessage } from "@/lib/store-errors"
+import { PermissionDenied, storeErrorMessage } from "@/lib/store-errors"
 import type { StoreRole } from "@/generated/prisma/client"
 import type { PermissionAction, ResourceKey } from "@/generated/prisma/client"
 
 export type { PermissionAction, ResourceKey }
+export { PermissionDenied }
 
-/// ชั้นสิทธิ์ตามบทบาท (§4) — ครอบหน้าและ action ของ F1–F9
+/// ชั้นสิทธิ์ตามบทบาท (§4) — ครอบหน้าและ action ของ F1–F9 และ MJD Mobile Order (Phase 16)
 ///
 /// ตรวจ **2 ชั้นเสมอ** ตามกติกาใน §4:
 ///   1. `requirePageAccess(resource)` ที่ต้นทุกหน้า — ไม่ผ่าน → เด้งไป /access-denied
@@ -37,6 +38,16 @@ export const RESOURCE_ACTIONS: Record<ResourceKey, PermissionAction[]> = {
   REPORTS: ["VIEW"],
   // EDIT ครอบการเปลี่ยนบทบาทผู้ใช้อื่น และเป็นสิทธิ์เดียวกับที่ใช้เข้าหน้า /roles
   USERS: ["VIEW", "ADD", "EDIT", "DELETE"],
+  // ───── MJD Mobile Order (Phase 16) ─────
+  // ADD = เปิด/รวมโต๊ะ · EDIT = ปิดบิล/ยืนยันชำระ/กดเสิร์ฟด้วยมือ/พิมพ์ทิกเก็ตซ้ำ · DELETE = ยกเลิกโต๊ะ/ยกเลิกรายการ
+  MO_TABLES: ["VIEW", "ADD", "EDIT", "DELETE"],
+  // EDIT = เริ่มทำ/เสร็จ/เสิร์ฟ บน KDS
+  MO_KITCHEN: ["VIEW", "EDIT"],
+  // EDIT = กดรับทราบ
+  MO_NOTIFICATIONS: ["VIEW", "EDIT"],
+  MO_MENU: ["VIEW", "ADD", "EDIT", "DELETE"],
+  // จัดการโต๊ะ + QR Code: ADD = สร้างโต๊ะ/ออก QR · EDIT = เปลี่ยนชื่อโต๊ะ/พิมพ์ QR ซ้ำ · DELETE = ลบโต๊ะ/ยกเลิก QR
+  MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
 }
 
 export const RESOURCE_LABEL: Record<ResourceKey, string> = {
@@ -50,6 +61,11 @@ export const RESOURCE_LABEL: Record<ResourceKey, string> = {
   POS_CLOSING: "ปิดยอดประจำวัน",
   REPORTS: "รายงาน",
   USERS: "ผู้ใช้งานและสิทธิ์",
+  MO_TABLES: "ผังโต๊ะและปิดบิล",
+  MO_KITCHEN: "หน้าจอครัว (KDS)",
+  MO_NOTIFICATIONS: "การแจ้งเตือน",
+  MO_MENU: "จัดการเมนูอาหาร",
+  MO_SETUP: "จัดการโต๊ะและ QR Code",
 }
 
 export const ACTION_LABEL: Record<PermissionAction, string> = {
@@ -65,6 +81,13 @@ export const ACTION_HINT: Partial<Record<`${ResourceKey}:${PermissionAction}`, s
   "POS_HISTORY:DELETE": "ยกเลิก (void) บิล",
   "POS_CLOSING:ADD": "กดปิดยอดประจำวัน",
   "USERS:EDIT": "แก้ผู้ใช้และจัดการบทบาท/สิทธิ์",
+  "MO_TABLES:ADD": "เปิดโต๊ะ/รวมโต๊ะ",
+  "MO_TABLES:EDIT": "ปิดบิล ยืนยันชำระเงิน กดเสิร์ฟด้วยมือ",
+  "MO_TABLES:DELETE": "ยกเลิกโต๊ะ/ยกเลิกรายการอาหาร",
+  "MO_KITCHEN:EDIT": "กดเริ่มทำ/เสร็จ/เสิร์ฟบน KDS",
+  "MO_NOTIFICATIONS:EDIT": "กดรับทราบการแจ้งเตือน",
+  "MO_SETUP:ADD": "สร้างโต๊ะ/ออก QR Code",
+  "MO_SETUP:DELETE": "ลบโต๊ะ/ยกเลิก QR Code",
 }
 
 export type CurrentUserPermissions = {
@@ -138,29 +161,41 @@ export async function hasPermission(resource: ResourceKey, action: PermissionAct
   return permissions.granted[resource]?.includes(action) ?? false
 }
 
-export class PermissionDenied extends Error {
-  constructor(
-    readonly resource: ResourceKey,
-    readonly action: PermissionAction,
-  ) {
-    super("PERMISSION_DENIED")
-  }
+function denied(resource: ResourceKey, action: PermissionAction): PermissionDenied {
+  return new PermissionDenied(resource, action, permissionErrorMessage(resource, action))
 }
 
 /// ด่านของ Server Action — โยน `PermissionDenied` เมื่อไม่มีสิทธิ์
-/// ผู้เรียกต้องจับแล้วคืน `ActionResult` ภาษาไทย (ดู `permissionErrorResult`)
+/// ผู้เรียกต้องจับแล้วคืน `ActionResult` ภาษาไทย (storeErrorMessage() รู้จัก PermissionDenied แล้ว)
 export async function requirePermission(
   resource: ResourceKey,
   action: PermissionAction,
 ): Promise<CurrentUserPermissions> {
   const permissions = await getCurrentPermissions()
-  if (!permissions) throw new PermissionDenied(resource, action)
-  if (!permissions.granted[resource]?.includes(action)) throw new PermissionDenied(resource, action)
+  if (!permissions) throw denied(resource, action)
+  if (!permissions.granted[resource]?.includes(action)) throw denied(resource, action)
   return permissions
 }
 
 export function permissionErrorMessage(resource: ResourceKey, action: PermissionAction): string {
   return `คุณไม่มีสิทธิ์${ACTION_LABEL[action]}ในหน้า${RESOURCE_LABEL[resource]} กรุณาติดต่อผู้ดูแลระบบ`
+}
+
+export type PermissionPair = [ResourceKey, PermissionAction]
+
+/// requireStore() + สิทธิ์ (Phase 16) — ใช้แทน `requireStore()` บรรทัดแรกของ action ฝั่ง Mobile Order โดยไม่ต้องแก้
+/// ส่วนที่เหลือ: คืน StoreContext เดิม · โยน Error รหัสของ requireStore() หรือ PermissionDenied ซึ่ง storeErrorMessage()
+/// แปลงเป็นไทยให้ทั้งคู่ · `pairs` หลายคู่ = ผ่านคู่ใดคู่หนึ่งก็พอ (เช่น กดเสิร์ฟได้ทั้งจาก KDS และหน้าโต๊ะ)
+export async function requireStoreAccess(
+  ...pairs: [PermissionPair, ...PermissionPair[]]
+): Promise<StoreContext> {
+  const result = await resolveStoreContext()
+  if (!result.ok) throw new Error(result.reason)
+  const permissions = await permissionsFromContext(result.context)
+  if (!pairs.some(([resource, action]) => permissions.granted[resource]?.includes(action))) {
+    throw denied(pairs[0][0], pairs[0][1])
+  }
+  return result.context
 }
 
 export type ActionGuard =
@@ -191,11 +226,12 @@ export async function guardAction(
 
 /// ด่านของหน้า — เรียกเป็นบรรทัดแรกของทุก page ที่คุมสิทธิ์
 /// ไม่ผ่าน → เด้งไป /access-denied (ไม่ใช่ 404 เพื่อให้ผู้ใช้รู้ว่าหน้ามีอยู่แต่สิทธิ์ไม่ถึง)
-export async function requirePageAccess(resource: ResourceKey): Promise<CurrentUserPermissions> {
+/// ระบุหลาย resource = มี VIEW ตัวใดตัวหนึ่งก็เข้าได้ (เช่น ทิกเก็ตครัวเปิดได้ทั้งจาก KDS และหน้าโต๊ะ)
+export async function requirePageAccess(resource: ResourceKey, ...alternatives: ResourceKey[]): Promise<CurrentUserPermissions> {
   const result = await resolveStoreContext()
   if (!result.ok) redirectForMissingStore(result.reason)
   const permissions = await permissionsFromContext(result.context)
-  if (!permissions.granted[resource]?.includes("VIEW")) {
+  if (![resource, ...alternatives].some((r) => permissions.granted[r]?.includes("VIEW"))) {
     redirect(`/access-denied?resource=${resource}`)
   }
   return permissions

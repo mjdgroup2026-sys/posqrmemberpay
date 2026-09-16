@@ -3,7 +3,8 @@
 import { randomBytes } from "node:crypto"
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
-import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireStoreAccess } from "@/lib/permissions"
 import { generateQrSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -23,7 +24,7 @@ function newToken(): string {
 export async function generateQRCode(formData: FormData): Promise<ActionResult<{ token: string }>> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_SETUP", "ADD"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -80,7 +81,7 @@ export async function generateQRCode(formData: FormData): Promise<ActionResult<{
 export async function invalidateQRCode(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_SETUP", "DELETE"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -108,7 +109,7 @@ export async function invalidateQRCode(formData: FormData): Promise<ActionResult
 export async function reprintQRCode(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_SETUP", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -136,7 +137,7 @@ export async function reprintQRCode(formData: FormData): Promise<ActionResult> {
 export async function generateMissingQRCodes(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_SETUP", "ADD"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }

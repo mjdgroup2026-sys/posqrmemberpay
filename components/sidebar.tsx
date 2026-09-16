@@ -27,8 +27,8 @@ import {
 } from "@/components/icons"
 import type { ResourceKey } from "@/lib/permissions"
 
-/// resource = ตัวคุมสิทธิ์ VIEW ของเมนูนั้น (§4) · ไม่ระบุ = เมนูที่ทุกคนที่ล็อกอินเห็นได้
-/// (ตั้งค่าโปรไฟล์ตัวเอง และหน้าของ MJD Mobile Order ที่ยังไม่อยู่ในชุด resource)
+/// resource = ตัวคุมสิทธิ์ VIEW ของเมนูนั้น (§4) · ไม่ระบุ = เมนูที่ทุกคนที่ล็อกอินเห็นได้ (ตั้งค่าโปรไฟล์ตัวเอง)
+/// Phase 16: หน้าของ MJD Mobile Order อยู่ในชุด resource แล้ว (MO_*) · ตั้งค่าร้านเป็นของเจ้าของร้าน
 type NavItem = {
   href: string
   label: string
@@ -53,13 +53,13 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
   {
     title: "MJD Mobile Order",
     items: [
-      { href: "/mobile-order/tables", label: "ผังโต๊ะ", Icon: IconTable },
-      { href: "/mobile-order/notifications", label: "การแจ้งเตือน", Icon: IconBell, badge: "pending" },
-      { href: "/mobile-order/kitchen", label: "หน้าจอครัว (KDS)", Icon: IconKitchen },
-      { href: "/mobile-order/menu", label: "จัดการเมนูอาหาร", Icon: IconMenu },
-      { href: "/mobile-order/tables/manage", label: "จัดการโต๊ะ", Icon: IconTable },
-      { href: "/mobile-order/qr-codes", label: "จัดการ QR Code", Icon: IconQr },
-      { href: "/mobile-order/settings", label: "ตั้งค่าร้าน", Icon: IconStore },
+      { href: "/mobile-order/tables", label: "ผังโต๊ะ", Icon: IconTable, resource: "MO_TABLES" },
+      { href: "/mobile-order/notifications", label: "การแจ้งเตือน", Icon: IconBell, badge: "pending", resource: "MO_NOTIFICATIONS" },
+      { href: "/mobile-order/kitchen", label: "หน้าจอครัว (KDS)", Icon: IconKitchen, resource: "MO_KITCHEN" },
+      { href: "/mobile-order/menu", label: "จัดการเมนูอาหาร", Icon: IconMenu, resource: "MO_MENU" },
+      { href: "/mobile-order/tables/manage", label: "จัดการโต๊ะ", Icon: IconTable, resource: "MO_SETUP" },
+      { href: "/mobile-order/qr-codes", label: "จัดการ QR Code", Icon: IconQr, resource: "MO_SETUP" },
+      { href: "/mobile-order/settings", label: "ตั้งค่าร้าน", Icon: IconStore, ownerOnly: true },
     ],
   },
   {
