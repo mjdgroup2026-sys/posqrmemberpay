@@ -127,6 +127,11 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    ทับไปทั้งที่ยังไม่ได้รัน ต้องดูผลจริงก่อน resolve เสมอ (ตรงกับกับดักใน CLAUDE.md)
    · **ปุ่มใน UI ซ่อนตามสิทธิ์ด้วย** (§4): client component รับ `allowed?: AllowedActions` / `can*` จาก `lib/types.ts` (ค่าเริ่มต้น `FULL_ACCESS`)
    หน้าเป็นคนส่ง `granted[RESOURCE]` จาก `requirePageAccess()` — เพิ่มปุ่มใหม่ต้องครอบด้วย `allowed.includes(...)` ให้ตรงกับ action ที่ guard
+12. **Realtime = SSE ผ่าน `lib/realtime.ts`** (2026-09-16 — แทน Socket.IO ที่ต้องมี custom server) — action/เส้นทางปิดบิลที่แตะข้อมูลของ
+   Mobile Order ต้องเรียก `publishStoreEvent(storeId, topic)` หลังเขียน DB สำเร็จ (ผ่าน helper `revalidateXPages(storeId)` ของแต่ละไฟล์ action
+   หรือ `closeSessionWithPayment`) · **event ห้ามพกข้อมูล** แค่ topic ให้ client refresh/fetch ผ่านด่านสิทธิ์ตามปกติ · client ใช้
+   `useRealtime()` และ**ต้องคง polling สำรอง**ไว้เสมอ (bus อยู่ในโปรเซสเดียว — สลับสี blue/green อาจทำ event หล่นช่วงสั้น ๆ) ·
+   stream ต้องส่ง heartbeat ≤ 25 วิ และ header `X-Accel-Buffering: no` ไม่งั้น nginx buffer/ตัด connection
 8. **(Phase 6+) บิลจาก MJD Mobile Order ต้องออกเป็น `Sale` ปกติเสมอ** (`channel = MOBILE_ORDER` +
    `tableSessionId`) ห้ามสร้างตารางบิลแยก เพื่อให้ Dashboard/Reports/`/pos/history`/`CashierClosing` ใช้ query
    เดิมได้ครบโดยไม่ต้องเขียน logic ซ้ำ
@@ -562,7 +567,7 @@ Channel ที่สอง (สั่งอาหารผ่าน QR Code ส�
 - [`Docs/spec.md` §3](Docs/spec.md) — หัวข้อ "MJD Mobile Order — กติกาธุรกิจ" (เปิด/ปิด/รวมโต๊ะ, สถานะรายการ
   อาหาร + ยกเลิกรายการ, วงจรชีวิต QR, การชำระเงิน/ปิดบิลอัตโนมัติ, LINE, CRM)
 - [`Docs/spec.md` §5 F11–F22](Docs/spec.md) — feature + acceptance criteria ทั้งหมด
-- [`Docs/spec.md` §6a Routes/UI](Docs/spec.md) — route ฝั่งลูกค้า/พนักงาน/ครัว + หมายเหตุ realtime (Socket.IO
+- [`Docs/spec.md` §6a Routes/UI](Docs/spec.md) — route ฝั่งลูกค้า/พนักงาน/ครัว + หมายเหตุ realtime (**SSE ผ่าน `lib/realtime.ts`** ตั้งแต่ 2026-09-16 — เดิมร่างเป็น Socket.IO
   สำหรับ staff/kitchen, polling สำหรับลูกค้า)
 - [`Docs/spec.md` §8 Phase 6–12](Docs/spec.md) — ลำดับงานและกับดักที่คาดไว้ล่วงหน้า (race condition ยกเลิก
   รายการ vs ครัวเริ่มทำ, webhook ซ้ำ/ไม่เรียงลำดับ, dynamic QR reuse-after-payment)

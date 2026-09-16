@@ -3,6 +3,7 @@ import { forStore, type StoreTx } from "@/lib/db"
 import { nextSaleNumber } from "@/lib/sale-number"
 import { toNumber } from "@/lib/format"
 import type { PaymentMethodValue } from "@/lib/types"
+import { publishStoreEvent } from "@/lib/realtime"
 
 /// ปิดบิลของโต๊ะ (MJD Mobile Order) — ใช้ร่วมกันระหว่างพนักงานกดยืนยันกับ webhook ของธนาคาร
 ///
@@ -210,6 +211,11 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
       return { saleId: sale.id, saleNumber: sale.saleNumber, total, alreadyClosed: false }
     })
 
+    // สัญญาณ SSE ให้ผังโต๊ะ/แจ้งเตือน/หน้าลูกค้า (จ่ายสำเร็จ) รู้ทันที — ทุกเส้นทางปิดบิล (พนักงาน/webhook/สลิป) ผ่านที่นี่
+    if (!result.alreadyClosed) {
+      publishStoreEvent(input.storeId, "payments")
+      publishStoreEvent(input.storeId, "tables")
+    }
     return { ok: true, ...result }
   } catch (error) {
     // ★ หน้าต่างแข่งกัน: คำขอที่ถือ reference เดียวกันชิงปิดบิลไปก่อนระหว่างที่คำขอนี้ทำงานอยู่

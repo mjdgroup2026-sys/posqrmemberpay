@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
+import { publishStoreEvent } from "@/lib/realtime"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { slipPaymentReference, verifySlipAndSettle } from "@/lib/slip-settle"
 import { parseSlipQr } from "@/lib/slip-qr"
@@ -25,7 +26,11 @@ class PaymentAbort extends Error {
   }
 }
 
-function revalidatePaymentPages() {
+/// revalidate + ส่งสัญญาณ SSE (Phase 8 realtime) — เรียกหลังเขียน DB สำเร็จเท่านั้น
+function revalidatePaymentPages(storeId: string) {
+  publishStoreEvent(storeId, "payments")
+  publishStoreEvent(storeId, "tables")
+  publishStoreEvent(storeId, "notifications")
   revalidatePath("/")
   revalidatePath("/mobile-order/tables")
   revalidatePath("/mobile-order/kitchen")
@@ -74,7 +79,7 @@ export async function confirmMobilePayment(formData: FormData): Promise<ActionRe
 
   if (!result.ok) return { ok: false, error: result.error }
 
-  revalidatePaymentPages()
+  revalidatePaymentPages(storeId)
   return {
     ok: true,
     message: result.alreadyClosed
@@ -169,7 +174,7 @@ export async function startCustomerPayment(
       return totals.total
     })
 
-    revalidatePaymentPages()
+    revalidatePaymentPages(storeId)
     return {
       ok: true,
       message: method === "PROMPTPAY" ? "สแกน QR เพื่อชำระเงินได้เลย" : "แจ้งพนักงานแล้ว กรุณาชำระด้วยบัตรที่เคาน์เตอร์",

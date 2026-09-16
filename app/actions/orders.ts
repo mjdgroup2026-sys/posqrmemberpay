@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
+import { publishStoreEvent } from "@/lib/realtime"
 import { idSchema, cancelOrderItemSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { OrderItemStatus } from "@/generated/prisma/client"
 import { isPrinterConfigured, printKitchenTicket } from "@/lib/kitchen-printer"
@@ -28,7 +29,10 @@ const STATUS_LABEL: Record<OrderItemStatus, string> = {
   CANCELLED: "ยกเลิกแล้ว",
 }
 
-function revalidateOrderPages() {
+/// revalidate + ส่งสัญญาณ SSE (Phase 8 realtime) — เรียกหลังเขียน DB สำเร็จเท่านั้น
+function revalidateOrderPages(storeId: string) {
+  publishStoreEvent(storeId, "orders")
+  publishStoreEvent(storeId, "tables")
   revalidatePath("/mobile-order/tables")
   revalidatePath("/mobile-order/kitchen")
   revalidatePath("/mobile-order/notifications")
@@ -78,7 +82,7 @@ async function transition(
     }
   }
 
-  revalidateOrderPages()
+  revalidateOrderPages(storeId)
   return { ok: true, message: `${item.menuItem.name} — ${STATUS_LABEL[to]}` }
 }
 
@@ -185,7 +189,7 @@ async function transitionOrder(
     return { ok: false, error: "รายการในทิกเก็ตนี้ถูกเปลี่ยนสถานะไปแล้ว" }
   }
 
-  revalidateOrderPages()
+  revalidateOrderPages(storeId)
   return { ok: true, message: `อัปเดต ${updated.count} รายการเป็น "${STATUS_LABEL[to]}" แล้ว` }
 }
 
@@ -297,7 +301,7 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
     data: { printedAt: new Date() },
   })
 
-  revalidateOrderPages()
+  revalidateOrderPages(storeId)
   return { ok: true, message: `พิมพ์ทิกเก็ตออร์เดอร์ที่ ${order.orderNumber} ซ้ำเรียบร้อยแล้ว` }
 }
 
@@ -328,7 +332,7 @@ export async function markTicketPrinted(formData: FormData): Promise<ActionResul
     data: { printedAt: new Date() },
   })
 
-  revalidateOrderPages()
+  revalidateOrderPages(storeId)
   return {
     ok: true,
     message: stamped.count > 0 ? "บันทึกว่าพิมพ์ทิกเก็ตแล้ว" : "ทิกเก็ตนี้เคยพิมพ์ไปแล้ว",

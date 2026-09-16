@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
+import { publishStoreEvent } from "@/lib/realtime"
 import { menuItemSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -18,7 +19,8 @@ class MenuAbort extends Error {
   }
 }
 
-function revalidateMenuPages() {
+function revalidateMenuPages(storeId: string) {
+  publishStoreEvent(storeId, "menu")
   revalidatePath("/mobile-order/menu")
   revalidatePath("/mobile-order/settings")
   // เมนูฝั่งลูกค้าอ่านจากตารางเดียวกัน
@@ -171,7 +173,7 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
     return { ok: false, error: "บันทึกเมนูไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 
-  revalidateMenuPages()
+  revalidateMenuPages(storeId)
   return { ok: true, message: data.id ? `บันทึกเมนู ${data.name} แล้ว` : `เพิ่มเมนู ${data.name} เรียบร้อยแล้ว` }
 }
 
@@ -212,7 +214,7 @@ export async function deleteMenuItem(formData: FormData): Promise<ActionResult> 
     return { ok: false, error: "ลบเมนูไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 
-  revalidateMenuPages()
+  revalidateMenuPages(storeId)
   return { ok: true, message: "ลบเมนูเรียบร้อยแล้ว" }
 }
 
@@ -243,6 +245,6 @@ export async function toggleMenuItemActive(formData: FormData): Promise<ActionRe
     return { ok: false, error: "เปลี่ยนสถานะเมนูไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 
-  revalidateMenuPages()
+  revalidateMenuPages(storeId)
   return { ok: true, message: next ? "เปิดขายเมนูนี้แล้ว" : "ปิดขายเมนูนี้แล้ว" }
 }
