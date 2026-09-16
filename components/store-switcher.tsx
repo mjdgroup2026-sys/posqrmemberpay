@@ -7,7 +7,15 @@ import { switchActiveStore } from "@/app/actions/store-members"
 import Link from "next/link"
 import { IconPlus, IconStore } from "@/components/icons"
 
-export type StoreOption = { storeId: string; name: string; role: "OWNER" | "STAFF"; status: "ACTIVE" | "SUSPENDED" }
+export type StoreOption = {
+  storeId: string
+  name: string
+  role: "OWNER" | "STAFF"
+  status: "ACTIVE" | "SUSPENDED"
+  /// Phase 14c — สาขาใต้แบรนด์ถูกจัดกลุ่มเป็น <optgroup> ตามชื่อแบรนด์
+  brandId: string | null
+  brandName: string | null
+}
 
 type Props = {
   activeStoreId: string
@@ -17,8 +25,33 @@ type Props = {
 /// ตัวสลับร้านใน topbar (Phase 13) — โผล่เป็น dropdown เฉพาะเมื่ออยู่มากกว่า 1 ร้าน
 /// อยู่ร้านเดียวแสดงแค่ชื่อร้าน ไม่ให้มีปุ่มที่กดแล้วไม่มีอะไรให้เลือก
 /// Phase 14a: มีทางไป /onboarding สร้างร้านเพิ่มเสมอ (ผู้ใช้เป็น OWNER ได้หลายร้าน = หลายสาขา)
+/// Phase 14c: จัดกลุ่มตามแบรนด์ — สาขาใต้แบรนด์เดียวกันอยู่ใน optgroup เดียว ร้านเดี่ยวอยู่นอกกลุ่ม
 
 const NEW_STORE_VALUE = "__new__"
+
+function renderOption(store: StoreOption) {
+  return (
+    <option key={store.storeId} value={store.storeId} disabled={store.status === "SUSPENDED"}>
+      {store.name}
+      {store.role === "OWNER" ? " · เจ้าของ" : ""}
+      {store.status === "SUSPENDED" ? " (ถูกระงับ)" : ""}
+    </option>
+  )
+}
+
+/// ร้านเดี่ยว (ไม่มีแบรนด์) รวมเป็นกลุ่มแรก ตามด้วยแต่ละแบรนด์ตามลำดับที่พบ
+function groupByBrand(stores: StoreOption[]): { brandId: string | null; brandName: string | null; stores: StoreOption[] }[] {
+  const groups: { brandId: string | null; brandName: string | null; stores: StoreOption[] }[] = []
+  for (const store of stores) {
+    let group = groups.find((g) => g.brandId === store.brandId)
+    if (!group) {
+      group = { brandId: store.brandId, brandName: store.brandName, stores: [] }
+      groups.push(group)
+    }
+    group.stores.push(store)
+  }
+  return groups.sort((a, b) => Number(a.brandId !== null) - Number(b.brandId !== null))
+}
 
 export function StoreSwitcher({ activeStoreId, stores }: Props) {
   const router = useRouter()
@@ -75,13 +108,15 @@ export function StoreSwitcher({ activeStoreId, stores }: Props) {
         disabled={busy}
         style={{ minWidth: 160 }}
       >
-        {stores.map((store) => (
-          <option key={store.storeId} value={store.storeId} disabled={store.status === "SUSPENDED"}>
-            {store.name}
-            {store.role === "OWNER" ? " · เจ้าของ" : ""}
-            {store.status === "SUSPENDED" ? " (ถูกระงับ)" : ""}
-          </option>
-        ))}
+        {groupByBrand(stores).map((group) =>
+          group.brandId ? (
+            <optgroup key={group.brandId} label={group.brandName ?? "แบรนด์"}>
+              {group.stores.map(renderOption)}
+            </optgroup>
+          ) : (
+            group.stores.map(renderOption)
+          ),
+        )}
         <option value={NEW_STORE_VALUE}>＋ สร้างร้านใหม่…</option>
       </select>
     </label>

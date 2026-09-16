@@ -96,6 +96,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       admin: await import("@/app/actions/admin"),
       billing: await import("@/app/actions/billing"),
       "admin-billing": await import("@/app/actions/admin-billing"),
+      brand: await import("@/app/actions/brand"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -462,6 +463,12 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "requestBill",
     "registerMember",
     "startCustomerPayment",
+    // Phase 14c: ขอบเขตคือ brand.ownerId ไม่ใช่ storeId (เทสสิทธิ์ข้ามแบรนด์อยู่ที่ brand.test.ts) ·
+    // ฝั่งแพลตฟอร์มทำงานข้ามร้านโดยตั้งใจ
+    "renameBrand",
+    "cancelBrandBatch",
+    "confirmSubscriptionBatch",
+    "voidSubscriptionBatch",
   ]
 
   type ActionCase = [
@@ -687,6 +694,38 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "revokeInvite",
       (b) => makeFormData({ id: b.inviteId }),
       async (b) => expect((await testPrisma().storeInvite.findUniqueOrThrow({ where: { id: b.inviteId } })).revokedAt).toBeNull(),
+    ],
+    // Phase 14c — ร้าน B ต้องดึงเข้าแบรนด์ของ A / ถูกคัดลอกเมนู / ถูกใส่ในใบจ่ายรวมของ A ไม่ได้
+    [
+      "createBrand",
+      (b) => {
+        const fd = makeFormData({ name: "แบรนด์ของ A" })
+        fd.append("storeIds", b.storeId)
+        return fd
+      },
+      async (b) => {
+        expect((await testPrisma().store.findUniqueOrThrow({ where: { id: b.storeId } })).brandId).toBeNull()
+        expect(await testPrisma().brand.count()).toBe(0)
+      },
+    ],
+    [
+      "attachStoreToBrand",
+      (b) => makeFormData({ storeId: b.storeId }),
+      async (b) => expect((await testPrisma().store.findUniqueOrThrow({ where: { id: b.storeId } })).brandId).toBeNull(),
+    ],
+    [
+      "copyMenuFromStore",
+      (b) => makeFormData({ sourceStoreId: b.storeId }),
+      async (b) => expect(await testPrisma().menuItem.count({ where: { storeId: b.storeId } })).toBe(1),
+    ],
+    [
+      "requestBrandBatch",
+      (b) => {
+        const fd = new FormData()
+        fd.append("item", `${b.storeId}|S-D7`)
+        return fd
+      },
+      async (b) => expect(await testPrisma().storeSubscription.count({ where: { storeId: b.storeId, batchId: { not: null } } })).toBe(0),
     ],
     [
       "cancelPendingRequest",

@@ -25,8 +25,8 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
   · **ข้อยกเว้น**: บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) อนุมัติแล้วเป็นส่วนหนึ่งของ Phase 13
 - **Phase 14–16 (onboarding / รับเงินต่อร้าน / RBAC เต็ม)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
   · **Phase 13 (multi-tenant) merge + migrate production แล้ว 2026-09-15** (PR #1) · **Phase 14 แบ่งเป็น 3 PR:
-  14a Onboarding (production แล้ว 2026-09-15, PR #2) → 14b Subscription (โค้ด+เทสเสร็จ 2026-09-15, branch
-  `feat/phase-14b-subscription` รอ merge) → 14c Brand (ยังไม่เริ่ม)**
+  14a Onboarding (production แล้ว 2026-09-15, PR #2) → 14b Subscription (production แล้ว 2026-09-15, PR #3) →
+  14c Brand (โค้ด+เทสเสร็จ 2026-09-16, branch `feat/phase-14c-brand` รอ merge)**
   — ต้องทำตามลำดับ ห้ามข้าม และ migration ที่แตะข้อมูลจริงต้อง `pg_dump` + ซ้อมบนสำเนาก่อนเสมอเหมือนที่ทำกับ Phase 13
 
 ## 📧 ระบบอีเมล (ต่อ Resend แล้วใน Phase 5)
@@ -69,10 +69,16 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    extension ช่วยไม่ได้ · `findUnique` ด้วย id จากผู้ใช้ปลอดภัยเพราะ extension ยัด storeId เข้า where ให้ —
    แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId`) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
    · เพิ่ม query/action ใหม่ต้องเพิ่มในตารางของ `__tests__/integration/tenant-isolation.test.ts` ไม่งั้นเทสแดง
-   · **การค้นข้ามร้านทำได้ 3 ที่เท่านั้น** (Phase 13–14b): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
+   · **การค้นข้ามร้านทำได้ 4 ที่เท่านั้น** (Phase 13–14c): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
    qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้), `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
-   ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว) และ `lib/plan-queries.ts` (แพ็กเกจ = ข้อมูลอ้างอิงของ
-   แพลตฟอร์ม ไม่มี storeId) — ที่อื่นห้าม · `TrialClaim` ตั้งใจไม่ scoped (กันใช้สิทธิ์ทดลองซ้ำข้ามร้าน)
+   ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว), `lib/plan-queries.ts` (แพ็กเกจ = ข้อมูลอ้างอิงของ
+   แพลตฟอร์ม ไม่มี storeId) และ `lib/brand-queries.ts` + `app/actions/brand.ts` (Phase 14c — ขอบเขต tenant คือ
+   `brand.ownerId = userId` ทุกฟังก์ชันรับ userId แล้วกรองเงื่อนไขนี้ ไม่รับ brandId จากผู้ใช้) — ที่อื่นห้าม
+   · `TrialClaim` ตั้งใจไม่ scoped (กันใช้สิทธิ์ทดลองซ้ำข้ามร้าน)
+   · **(Phase 14c) ตรรกะ "ผู้ใช้เข้าร้านไหนได้ในบทบาทอะไร" อยู่ที่ `lib/store-context.ts` (`loadStoreContext()`) ที่เดียว**
+   — `lib/session.ts` และ mock ของเทส (`__tests__/helpers/session-mock.ts`) เรียกตัวเดียวกัน ห้ามลอกตรรกะไปเขียนซ้ำ
+   · เจ้าของ `Brand` = OWNER ของทุก `Store` ใต้แบรนด์โดยอัตโนมัติแม้ไม่มีแถว `StoreMember` (`viaBrand`) ·
+   `switchActiveStore` ก็ใช้ `loadStoreContext()` ตรวจ ไม่ใช่ `StoreMember` ตรง ๆ
    · **(Phase 14b) action ที่ "ขายใหม่" ต้องผ่าน `requireSellingStore()`** (หรือ `guardAction(..., { selling: true })` สำหรับ POS)
    ไม่ใช่ `requireStore()` — แพ็กเกจหมดอายุ = อ่านได้ ขายไม่ได้ (`STORE_EXPIRED`) · ที่ใช้อยู่: `createSale`, `openTableSession`
    ทั้งสองทาง, `submitOrder` · ห้ามใส่กับปิดบิล/void/รายงาน
@@ -81,6 +87,11 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    (`updateMany` + `where: { status: 'AWAITING_KITCHEN' }`) เหมือนกติกากันขายเกินสต็อกในข้อ 4 — ป้องกัน race
    ระหว่างพนักงานกดยกเลิกรายการกับครัวกด "เริ่มทำ" พร้อมกัน ห้ามใช้ read-then-write ธรรมดา
 9. **(Phase 14b) `StoreSubscription` และ `SubscriptionPlan` เป็น ledger append-only** เหมือน `StockTransaction` —
+   · **(Phase 14c) ใบจ่ายรวม `SubscriptionBatch`**: แถว `StoreSubscription` ที่มี `batchId` ยืนยัน/ยกเลิก**ทั้งใบเท่านั้น**
+   (`confirmSubscriptionBatch`/`voidSubscriptionBatch`/`cancelBrandBatch`) — `confirmSubscription`/`voidSubscription`/
+   `cancelPendingRequest` ปฏิเสธแถวที่มี `batchId` · เลขอ้างอิงธนาคารอยู่ที่หัวใบ (`SubscriptionBatch.paymentReference` unique)
+   แถวลูกเป็น null โดยตั้งใจ · ยืนยัน = `updateMany where status: PENDING` ที่หัวใบ + นับแถวลูกที่ปิดได้ต้องเท่ากับจำนวนแถว
+   ไม่งั้น throw → rollback ทั้งใบ (มีเทส concurrent) · ใบที่ PAID แล้วถอย**รายสาขา**ผ่าน `voidSubscription` ตามปกติ
    ถอยรายการ PAID = สร้างแถว VOID ชดเชย (ตัวเลขติดลบ, `reversesId`) ไม่แก้แถวเดิม · แก้ราคาแพ็กเกจ = version ใหม่
    (`supersededById`) ห้าม UPDATE · `Store.planTier/tableLimit/planExpiresAt` เป็นค่า denormalized ที่**ต้องอัปเดตใน
    ทรานแซคชันเดียวกับแถว PAID เสมอ** · ยืนยันจ่ายด้วย `updateMany where status: PENDING` และเพดานโต๊ะนับใต้
@@ -405,7 +416,7 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
 ตอบรับได้ทั้ง token และจากรายการคำเชิญค้างบน `/no-store`) → `/admin/stores` ระงับ/ปลดระงับร้าน (ผู้ดูแลแพลตฟอร์ม)
 · `SIGNUP_OPEN=true` ตั้งบน VPS แล้ว · admin เป็น `isPlatformAdmin` แล้ว
 
-**🔨 Phase 14b Subscription โค้ด+เทสเสร็จ (2026-09-15, branch `feat/phase-14b-subscription` — รอ merge)**: ค่าใช้งานคิดเป็นวัน
+**✅ Phase 14b Subscription ขึ้น production แล้ว (2026-09-15, PR #3)**: ค่าใช้งานคิดเป็นวัน
 ตาม tier โต๊ะ (S/M/L/XL = 12/30/60/120 โต๊ะ · 10/20/35/60 บาท/วัน · แพ็กเกจ 7/15/30/90/180/365 วัน ราคาสุทธิตั้งตรง ๆ) ·
 ทดลอง 7 วันครั้งเดียวต่อเลขพร้อมเพย์ (`TrialClaim` เก็บ hash) · ต่ออายุ stack ต่อท้าย · อัปเกรดกลางทางจ่ายส่วนต่าง ·
 หมดอายุ = อ่านได้ ขายไม่ได้ (`requireSellingStore`) · เพดานโต๊ะใต้ advisory lock · `/billing` (OWNER) · `/admin/stores/[id]`
@@ -413,8 +424,19 @@ ledger + ยืนยัน/ถอย/เติมวัน/ตั้งเพ�
 · **ร้านเดิมทุกร้านตอน migrate ถูก backfill เป็น FREE ถึง 2099 / 120 โต๊ะ** (ledger แถว `SUB-LEGACYxxxx`) · ร้านใหม่เริ่มที่
 "ยังไม่มีแพ็กเกจ" ต้องรับสิทธิ์ทดลอง/จ่ายก่อนขาย · **ตอน deploy**: ตั้ง `PLATFORM_PROMPTPAY_ID`/`CRON_SECRET` ใน `.env` บน VPS
 + รัน `bash ops/install-cron.sh` ใหม่ + ซ้อม migration บนสำเนาก่อน (แตะ `store`/`store_settings` ที่มีข้อมูล)
+· `CRON_SECRET` ตั้งแล้ว cron ทำงานแล้ว · `PLATFORM_PROMPTPAY_ID` **ยังเว้นว่างโดยตั้งใจ** (เจ้าของสั่ง hold รอเลขจริง —
+หน้า `/billing` และ `/brand/billing` สร้างคำขอได้แต่ไม่มี QR จนกว่าจะเติมค่าแล้ว recreate คอนเทนเนอร์)
 
-**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 14c Brand** (ร่างใน spec แล้ว — หลายสาขาใต้ Brand, คัดลอกเมนู, จ่ายรวม batch) · **Phase 15–16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**🔨 Phase 14c Brand โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-14c-brand` — รอ merge)**: `Brand` (1 บัญชี = 1 แบรนด์ ·
+`Store.brandId?` · เจ้าของแบรนด์ = OWNER ทุกสาขาอัตโนมัติผ่าน `lib/store-context.ts`) · `/brand` สร้าง/เปลี่ยนชื่อแบรนด์
+ดึงร้านที่ตัวเองเป็นเจ้าของเข้า (ย้ายระหว่างแบรนด์ยังไม่ทำ) · คัดลอกเมนูข้ามสาขา (`lib/menu-copy.ts` — สำเนาอิสระ
+MenuItem + Modifier ข้ามชื่อซ้ำ ไม่ติด featured · ใช้ทั้งบน `/brand` และตอนสร้างสาขาใหม่ที่ `/onboarding?brand=1`) ·
+`/brand/reports` ยอด 30 วันรายสาขาเทียบกัน (วน query เดิมของ `lib/queries.ts` ต่อ storeId ไม่มี query ข้ามร้านใหม่) ·
+`/brand/billing` ใบจ่ายรวม `SubscriptionBatch` (`BAT-XXXXXX`) → ผู้ดูแลยืนยันทั้งใบที่ `/admin/batches/[id]` ·
+ตัวสลับร้านจัดกลุ่มตามแบรนด์ (`<optgroup>`) · migration `add_brand_and_subscription_batch` additive ล้วน ไม่มี backfill
+(ร้านเดิมทุกร้าน `brandId = NULL`) · เทส `__tests__/integration/brand.test.ts` 21 เทส (รวม concurrent ยืนยันใบ)
+
+**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 15–16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**

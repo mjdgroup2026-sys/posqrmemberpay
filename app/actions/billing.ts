@@ -302,11 +302,14 @@ export async function cancelPendingRequest(formData: FormData): Promise<ActionRe
   const parsed = subscriptionIdSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
+  // แถวในใบจ่ายรวมของแบรนด์ (Phase 14c) ยกเลิกรายสาขาไม่ได้ — ต้องยกเลิกทั้งใบที่ /brand/billing
   const result = await forStore(ctx.storeId).storeSubscription.updateMany({
-    where: { id: parsed.data.id, status: "PENDING" },
+    where: { id: parsed.data.id, status: "PENDING", batchId: null },
     data: { status: "VOID", voidedAt: new Date(), voidedById: ctx.user.id, note: "ร้านยกเลิกคำขอเอง" },
   })
-  if (result.count === 0) return { ok: false, error: "ไม่พบคำขอ หรือคำขอนี้ถูกยืนยัน/ยกเลิกไปแล้ว" }
+  if (result.count === 0) {
+    return { ok: false, error: "ไม่พบคำขอ หรือคำขอนี้ถูกยืนยัน/ยกเลิกไปแล้ว (คำขอในใบจ่ายรวมของแบรนด์ต้องยกเลิกทั้งใบที่หน้าแบรนด์)" }
+  }
 
   revalidateBilling()
   return { ok: true, message: "ยกเลิกคำขอแล้ว" }

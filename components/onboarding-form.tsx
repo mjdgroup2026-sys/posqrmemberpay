@@ -25,8 +25,19 @@ function slugify(name: string): string {
     .slice(0, 30)
 }
 
-export function OnboardingForm({ hasExistingStore }: { hasExistingStore: boolean }) {
+export type OnboardingBrandProps = {
+  /// แบรนด์ของผู้ใช้ (Phase 14c) — null = ไม่มี ไม่แสดงตัวเลือก
+  brand: { id: string; name: string } | null
+  /// ร้านที่ผู้ใช้เป็น OWNER — เป็นต้นทางคัดลอกเมนูได้
+  ownedStores: { id: string; name: string }[]
+  /// เปิดหน้าด้วย ?brand=1 (มาจากหน้าแบรนด์) → ติ๊ก "อยู่ใต้แบรนด์" ให้ล่วงหน้า
+  joinBrandDefault: boolean
+}
+
+export function OnboardingForm({ hasExistingStore, brand, ownedStores, joinBrandDefault }: { hasExistingStore: boolean } & OnboardingBrandProps) {
   const router = useRouter()
+  const [joinBrand, setJoinBrand] = useState(joinBrandDefault && brand !== null)
+  const [copyFrom, setCopyFrom] = useState("")
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [name, setName] = useState("")
@@ -48,6 +59,8 @@ export function OnboardingForm({ hasExistingStore }: { hasExistingStore: boolean
     formData.set("name", name)
     formData.set("slug", slug)
     formData.set("themeColor", themeColor)
+    if (joinBrand && brand) formData.set("joinBrand", "on")
+    if (copyFrom) formData.set("copyMenuFromStoreId", copyFrom)
 
     try {
       const result = await createStore(formData)
@@ -134,8 +147,39 @@ export function OnboardingForm({ hasExistingStore }: { hasExistingStore: boolean
         {fieldErrors.themeColor ? <span className="field-hint error">{fieldErrors.themeColor}</span> : null}
       </div>
 
+      {brand ? (
+        <label className="checkbox-row">
+          <input type="checkbox" checked={joinBrand} onChange={(e) => setJoinBrand(e.target.checked)} />
+          <span>
+            สร้างเป็นสาขาใต้แบรนด์ <strong>{brand.name}</strong>
+            <span className="t-caption" style={{ display: "block" }}>
+              รวมรายงานและจ่ายค่าใช้งานใบเดียวกับสาขาอื่นได้ · เมนู/โต๊ะ/QR ยังแยกของสาขานี้เอง
+            </span>
+          </span>
+        </label>
+      ) : null}
+
+      {ownedStores.length > 0 ? (
+        <div className="field">
+          <label className="t-small" htmlFor="copyMenuFromStoreId">
+            คัดลอกเมนูจากสาขาไหน
+          </label>
+          <select id="copyMenuFromStoreId" className="select" value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)}>
+            <option value="">— ไม่คัดลอก ใช้เมนูตัวอย่าง 3 รายการ —</option>
+            {ownedStores.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <span className="field-hint">ได้สำเนาอิสระ (เมนู + ตัวเลือกเสริม) แก้ราคาที่สาขาใหม่ไม่กระทบต้นทาง</span>
+          {fieldErrors.copyMenuFromStoreId ? <span className="field-hint error">{fieldErrors.copyMenuFromStoreId}</span> : null}
+        </div>
+      ) : null}
+
       <div className="alert-banner info">
-        ระบบจะเตรียมโต๊ะตัวอย่าง 4 โต๊ะพร้อม QR และเมนูตัวอย่าง 3 รายการให้ลองกดได้ทันที — ลบหรือแก้ทีหลังได้ทั้งหมด
+        ระบบจะเตรียมโต๊ะตัวอย่าง 4 โต๊ะพร้อม QR {copyFrom ? "และคัดลอกเมนูจากสาขาที่เลือก" : "และเมนูตัวอย่าง 3 รายการ"}ให้ลองกดได้ทันที —
+        ลบหรือแก้ทีหลังได้ทั้งหมด
       </div>
 
       <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>

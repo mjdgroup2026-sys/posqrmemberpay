@@ -277,3 +277,121 @@ export async function listPlanVersionsForAdmin(): Promise<PlanVersionRow[]> {
     usedCount: p._count.subscriptions,
   }))
 }
+
+// ───────────────────── ใบจ่ายรวมของแบรนด์ (Phase 14c) ─────────────────────
+
+export type AdminBatchItem = {
+  subscriptionId: string
+  storeId: string
+  storeName: string
+  storeSlug: string
+  tier: "S" | "M" | "L" | "XL"
+  tableLimit: number
+  tableCount: number
+  days: number
+  amount: number
+  requestRef: string
+  status: "PENDING" | "PAID" | "VOID"
+  periodStart: Date
+  periodEnd: Date
+}
+
+export type AdminBatchDetail = {
+  id: string
+  requestRef: string
+  amount: number
+  status: "PENDING" | "PAID" | "VOID"
+  paymentReference: string | null
+  createdAt: Date
+  paidAt: Date | null
+  voidedAt: Date | null
+  note: string | null
+  brand: { id: string; name: string; ownerName: string; ownerEmail: string }
+  items: AdminBatchItem[]
+}
+
+/// ใบจ่ายรวมที่รอยืนยันทุกแบรนด์ — โผล่ในกล่องงานของผู้ดูแลคู่กับคำขอเดี่ยว
+export async function listPendingBatchesForAdmin() {
+  const rows = await prisma.subscriptionBatch.findMany({
+    where: { status: "PENDING" },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      requestRef: true,
+      amount: true,
+      createdAt: true,
+      brand: { select: { name: true } },
+      _count: { select: { items: true } },
+    },
+  })
+  return rows.map((b) => ({
+    id: b.id,
+    requestRef: b.requestRef,
+    amount: toNumber(b.amount),
+    createdAt: b.createdAt,
+    brandName: b.brand.name,
+    storeCount: b._count.items,
+  }))
+}
+
+export async function getBatchForAdmin(batchId: string): Promise<AdminBatchDetail | null> {
+  const b = await prisma.subscriptionBatch.findUnique({
+    where: { id: batchId },
+    select: {
+      id: true,
+      requestRef: true,
+      amount: true,
+      status: true,
+      paymentReference: true,
+      createdAt: true,
+      paidAt: true,
+      voidedAt: true,
+      note: true,
+      brand: { select: { id: true, name: true, owner: { select: { name: true, email: true } } } },
+      items: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          storeId: true,
+          tier: true,
+          tableLimit: true,
+          days: true,
+          amount: true,
+          requestRef: true,
+          status: true,
+          periodStart: true,
+          periodEnd: true,
+          store: { select: { name: true, slug: true, _count: { select: { tables: true } } } },
+        },
+      },
+    },
+  })
+  if (!b) return null
+  return {
+    id: b.id,
+    requestRef: b.requestRef,
+    amount: toNumber(b.amount),
+    status: b.status,
+    paymentReference: b.paymentReference,
+    createdAt: b.createdAt,
+    paidAt: b.paidAt,
+    voidedAt: b.voidedAt,
+    note: b.note,
+    brand: { id: b.brand.id, name: b.brand.name, ownerName: b.brand.owner.name, ownerEmail: b.brand.owner.email },
+    items: b.items.map((i) => ({
+      subscriptionId: i.id,
+      storeId: i.storeId,
+      storeName: i.store.name,
+      storeSlug: i.store.slug,
+      tier: i.tier,
+      tableLimit: i.tableLimit,
+      tableCount: i.store._count.tables,
+      days: i.days,
+      amount: toNumber(i.amount),
+      requestRef: i.requestRef,
+      status: i.status,
+      periodStart: i.periodStart,
+      periodEnd: i.periodEnd,
+    })),
+  }
+}

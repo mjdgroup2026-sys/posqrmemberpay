@@ -441,6 +441,9 @@ export const createStoreSchema = z.object({
     .refine((v) => !v.startsWith("-") && !v.endsWith("-"), "รหัสร้านต้องไม่ขึ้นต้นหรือลงท้ายด้วย -")
     .refine((v) => !(RESERVED_STORE_SLUGS as readonly string[]).includes(v), "รหัสร้านนี้สงวนไว้สำหรับระบบ กรุณาใช้ชื่ออื่น"),
   themeColor: hexColor,
+  /// Phase 14c: "on" = สร้างเป็นสาขาใต้แบรนด์ของผู้ใช้ · copyMenuFromStoreId = คัดลอกเมนูจากสาขานั้นแทนเมนูตัวอย่าง
+  joinBrand: z.union([z.literal("on"), z.literal("")]).nullish().transform((v) => v === "on"),
+  copyMenuFromStoreId: z.string().trim().max(64).nullish().transform((v) => v || null),
 })
 
 export const inviteMemberSchema = z.object({
@@ -532,4 +535,60 @@ export const publishPlanSchema = z.object({
 
 export const planCodeSchema = z.object({
   code: z.string({ error: "ไม่พบรหัสแพ็กเกจ" }).trim().toUpperCase().min(1, "ไม่พบรหัสแพ็กเกจ").max(20),
+})
+
+// ───────────────────── ร้านหลายสาขา / Brand (Phase 14c) ─────────────────────
+
+const brandName = z
+  .string({ error: "กรุณากรอกชื่อแบรนด์" })
+  .trim()
+  .min(2, "ชื่อแบรนด์ต้องมีอย่างน้อย 2 ตัวอักษร")
+  .max(60, "ชื่อแบรนด์ยาวเกินไป (ไม่เกิน 60 ตัวอักษร)")
+
+export const createBrandSchema = z.object({
+  name: brandName,
+  /// สาขาที่จะดึงเข้าแบรนด์ทันที (เลือกได้หลายร้าน · ว่างได้) — ต้องเป็น OWNER ของทุกร้านที่เลือก
+  storeIds: z.array(requiredId("ไม่พบร้านที่เลือก")).max(50, "เลือกร้านได้ไม่เกิน 50 ร้านต่อครั้ง"),
+})
+
+export const renameBrandSchema = z.object({ name: brandName })
+
+export const attachStoreToBrandSchema = z.object({
+  storeId: requiredId("ไม่พบร้านที่ต้องการดึงเข้าแบรนด์"),
+})
+
+export const copyMenuSchema = z.object({
+  sourceStoreId: requiredId("กรุณาเลือกสาขาต้นทางที่จะคัดลอกเมนู"),
+})
+
+/// รายการในใบจ่ายรวม — ฟอร์มส่งมาเป็น "storeId|planCode" ต่อสาขา
+export const brandBatchSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        storeId: requiredId("ไม่พบสาขาในรายการ"),
+        planCode: z.string({ error: "กรุณาเลือกแพ็กเกจ" }).trim().regex(/^[A-Z]{1,2}-[A-Z]\d{1,2}$/, "รหัสแพ็กเกจไม่ถูกต้อง"),
+      }),
+    )
+    .min(1, "เลือกอย่างน้อย 1 สาขา")
+    .max(50, "จ่ายรวมได้ไม่เกิน 50 สาขาต่อใบ")
+    .refine((items) => new Set(items.map((i) => i.storeId)).size === items.length, "มีสาขาซ้ำกันในรายการ"),
+})
+
+export const batchIdSchema = z.object({
+  batchId: requiredId("ไม่พบใบจ่ายรวมที่ต้องการ"),
+})
+
+export const confirmBatchSchema = z.object({
+  batchId: requiredId("ไม่พบใบจ่ายรวมที่ต้องการยืนยัน"),
+  paymentReference: z
+    .string({ error: "กรุณากรอกเลขอ้างอิงจากธนาคาร" })
+    .trim()
+    .min(4, "เลขอ้างอิงจากธนาคารต้องมีอย่างน้อย 4 ตัว")
+    .max(64, "เลขอ้างอิงยาวเกินไป"),
+})
+
+export const voidBatchSchema = z.object({
+  batchId: requiredId("ไม่พบใบจ่ายรวมที่ต้องการยกเลิก"),
+  reason: z.string({ error: "กรุณาระบุเหตุผล" }).trim().min(3, "กรุณาระบุเหตุผลอย่างน้อย 3 ตัวอักษร").max(200, "เหตุผลยาวเกินไป"),
 })
