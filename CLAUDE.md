@@ -21,9 +21,10 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 
 ## ⏸️ งานที่ถูกกั้นไว้ — ห้ามเริ่มเอง
 
-- **Role-Based Permission** — นอกขอบเขต v1 ดูหัวข้อ "สถานะการพัฒนา" ท้ายไฟล์นี้
-  · **ข้อยกเว้น**: บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) อนุมัติแล้วเป็นส่วนหนึ่งของ Phase 13
-- **Phase 14–16 (onboarding / รับเงินต่อร้าน / RBAC เต็ม)** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
+- ~~**Role-Based Permission** — นอกขอบเขต v1~~ → **ทำแล้ว**: matrix สิทธิ์ F1–F9 มาตั้งแต่ Phase 13 และ **Phase 16 (2026-09-16)
+  ขยายครอบ MJD Mobile Order ครบ** (`MO_*`) — ดูกติกาข้อ 11 · บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) เป็นคนละแกน
+- **Phase 15b–15c (ตรวจสลิป / SCB ต่อร้าน)** — รอเจ้าของระบบเลือก provider/credential ก่อน ห้ามเริ่มเอง
+- **Phase 14–16** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
   · **Phase 13 (multi-tenant) merge + migrate production แล้ว 2026-09-15** (PR #1) · **Phase 14 แบ่งเป็น 3 PR:
   14a Onboarding (production แล้ว 2026-09-15, PR #2) → 14b Subscription (production แล้ว 2026-09-15, PR #3) →
   14c Brand (production แล้ว 2026-09-16, PR #4)** — **Phase 14 ปิดครบทั้งสามก้อนแล้ว**
@@ -102,6 +103,17 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    ต้องได้เลขผู้รับเป็นพารามิเตอร์เสมอ ไม่มี default จาก env — ก่อน 15a ทุกร้านออก QR ของร้าน `default` (ลูกค้าร้านอื่น
    จ่ายเข้าบัญชีผิดร้าน) · โหมด `SCB_BILLER` ตั้งได้เฉพาะผู้ดูแลแพลตฟอร์ม (`setStorePaymentMode`) จนกว่า 15c จะย้าย credential
    เป็นต่อร้าน · `PROMPTPAY_SLIP` เลือกไม่ได้จนกว่า 15b
+11. **(Phase 16) หน้า/action ของ MJD Mobile Order อยู่ใต้ matrix สิทธิ์แล้ว** — resource `MO_TABLES` (ผังโต๊ะ/รายละเอียด/ปิดบิล ·
+   ADD เปิด/รวมโต๊ะ · EDIT ปิดบิล/ยืนยันชำระ/เสิร์ฟด้วยมือ · DELETE ยกเลิกโต๊ะ/รายการ), `MO_KITCHEN` (EDIT = เริ่มทำ/เสร็จ/เสิร์ฟ),
+   `MO_NOTIFICATIONS` (EDIT = รับทราบ), `MO_MENU`, `MO_SETUP` (จัดการโต๊ะ + QR) · action ใช้ `requireStoreAccess([res, act], …)`
+   จาก `lib/permissions.ts` แทน `requireStore()` (คืน `StoreContext` เดิม · หลายคู่ = ผ่านคู่ใดคู่หนึ่ง เช่น กดเสิร์ฟได้ทั้งจาก KDS
+   และหน้าโต๊ะ) · หน้าใช้ `requirePageAccess("MO_X")` · `PermissionDenied` ย้ายไป `lib/store-errors.ts` และ `storeErrorMessage()`
+   รู้จักแล้ว จึงไม่ต้องแก้ catch เดิม · ตั้งค่าร้าน (`/mobile-order/settings`) ยังเป็น OWNER-only ไม่ใช่ resource ·
+   **preset ที่ 4 "พนักงานเสิร์ฟ"** (MO เต็ม ยกเว้นเมนู/โต๊ะ+QR ดูอย่างเดียว · ไม่เห็นคลัง/POS) — migration backfill ผูกให้ STAFF
+   ที่ `roleId = null` ทุกคนตอน deploy เพราะเดิมคนกลุ่มนี้เข้าได้แค่หน้า Mobile Order อยู่แล้ว (สิทธิ์เท่าเดิมพอดี) · บทบาทเดิมทุกตัว
+   ได้ MO เต็ม ยกเว้น "แคชเชียร์" ได้ระดับพนักงานเสิร์ฟ+ · ⚠️ `ALTER TYPE … ADD VALUE` ต้องแยกไฟล์ migration จากที่ใช้ค่าใหม่
+   (PostgreSQL ห้ามใช้ในทรานแซคชันเดียวกัน) · ⚠️ `full` เป็น reserved word ใน SQL — เคยทำ migration พังแล้ว `migrate resolve --applied`
+   ทับไปทั้งที่ยังไม่ได้รัน ต้องดูผลจริงก่อน resolve เสมอ (ตรงกับกับดักใน CLAUDE.md)
 8. **(Phase 6+) บิลจาก MJD Mobile Order ต้องออกเป็น `Sale` ปกติเสมอ** (`channel = MOBILE_ORDER` +
    `tableSessionId`) ห้ามสร้างตารางบิลแยก เพื่อให้ Dashboard/Reports/`/pos/history`/`CashierClosing` ใช้ query
    เดิมได้ครบโดยไม่ต้องเขียน logic ซ้ำ
@@ -452,7 +464,11 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 ผู้ดูแลตั้งโหมด SCB ที่ `/admin/stores/[id]` · migration ตั้ง `default` = `SCB_BILLER` ร้านอื่น = `PROMPTPAY_DIRECT` ·
 ซ้อมบนสำเนา production แล้ว diff สะอาด · **15b (ตรวจสลิป) / 15c (SCB ต่อร้าน) รอเจ้าของระบบเลือก provider/credential**
 
-**ยังไม่ได้ทำ**: Phase 11 (LINE) · **Phase 15b–15c, 16** (เงินเข้าบัญชีร้านโดยตรง 3 ระดับ ก/ก+/ข ไม่ใช้ gateway แบบโอนต่อ · RBAC เต็ม) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**🔨 Phase 16 RBAC เต็ม โค้ด+เทสเสร็จ (2026-09-16, branch `feat/phase-16-mobile-order-rbac` — รอ merge)**: resource `MO_*` 5 ตัว
+ครอบทุกหน้า/action ของ Mobile Order · preset "พนักงานเสิร์ฟ" · 2 migrations (เพิ่ม enum / backfill สิทธิ์ + ผูก STAFF ที่ไม่มีบทบาท) ·
+ซ้อมบนสำเนา production แล้ว diff สะอาด · ไม่มี env ใหม่ · ไม่ซ่อนปุ่มรายสิทธิ์ใน UI (เหมือน F1–F9 ที่มีอยู่ — ด่านจริงคือ server)
+
+**ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · **Phase 15b–15c** (รอเลือก provider ตรวจสลิป / credential SCB) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**
@@ -503,14 +519,9 @@ CI/CD อัตโนมัติจาก `main` ทำงานจริง �
 `requireEmailVerification` เปิดเป็น `true` แล้ว และมีหน้า `/verify-email` + ปุ่มส่งอีเมลยืนยันซ้ำบน `/login`
 — บัญชีที่สร้างด้วย `pnpm db:create-user` ถูกตั้ง `emailVerified = true` มาแล้วจึงล็อกอินได้ตามปกติ
 
-**ระบบสิทธิ์ตามบทบาท (Role-Based Permission) อยู่นอกขอบเขต v1** — เดิมคือ Phase 2.6 ปัจจุบันยกไปเป็น
-"Phase ถัดไป (ยังไม่กำหนดวัน)" ท้าย §8 ของ spec ห้ามเริ่มทำจนกว่า Phase 1–5 จะปิดครบและมีการอนุมัติขอบเขตใหม่
-(ดู [`Docs/spec.md` §7 Out of Scope](Docs/spec.md))
-
-ผลจากการที่ v1 ไม่ทำ RBAC — ต้องออกแบบโค้ดให้เป็นแบบนี้ตั้งแต่แรก:
-
-- หน้า `/users` แสดงคอลัมน์บทบาทเป็น "ยังไม่กำหนดสิทธิ์" ทุกแถว เพราะไม่มีตาราง `Role` (และจะไม่มีใน v1)
-- `requireUser()` เช็คแค่ว่าล็อกอินอยู่ — v1 ตั้งใจให้เป็นแบบนี้ ไม่ต้องต่อยอดเป็น `requirePermission()`
+**ระบบสิทธิ์ตามบทบาท (Role-Based Permission) ทำครบแล้ว** — `Role`/`RolePermission` ต่อร้าน (Phase 13) + matrix F1–F9 และ
+Phase 16 ครอบ MJD Mobile Order (`MO_*`) · หน้า `/roles` แก้ matrix · `/users` ผูกบทบาท · STAFF ที่ `roleId = null` เข้าได้เฉพาะ
+`/settings` ตาม §4 (ตั้งแต่ Phase 16 ไม่มีทางลัดผ่านหน้า Mobile Order อีกแล้ว) · OWNER ได้เต็มทุก resource โดยไม่ต้องมี Role
 
 ## 🍽️ MJD Mobile Order (Phase 6–12)
 

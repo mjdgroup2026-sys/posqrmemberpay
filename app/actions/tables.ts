@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
-import { requireSellingStore, requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireSellingStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireStoreAccess } from "@/lib/permissions"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { isPlanActive } from "@/lib/subscription"
 import { assertTableCapacity, TableLimitExceeded } from "@/lib/table-limit"
@@ -73,6 +74,8 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
     storeId = store.storeId
   } else {
     try {
+      // Phase 16: ต้องมีสิทธิ์เปิดโต๊ะ + แพ็กเกจยังไม่หมดอายุ (Phase 14b) — resolveStoreContext() cache ไว้ จึงไม่ยิง DB ซ้ำ
+      await requireStoreAccess(["MO_TABLES", "ADD"])
       storeId = (await requireSellingStore()).storeId
     } catch (error) {
       return { ok: false, error: storeErrorMessage(error) }
@@ -169,7 +172,7 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
 export async function mergeTables(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_TABLES", "ADD"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -239,7 +242,7 @@ export async function mergeTables(formData: FormData): Promise<ActionResult> {
 export async function unmergeTables(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_TABLES", "ADD"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -292,7 +295,7 @@ export async function unmergeTables(formData: FormData): Promise<ActionResult> {
 export async function cancelTableSession(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_TABLES", "DELETE"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -403,7 +406,7 @@ async function assertTableIdle(
 export async function createTable(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_SETUP", "ADD"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -440,7 +443,7 @@ export async function createTable(formData: FormData): Promise<ActionResult> {
 export async function createTablesBulk(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_SETUP", "ADD"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -494,7 +497,7 @@ export async function createTablesBulk(formData: FormData): Promise<ActionResult
 export async function renameTable(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_SETUP", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -528,7 +531,7 @@ export async function renameTable(formData: FormData): Promise<ActionResult> {
 export async function deleteTable(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_SETUP", "DELETE"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }

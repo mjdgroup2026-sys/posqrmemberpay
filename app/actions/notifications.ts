@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
-import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireStoreAccess } from "@/lib/permissions"
 import { idSchema, firstIssueMessage } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -16,7 +17,7 @@ function revalidateNotificationPages() {
 export async function acknowledgeNotification(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_NOTIFICATIONS", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -47,7 +48,7 @@ export async function acknowledgeNotification(formData: FormData): Promise<Actio
 export async function acknowledgeAllNotifications(): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_NOTIFICATIONS", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }

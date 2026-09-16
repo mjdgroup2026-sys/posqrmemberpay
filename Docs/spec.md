@@ -1241,31 +1241,29 @@ enum ResourceKey {
             categories, stock-in, stock-out, reports, users, settings + หน้า MJD Mobile Order
             ตาม [§6a](#6a-routes--ui-mjd-mobile-order)) และ render ภาษาไทยครบทุกหน้า
 
-### ⏭️ Phase ถัดไป (ยังไม่กำหนดวัน) — Role-Based Permission
-> ⛔ **นอกขอบเขต v1** — พิมพ์เขียวสำหรับเฟสถัดไป (ดู [§7 Out of Scope](#7-out-of-scope-v1))
-> เดิมคือ "Phase 2.6" ที่แทรกอยู่ระหว่าง Phase 2.5 กับ Phase 3 — ยกออกจากไทม์ไลน์ v1 แล้ว
-> เริ่มทำเมื่อ Phase 1–5 ปิดครบและมีการอนุมัติขอบเขตใหม่ · ไม่นับรวมใน
-> [§9 Definition of Done](#9-เกณฑ์ความสำเร็จโดยรวม-definition-of-done) ของ v1
+### ✅ Role-Based Permission (F1–F9) — ทำแล้วใน Phase 13 · ขยายครอบ Mobile Order ใน Phase 16
+> เดิมคือ "Phase 2.6" ที่ยกออกจาก v1 — กลับมาทำจริงตอน multi-tenant (Phase 13) โดย `Role` อยู่ใต้ `Store` และ `roleId` อยู่ที่
+> `StoreMember` (ไม่ใช่ตาราง `user` ตามร่างเดิม) · checklist ด้านล่างคือร่างเดิม — ทุกข้อทำแล้วยกเว้นที่ระบุ
 
 เพิ่มระบบสิทธิ์ผู้ใช้ให้ Better Auth ครอบทุกหน้าที่มีอยู่ในระบบ (F1–F9)
 
-- [ ] เพิ่ม schema: `Role`, `RolePermission`, enum `PermissionAction`, enum `ResourceKey`
-- [ ] เพิ่ม `roleId` ให้ตาราง `user` ของ Better Auth ผ่าน `additionalFields` แล้ว sync ด้วย
+- [x] เพิ่ม schema: `Role`, `RolePermission`, enum `PermissionAction`, enum `ResourceKey`
+- [x] ~~เพิ่ม `roleId` ให้ตาราง `user`~~ → `StoreMember.roleId` (บทบาทเป็นของร้าน) ของ Better Auth ผ่าน `additionalFields` แล้ว sync ด้วย
       `npx @better-auth/cli generate`
-- [ ] รัน migration: `prisma migrate dev --name add_rbac`
-- [ ] Seed บทบาทเริ่มต้น 3 บทบาท: ผู้ดูแลระบบ (Full ทุก resource, `isSystem=true`), ผู้จัดการร้าน, แคชเชียร์
+- [x] migration `add_rbac` (Phase 13) + `add_mobile_order_resources`/`backfill_mobile_order_permissions` (Phase 16)
+- [x] Seed บทบาทเริ่มต้น 3 บทบาท: ผู้ดูแลระบบ (Full ทุก resource, `isSystem=true`), ผู้จัดการร้าน, แคชเชียร์
       ตามตารางสิทธิ์เริ่มต้นใน [4. ระบบสิทธิ์ผู้ใช้](#4-ระบบสิทธิ์ผู้ใช้-better-auth--role-based-permission)
-- [ ] เขียน helper กลาง `requirePermission(resource, action)` เรียกใช้ต้นทุก Server Action ที่มีผลต่อข้อมูล
+- [x] เขียน helper กลาง `requirePermission(resource, action)` เรียกใช้ต้นทุก Server Action ที่มีผลต่อข้อมูล
       (add/edit/delete) ของทุกโมดูล (Products, Categories, Stock In/Out, POS, POS History, POS Closing, Users)
-- [ ] เพิ่ม page guard ฝั่ง server เช็คสิทธิ์ `VIEW` ก่อน render ทุกหน้า — ไม่ผ่าน → redirect ไปหน้า Access Denied
-- [ ] Sidebar: กรองเมนูตามสิทธิ์ `VIEW` ของผู้ใช้ที่ login อยู่ (ซ่อนเมนูที่ไม่มีสิทธิ์)
-- [ ] ปุ่ม เพิ่ม/แก้ไข/ลบ ในทุกหน้าที่มีอยู่แล้ว (Products, Categories, Stock In/Out, POS History) ผูกกับสิทธิ์
+- [x] เพิ่ม page guard ฝั่ง server เช็คสิทธิ์ `VIEW` ก่อน render ทุกหน้า — ไม่ผ่าน → redirect ไปหน้า Access Denied
+- [x] Sidebar: กรองเมนูตามสิทธิ์ `VIEW` ของผู้ใช้ที่ login อยู่ (ซ่อนเมนูที่ไม่มีสิทธิ์)
+- [x] ปุ่ม เพิ่ม/แก้ไข/ลบ ในทุกหน้าที่มีอยู่แล้ว (Products, Categories, Stock In/Out, POS History) ผูกกับสิทธิ์
       ที่ตรงกันของ resource นั้น (ซ่อน/ปิดใช้งานเมื่อไม่มีสิทธิ์)
-- [ ] Server actions: `createRole`, `updateRole`, `deleteRole` (block role ที่ `isSystem=true`), `assignUserRole`
-- [ ] หน้า `/roles` — list บทบาท + ตาราง matrix แก้สิทธิ์ (View/Add/Edit/Delete + ปุ่มลัด Full/Readonly)
-- [ ] หน้า `/users` — เพิ่มคอลัมน์ Role + dropdown เปลี่ยน role ต่อผู้ใช้
-- [ ] Sidebar: เพิ่มเมนู "บทบาทและสิทธิ์" (แสดงเฉพาะผู้มีสิทธิ์ `USERS:EDIT`)
-- [ ] ตรวจสอบ: ผู้ใช้ที่ `roleId=null` เข้าได้เฉพาะ `/settings`; ไม่มีสิทธิ์ View → เมนูหายและเข้า URL ตรงถูก
+- [x] Server actions: `createRole`, `updateRole`, `deleteRole` (block role ที่ `isSystem=true`), `assignUserRole`
+- [x] หน้า `/roles` — list บทบาท + ตาราง matrix แก้สิทธิ์ (View/Add/Edit/Delete + ปุ่มลัด Full/Readonly)
+- [x] หน้า `/users` — เพิ่มคอลัมน์ Role + dropdown เปลี่ยน role ต่อผู้ใช้
+- [x] Sidebar: เพิ่มเมนู "บทบาทและสิทธิ์" (แสดงเฉพาะผู้มีสิทธิ์ `USERS:EDIT`)
+- [x] ตรวจสอบ: ผู้ใช้ที่ `roleId=null` เข้าได้เฉพาะ `/settings`; ไม่มีสิทธิ์ View → เมนูหายและเข้า URL ตรงถูก
       block; ไม่มีสิทธิ์ Add/Edit/Delete → เรียก Server Action ตรงถูกปฏิเสธแม้ UI ไม่ได้ซ่อนปุ่ม; ลบ/เปลี่ยน role
       ผู้ดูแลระบบคนสุดท้ายไม่ได้; แก้ชื่อ/ลบบทบาทระบบไม่ได้
 
@@ -1814,9 +1812,29 @@ enum ResourceKey {
 - [ ] เทส: สลิปซ้ำไม่ปิดบิลซ้ำ · สลิปโอนเข้าบัญชีร้านอื่นถูกปฏิเสธ · ยอดขาดถูกส่งให้พนักงาน · webhook ร้าน A ปิดบิล
       ร้าน B ไม่ได้
 
-### ⏭️ Phase 16 — Role-Based Permission เต็มรูปแบบ (ถ้าจำเป็น)
+### ✅ Phase 16 — Role-Based Permission เต็มรูปแบบ — โค้ด+เทสเสร็จ 2026-09-16 (branch `feat/phase-16-mobile-order-rbac` — รอ merge)
 > = หัวข้อ "Phase ถัดไป — Role-Based Permission" ข้างบน ปรับให้ `Role` อยู่ใต้ `Store` (ร้านกำหนดบทบาทเอง) ·
-> เริ่มเมื่อมีร้านจริงร้องขอมากกว่า OWNER/STAFF เท่านั้น
+> ส่วน F1–F9 ทำไปแล้วใน Phase 13 · **Phase 16 = ขยายให้ครอบ MJD Mobile Order (F11–F22)** ซึ่งก่อนหน้านี้สมาชิกร้านทุกคนเข้าได้หมด
+> · **การตัดสินใจ (ล็อกแล้ว 2026-09-16)**:
+> 1. resource ใหม่ 5 ตัว: `MO_TABLES` (ผังโต๊ะ/รายละเอียดโต๊ะ/ปิดบิล — ADD เปิด/รวมโต๊ะ · EDIT ปิดบิล/ยืนยันชำระ/กดเสิร์ฟด้วยมือ/พิมพ์
+>    ทิกเก็ตซ้ำ · DELETE ยกเลิกโต๊ะ/ยกเลิกรายการ) · `MO_KITCHEN` (VIEW, EDIT = เริ่มทำ/เสร็จ/เสิร์ฟ) · `MO_NOTIFICATIONS` (VIEW, EDIT = รับทราบ)
+>    · `MO_MENU` (CRUD + เมนูแนะนำ = EDIT) · `MO_SETUP` (จัดการโต๊ะ + QR Code: ADD สร้างโต๊ะ/ออก QR · EDIT เปลี่ยนชื่อ/พิมพ์ซ้ำ · DELETE
+>    ลบโต๊ะ/ยกเลิก QR) · ตั้งค่าร้านยังเป็น OWNER-only ไม่ใช่ resource · หน้าทิกเก็ต `/tickets/[orderId]` เข้าได้ด้วย VIEW ของ
+>    `MO_KITCHEN` หรือ `MO_TABLES`
+> 2. action ที่กดได้จากสองหน้า (เสิร์ฟ/พิมพ์ทิกเก็ต) ผ่านได้ด้วยสิทธิ์ใดสิทธิ์หนึ่ง — helper `requireStoreAccess(...pairs)` คืน `StoreContext`
+>    เดิม จึงแทน `requireStore()` ได้บรรทัดเดียวโดยไม่แก้ตัว action · `PermissionDenied` ย้ายไป `lib/store-errors.ts` ให้
+>    `storeErrorMessage()` แปลงได้ · `openTableSession` ฝั่งพนักงาน = `MO_TABLES:ADD` + `requireSellingStore()` (14b) ทั้งคู่
+> 3. **preset ที่ 4 "พนักงานเสิร์ฟ"** (`isSystem = false`): MO_TABLES เต็ม · MO_KITCHEN/MO_NOTIFICATIONS VIEW+EDIT · MO_MENU/MO_SETUP VIEW ·
+>    ไม่มี F1–F9 เลย · migration backfill สร้างให้ทุกร้านและ**ผูกให้ STAFF ที่ `roleId = null` ทุกคน** — คนกลุ่มนี้เดิมเข้าได้แค่หน้า
+>    Mobile Order อยู่แล้ว (F1–F9 ถูกกันด้วย roleId null) สิทธิ์จึงเท่าเดิมพอดี ไม่มีใครหลุดตอน deploy · บทบาทเดิมทุกตัว (ระบบ+ที่ร้านสร้าง)
+>    ได้ MO เต็ม ยกเว้น "แคชเชียร์" ได้ระดับพนักงานเสิร์ฟ · เจ้าของปรับลดทีหลังได้ที่ `/roles` (matrix โชว์ MO_* อัตโนมัติ)
+> 4. คำเชิญพนักงานใหม่ยังให้ `roleId = null` (เข้าได้เฉพาะ `/settings` ตาม §4) — เจ้าของกำหนดบทบาทที่ `/users`
+> 5. ยังไม่ซ่อนปุ่มรายสิทธิ์ใน component ฝั่ง Mobile Order — สอดคล้องกับ F1–F9 ที่มีอยู่ (ด่านจริงคือ server 2 ชั้น) · ทำเมื่อร้านจริงร้องขอ
+> 6. migration แยก 2 ไฟล์: `add_mobile_order_resources` (ALTER TYPE ADD VALUE ×5) → `backfill_mobile_order_permissions` เพราะ PostgreSQL
+>    ห้ามใช้ค่า enum ใหม่ในทรานแซคชันเดียวกับที่เพิ่ม · id แถว backfill = md5 (idempotent · ON CONFLICT DO NOTHING) · ซ้อมบนสำเนา
+>    production แล้ว diff สะอาด · ไม่มี env ใหม่
+> 7. เทส: `permissions.test.ts` +4 (STAFF ไร้บทบาททำอะไร MO ไม่ได้ · พนักงานเสิร์ฟทำได้/ไม่ได้ตาม preset · ครัวเสิร์ฟได้แต่ยกเลิกไม่ได้ ·
+>    ทุก preset ครอบ MO_* ครบ) · `onboarding.test.ts` นับบทบาทระบบ 4
 
 
 ---

@@ -37,7 +37,7 @@ describe.skipIf(!dbReady)("createStore — สร้างร้านใหม�
 
   const validForm = () => makeFormData({ name: "ครัวคุณแม่", slug: "mom-kitchen", themeColor: "#E8571F" })
 
-  it("สร้าง Store + Settings + บทบาทระบบ 3 + OWNER + โต๊ะ 4 + QR 4 + เมนู 3 ในครั้งเดียว และตั้ง cookie ชี้ร้านใหม่", async () => {
+  it("สร้าง Store + Settings + บทบาทระบบ 4 + OWNER + โต๊ะ 4 + QR 4 + เมนู 3 ในครั้งเดียว และตั้ง cookie ชี้ร้านใหม่", async () => {
     const result = await createStore(validForm())
     expect(result.ok, JSON.stringify(result)).toBe(true)
     if (!result.ok) return
@@ -53,7 +53,7 @@ describe.skipIf(!dbReady)("createStore — สร้างร้านใหม�
     expect(settings.storeName).toBe("ครัวคุณแม่")
     expect(settings.themeColor).toBe("#E8571F")
 
-    expect(await db.role.count({ where: { storeId } })).toBe(3)
+    expect(await db.role.count({ where: { storeId } })).toBe(4)
 
     const member = await db.storeMember.findUniqueOrThrow({ where: { userId_storeId: { userId: "newbie", storeId } } })
     expect(member.role).toBe("OWNER")

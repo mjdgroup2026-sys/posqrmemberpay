@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
-import { requireOwner, requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireOwner, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireStoreAccess } from "@/lib/permissions"
 import {
   storeSettingsSchema,
   featuredMenuSchema,
@@ -111,7 +112,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
 export async function setFeaturedMenu(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_MENU", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }

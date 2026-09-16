@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { getKitchenTicket } from "@/lib/queries"
-import { requireStorePage } from "@/lib/permissions"
+import { requirePageAccess } from "@/lib/permissions"
 import { KitchenTicket } from "@/components/kitchen-ticket"
 
 export const metadata = { title: "ทิกเก็ตครัว" }
@@ -11,7 +11,8 @@ export default async function KitchenTicketPage({
   params,
   searchParams,
 }: PageProps<"/tickets/[orderId]">) {
-  const { storeId } = await requireStorePage()
+  // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
+  const { storeId } = await requirePageAccess("MO_KITCHEN", "MO_TABLES")
 
   const { orderId } = await params
   const query = await searchParams

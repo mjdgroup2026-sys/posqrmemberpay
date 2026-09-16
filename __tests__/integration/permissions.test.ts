@@ -3,7 +3,11 @@ import type { ActionResult } from "@/lib/types"
 import {
   addTestMember,
   createTestCategory,
+  createTestMenuItem,
+  createTestNotification,
   createTestProduct,
+  createTestSession,
+  createTestTable,
   disconnectTestDb,
   ensureTestStore,
   ensureTestUser,
@@ -345,6 +349,98 @@ describe.skipIf(!dbReady)("ระบบสิทธิ์ตามบทบา�
       await giveRole("ผู้ดูแล", { USERS: ["VIEW", "EDIT"] })
       const result = await assignUserRole(makeFormData({ userId: "test-user", roleId: "ไม่มีอยู่จริง" }))
       expect(result.ok).toBe(false)
+    })
+  })
+  // ───────────────────── Phase 16 — MJD Mobile Order อยู่ใต้ matrix สิทธิ์ ─────────────────────
+  describe("Phase 16 — สิทธิ์ MJD Mobile Order (MO_*)", () => {
+    let tables: typeof import("@/app/actions/tables")
+    let orders: typeof import("@/app/actions/orders")
+    let menu: typeof import("@/app/actions/menu")
+    let notifications: typeof import("@/app/actions/notifications")
+    let qr: typeof import("@/app/actions/qr-codes")
+    let provision: typeof import("@/lib/store-provision")
+
+    beforeAll(async () => {
+      tables = await import("@/app/actions/tables")
+      orders = await import("@/app/actions/orders")
+      menu = await import("@/app/actions/menu")
+      notifications = await import("@/app/actions/notifications")
+      qr = await import("@/app/actions/qr-codes")
+      provision = await import("@/lib/store-provision")
+    })
+
+    it("STAFF ที่ไม่มีบทบาท ทำอะไรฝั่ง Mobile Order ไม่ได้เลย (เดิมเข้าได้หมด)", async () => {
+      const table = await createTestTable("P1")
+      expect((await tables.openTableSession(makeFormData({ tableId: table.id }))).ok).toBe(false)
+      expect((await tables.createTable(makeFormData({ code: "P2" }))).ok).toBe(false)
+      expect((await menu.saveMenuItem(makeFormData({ name: "ข้าวผัด", price: "50" }))).ok).toBe(false)
+      expect((await notifications.acknowledgeAllNotifications()).ok).toBe(false)
+      expect(await testPrisma().tableSession.count()).toBe(0)
+      expect(await testPrisma().menuItem.count()).toBe(0)
+    })
+
+    it("พนักงานเสิร์ฟ (preset): เปิดโต๊ะ/รับทราบ/กดเสิร์ฟได้ แต่สร้างโต๊ะ/แก้เมนู/ยกเลิก QR ไม่ได้", async () => {
+      // บทบาทนี้ถูก provisionStore() สร้างให้ร้านทดสอบแล้ว — ผูกตัวจริง ไม่สร้างซ้ำ
+      const waiter = await testPrisma().role.findFirstOrThrow({ where: { storeId: TEST_STORE_ID, name: "พนักงานเสิร์ฟ" } })
+      await testPrisma().storeMember.update({ where: { userId_storeId: { userId: "test-user", storeId: TEST_STORE_ID } }, data: { roleId: waiter.id } })
+      const table = await createTestTable("W1")
+
+      const opened = await tables.openTableSession(makeFormData({ tableId: table.id }))
+      expect(opened.ok, opened.ok ? "" : opened.error).toBe(true)
+      const session = await testPrisma().tableSession.findFirstOrThrow()
+      const note = await createTestNotification(session.id)
+      expect((await notifications.acknowledgeNotification(makeFormData({ id: note.id }))).ok).toBe(true)
+
+      // MO_SETUP / MO_MENU มีแค่ VIEW
+      expect((await tables.createTable(makeFormData({ code: "W2" }))).ok).toBe(false)
+      expect((await tables.renameTable(makeFormData({ id: table.id, code: "W9" }))).ok).toBe(false)
+      expect((await menu.saveMenuItem(makeFormData({ name: "ข้าวผัด", price: "50" }))).ok).toBe(false)
+      const item = await createTestMenuItem()
+      expect((await menu.toggleMenuItemActive(makeFormData({ id: item.id }))).ok).toBe(false)
+      expect((await qr.generateMissingQRCodes(makeFormData({}))).ok).toBe(false)
+      expect(await testPrisma().qRCode.count()).toBe(0)
+    })
+
+    it("KDS: ครัวที่มีแค่ MO_KITCHEN กดเริ่มทำ/เสิร์ฟได้ แต่ยกเลิกรายการ (MO_TABLES:DELETE) ไม่ได้", async () => {
+      await giveRole("ครัว", { MO_KITCHEN: ["VIEW", "EDIT"] })
+      // ปุ่มเริ่มทำ/เสร็จ มีเฉพาะร้านที่เปิด KDS
+      await testPrisma().storeSettings.update({ where: { storeId: TEST_STORE_ID }, data: { hasKDS: true } })
+      const table = await createTestTable("K1")
+      const session = await createTestSession(table.id)
+      const item = await createTestMenuItem()
+      const order = await testPrisma().mobileOrder.create({
+        data: {
+          storeId: TEST_STORE_ID,
+          tableSessionId: session.id,
+          orderNumber: 1,
+          items: { create: [{ menuItemId: item.id, quantity: 1, unitPrice: "80.00", status: "AWAITING_KITCHEN" }] },
+        },
+        include: { items: true },
+      })
+      const orderItem = order.items[0]
+      expect((await orders.startCookingItem(makeFormData({ id: orderItem.id }))).ok).toBe(true)
+      expect((await orders.markItemReady(makeFormData({ id: orderItem.id }))).ok).toBe(true)
+      // เสิร์ฟได้จาก MO_KITCHEN:EDIT หรือ MO_TABLES:EDIT
+      expect((await orders.markItemServed(makeFormData({ id: orderItem.id }))).ok).toBe(true)
+
+      const item2 = await testPrisma().mobileOrderItem.create({
+        data: { mobileOrderId: order.id, menuItemId: item.id, quantity: 1, unitPrice: "80.00", status: "AWAITING_KITCHEN" },
+      })
+      const cancelled = await orders.cancelOrderItem(makeFormData({ id: item2.id, reason: "ลูกค้าเปลี่ยนใจ" }))
+      expect(cancelled.ok).toBe(false)
+      expect((await testPrisma().mobileOrderItem.findUniqueOrThrow({ where: { id: item2.id } })).status).toBe("AWAITING_KITCHEN")
+    })
+
+    it("matrix ใน RESOURCE_ACTIONS มี MO_* ครบและทุก preset ระบบครอบ MO_* (ไม่มีบทบาทที่เงียบหาย)", async () => {
+      for (const key of ["MO_TABLES", "MO_KITCHEN", "MO_NOTIFICATIONS", "MO_MENU", "MO_SETUP"] as const) {
+        expect(permissions.RESOURCE_ACTIONS[key]).toContain("VIEW")
+        expect(permissions.RESOURCE_LABEL[key]).toBeTruthy()
+      }
+      for (const preset of provision.SYSTEM_ROLE_PRESETS) {
+        expect(Object.keys(preset.permissions).filter((k) => k.startsWith("MO_")), preset.name).toHaveLength(5)
+      }
+      // provisionStore() ของร้านทดสอบต้องสร้าง "พนักงานเสิร์ฟ" ให้ด้วย
+      expect(await testPrisma().role.count({ where: { storeId: TEST_STORE_ID, name: "พนักงานเสิร์ฟ" } })).toBe(1)
     })
   })
 })

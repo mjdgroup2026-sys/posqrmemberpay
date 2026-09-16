@@ -5,8 +5,22 @@ export type StoreContextReason = "UNAUTHENTICATED" | "NO_STORE" | "STORE_SUSPEND
 /// รหัสเพิ่มจาก requireSellingStore() (Phase 14b) — ไม่ใช่เหตุผลของ context (ร้านยังใช้งานได้ แค่ขายไม่ได้)
 export type SellingBlockReason = "STORE_EXPIRED"
 
-/// แปลงรหัสจาก requireStore()/requireOwner() เป็นข้อความที่ผู้ใช้เห็น
+/// ไม่มีสิทธิ์ตาม matrix (§4) — โยนจาก requirePermission()/requireStoreAccess() ใน lib/permissions.ts
+/// เก็บข้อความไทยไว้ในตัวเอง (Phase 16) เพื่อให้ catch เดิมที่เรียก storeErrorMessage(error) คืนข้อความถูกต้อง
+/// โดยไม่ต้องแก้ทุก action
+export class PermissionDenied extends Error {
+  constructor(
+    readonly resource: string,
+    readonly action: string,
+    readonly reason: string,
+  ) {
+    super("PERMISSION_DENIED")
+  }
+}
+
+/// แปลงรหัสจาก requireStore()/requireOwner()/requireStoreAccess() เป็นข้อความที่ผู้ใช้เห็น
 export function storeErrorMessage(error: unknown): string {
+  if (error instanceof PermissionDenied) return error.reason
   const code = error instanceof Error ? error.message : ""
   switch (code) {
     case "UNAUTHENTICATED":

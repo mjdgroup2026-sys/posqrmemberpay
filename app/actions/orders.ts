@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
-import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireStoreAccess } from "@/lib/permissions"
 import { idSchema, cancelOrderItemSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { OrderItemStatus } from "@/generated/prisma/client"
 import { isPrinterConfigured, printKitchenTicket } from "@/lib/kitchen-printer"
@@ -85,7 +86,7 @@ async function transition(
 export async function startCookingItem(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_KITCHEN", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -105,7 +106,7 @@ export async function startCookingItem(formData: FormData): Promise<ActionResult
 export async function markItemReady(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_KITCHEN", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -121,7 +122,7 @@ export async function markItemReady(formData: FormData): Promise<ActionResult> {
 export async function markItemServed(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_KITCHEN", "EDIT"], ["MO_TABLES", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -141,7 +142,7 @@ export async function markItemServed(formData: FormData): Promise<ActionResult> 
 export async function cancelOrderItem(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_TABLES", "DELETE"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -191,7 +192,7 @@ async function transitionOrder(
 export async function startCookingOrder(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_KITCHEN", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -210,7 +211,7 @@ export async function startCookingOrder(formData: FormData): Promise<ActionResul
 export async function markOrderReady(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_KITCHEN", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -225,7 +226,7 @@ export async function markOrderReady(formData: FormData): Promise<ActionResult> 
 export async function markOrderServed(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_KITCHEN", "EDIT"], ["MO_TABLES", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -246,7 +247,7 @@ export async function markOrderServed(formData: FormData): Promise<ActionResult>
 export async function reprintKitchenTicket(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_KITCHEN", "EDIT"], ["MO_TABLES", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -307,7 +308,7 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
 export async function markTicketPrinted(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_KITCHEN", "EDIT"], ["MO_TABLES", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }

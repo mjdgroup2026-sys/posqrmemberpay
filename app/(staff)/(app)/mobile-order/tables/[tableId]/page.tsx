@@ -1,12 +1,13 @@
 import Link from "next/link"
 import { getTableDetail } from "@/lib/queries"
-import { requireStorePage } from "@/lib/permissions"
+import { requirePageAccess } from "@/lib/permissions"
 import { TableDetail } from "@/components/table-detail"
 
 export const metadata = { title: "รายละเอียดออร์เดอร์" }
 
 export default async function TableDetailPage({ params }: PageProps<"/mobile-order/tables/[tableId]">) {
-  const { storeId } = await requireStorePage()
+  // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
+  const { storeId } = await requirePageAccess("MO_TABLES")
   const { tableId } = await params
   const detail = await getTableDetail(storeId, tableId)
 

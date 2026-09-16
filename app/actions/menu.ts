@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
-import { requireStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { storeErrorMessage, type StoreContext } from "@/lib/session"
+import { requireStoreAccess } from "@/lib/permissions"
 import { menuItemSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -109,7 +110,7 @@ async function writeGroups(
 export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_MENU", formData.get("id") ? "EDIT" : "ADD"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -177,7 +178,7 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
 export async function deleteMenuItem(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_MENU", "DELETE"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }
@@ -219,7 +220,7 @@ export async function deleteMenuItem(formData: FormData): Promise<ActionResult> 
 export async function toggleMenuItemActive(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
   try {
-    ctx = await requireStore()
+    ctx = await requireStoreAccess(["MO_MENU", "EDIT"])
   } catch (error) {
     return { ok: false, error: storeErrorMessage(error) }
   }

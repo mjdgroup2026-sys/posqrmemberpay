@@ -102,6 +102,12 @@ enum ResourceKey {
   POS_CLOSING
   REPORTS
   USERS
+  /// MJD Mobile Order (Phase 16) — ผังโต๊ะ/รายละเอียดโต๊ะ/ปิดบิล · KDS · การแจ้งเตือน · จัดการเมนู · จัดการโต๊ะ+QR
+  MO_TABLES
+  MO_KITCHEN
+  MO_NOTIFICATIONS
+  MO_MENU
+  MO_SETUP
 }
 
 /// บทบาทเป็นของร้าน (Phase 13) — แต่ละร้านมีชุดของตัวเอง ร้านใหม่ได้ 3 บทบาทระบบตอนสร้าง
