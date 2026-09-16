@@ -4,11 +4,15 @@ import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
+import { publishStoreEvent } from "@/lib/realtime"
 import { idSchema, firstIssueMessage } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
 
-function revalidateNotificationPages() {
+/// revalidate + ส่งสัญญาณ SSE (Phase 8 realtime) — เรียกหลังเขียน DB สำเร็จเท่านั้น
+function revalidateNotificationPages(storeId: string) {
+  publishStoreEvent(storeId, "notifications")
+  publishStoreEvent(storeId, "tables")
   revalidatePath("/mobile-order/tables")
   revalidatePath("/mobile-order/notifications")
 }
@@ -41,7 +45,7 @@ export async function acknowledgeNotification(formData: FormData): Promise<Actio
     return { ok: false, error: "รับทราบการแจ้งเตือนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 
-  revalidateNotificationPages()
+  revalidateNotificationPages(storeId)
   return { ok: true, message: "รับทราบการแจ้งเตือนแล้ว" }
 }
 
@@ -62,7 +66,7 @@ export async function acknowledgeAllNotifications(): Promise<ActionResult> {
       data: { status: "ACKNOWLEDGED", acknowledgedAt: new Date(), acknowledgedById: user.id },
     })
 
-    revalidateNotificationPages()
+    revalidateNotificationPages(storeId)
     return {
       ok: true,
       message:

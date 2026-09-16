@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
 import { requireSellingStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
+import { publishStoreEvent } from "@/lib/realtime"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { isPlanActive } from "@/lib/subscription"
 import { assertTableCapacity, TableLimitExceeded } from "@/lib/table-limit"
@@ -26,7 +27,10 @@ import type { ActionResult, FieldErrors } from "@/lib/types"
 /// สถานะ session ที่ยังถือว่า "โต๊ะเปิดอยู่"
 const LIVE_SESSION_STATUS: TableSessionStatus[] = ["OPEN", "AWAITING_BILL"]
 
-function revalidateTablePages() {
+/// revalidate + ส่งสัญญาณ SSE (Phase 8 realtime) — เรียกหลังเขียน DB สำเร็จเท่านั้น
+function revalidateTablePages(storeId: string) {
+  publishStoreEvent(storeId, "tables")
+  publishStoreEvent(storeId, "notifications")
   revalidatePath("/mobile-order/tables")
   revalidatePath("/mobile-order/notifications")
   revalidatePath("/mobile-order/kitchen")
@@ -156,7 +160,7 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
       return { sessionId: session.id, tableId: effectiveTableId, tableCode: effectiveTable.code, reused: false }
     })
 
-    revalidateTablePages()
+    revalidateTablePages(storeId)
     return {
       ok: true,
       message: result.reused ? `กลับเข้าโต๊ะ ${result.tableCode}` : `เปิดโต๊ะ ${result.tableCode} เรียบร้อยแล้ว`,
@@ -230,7 +234,7 @@ export async function mergeTables(formData: FormData): Promise<ActionResult> {
       return { primary: primary.code, secondary: secondary.code }
     })
 
-    revalidateTablePages()
+    revalidateTablePages(storeId)
     return { ok: true, message: `รวมโต๊ะ ${codes.secondary} เข้ากับโต๊ะ ${codes.primary} เรียบร้อยแล้ว` }
   } catch (error) {
     if (error instanceof TableAbort) return { ok: false, ...error.failure }
@@ -282,7 +286,7 @@ export async function unmergeTables(formData: FormData): Promise<ActionResult> {
       return secondary.code
     })
 
-    revalidateTablePages()
+    revalidateTablePages(storeId)
     return { ok: true, message: `ยกเลิกการรวมโต๊ะ ${code} เรียบร้อยแล้ว` }
   } catch (error) {
     if (error instanceof TableAbort) return { ok: false, ...error.failure }
@@ -366,7 +370,7 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
       return session.table.code
     })
 
-    revalidateTablePages()
+    revalidateTablePages(storeId)
     return { ok: true, message: `ยกเลิกโต๊ะ ${tableCode} เรียบร้อยแล้ว (ไม่มีการออกบิล)` }
   } catch (error) {
     if (error instanceof TableAbort) return { ok: false, ...error.failure }
@@ -432,7 +436,7 @@ export async function createTable(formData: FormData): Promise<ActionResult> {
     return { ok: false, error: "เพิ่มโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 
-  revalidateTablePages()
+  revalidateTablePages(storeId)
   revalidatePath("/mobile-order/tables/manage")
   revalidatePath("/mobile-order/qr-codes")
   return { ok: true, message: `เพิ่มโต๊ะ ${parsed.data.code} เรียบร้อยแล้ว` }
@@ -482,7 +486,7 @@ export async function createTablesBulk(formData: FormData): Promise<ActionResult
     return { ok: false, error: "เพิ่มโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 
-  revalidateTablePages()
+  revalidateTablePages(storeId)
   revalidatePath("/mobile-order/tables/manage")
   revalidatePath("/mobile-order/qr-codes")
   return {
@@ -522,7 +526,7 @@ export async function renameTable(formData: FormData): Promise<ActionResult> {
     return { ok: false, error: "แก้รหัสโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 
-  revalidateTablePages()
+  revalidateTablePages(storeId)
   revalidatePath("/mobile-order/tables/manage")
   revalidatePath("/mobile-order/qr-codes")
   return { ok: true, message: `เปลี่ยนรหัสโต๊ะเป็น ${parsed.data.code} แล้ว` }
@@ -563,7 +567,7 @@ export async function deleteTable(formData: FormData): Promise<ActionResult> {
     return { ok: false, error: "ลบโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 
-  revalidateTablePages()
+  revalidateTablePages(storeId)
   revalidatePath("/mobile-order/tables/manage")
   revalidatePath("/mobile-order/qr-codes")
   return { ok: true, message: "ลบโต๊ะเรียบร้อยแล้ว" }

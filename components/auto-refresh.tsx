@@ -1,23 +1,30 @@
 "use client"
 
-import { useEffect } from "react"
+import { useCallback, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { useRealtime } from "@/components/use-realtime"
 
-/// ดึงข้อมูลใหม่เป็นรอบ ๆ สำหรับหน้าจอที่ต้องเห็นความเปลี่ยนแปลงเกือบทันที (ผังโต๊ะ / KDS / แจ้งเตือน)
+/// ทำให้หน้าจอพนักงาน (ผังโต๊ะ / KDS / แจ้งเตือน / รายละเอียดโต๊ะ) เห็นความเปลี่ยนแปลงเกือบทันที
 ///
-/// เป็นทางสำรองที่ทำงานได้จริงบน deployment ปัจจุบัน (Next.js standalone ไม่มี custom server)
-/// — Socket.IO ตาม §6a ต้องรอย้ายไป custom server ก่อน ดูหมายเหตุใน Docs/spec.md §8 Phase 8
+/// ทางหลัก: SSE จาก /api/events — server ส่งสัญญาณเมื่อมี action/callback แตะข้อมูลของร้าน แล้วเรา router.refresh()
+/// ทางสำรอง: polling ตามรอบเดิม (`seconds`) เมื่อยังต่อ SSE ไม่ได้ · ต่อได้แล้วชะลอเป็น 60 วิ — ไม่ปิดเพราะ event bus อยู่
+/// ในโปรเซสเดียว ตอนสลับสี blue/green อาจมี event หล่นช่วงสั้น ๆ (ดู lib/realtime.ts)
+/// · ตอนแท็บถูกซ่อนหยุดโพล (กันยิงถี่ทิ้งเปล่าเวลาเครื่องครัวพักหน้าจอ)
+const CONNECTED_FALLBACK_SECONDS = 60
+
 export function AutoRefresh({ seconds = 15 }: { seconds?: number }) {
   const router = useRouter()
+  const refresh = useCallback(() => router.refresh(), [router])
+  const connected = useRealtime("/api/events", refresh)
 
   useEffect(() => {
+    const interval = (connected ? CONNECTED_FALLBACK_SECONDS : seconds) * 1000
     const timer = setInterval(() => {
-      // หยุดดึงตอนแท็บถูกซ่อน — กันยิงถี่ทิ้งเปล่าเวลาเครื่องครัวพักหน้าจอ
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return
       router.refresh()
-    }, seconds * 1000)
+    }, interval)
     return () => clearInterval(timer)
-  }, [router, seconds])
+  }, [router, seconds, connected])
 
   return null
 }

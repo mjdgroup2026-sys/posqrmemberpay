@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
 import { findStoreByQrToken } from "@/lib/store-resolve"
+import { publishStoreEvent } from "@/lib/realtime"
 import { isPlanActive } from "@/lib/subscription"
 import { toNumber } from "@/lib/format"
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
@@ -60,7 +61,11 @@ async function requireLiveSession(tx: StoreTx, qrToken: string) {
   return session
 }
 
-function revalidateCustomerPages() {
+/// revalidate + ส่งสัญญาณ SSE (Phase 8 realtime) — เรียกหลังเขียน DB สำเร็จเท่านั้น
+function revalidateCustomerPages(storeId: string) {
+  publishStoreEvent(storeId, "orders")
+  publishStoreEvent(storeId, "tables")
+  publishStoreEvent(storeId, "notifications")
   revalidatePath("/mobile-order/tables")
   revalidatePath("/mobile-order/kitchen")
   revalidatePath("/mobile-order/notifications")
@@ -203,7 +208,7 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
       }
     }
 
-    revalidateCustomerPages()
+    revalidateCustomerPages(storeId)
     return {
       ok: true,
       message: `ส่งออร์เดอร์ที่ ${created.order.orderNumber} เข้าครัวเรียบร้อยแล้ว`,
@@ -252,7 +257,7 @@ export async function callStaff(formData: FormData): Promise<ActionResult> {
       })
     })
 
-    revalidateCustomerPages()
+    revalidateCustomerPages(storeId)
     return { ok: true, message: "แจ้งพนักงานแล้ว กรุณารอสักครู่" }
   } catch (error) {
     if (error instanceof CustomerAbort) return { ok: false, ...error.failure }
@@ -293,7 +298,7 @@ export async function requestBill(formData: FormData): Promise<ActionResult<{ to
       return Math.round((sum + Number.EPSILON) * 100) / 100
     })
 
-    revalidateCustomerPages()
+    revalidateCustomerPages(storeId)
     return { ok: true, message: "แจ้งพนักงานเช็กบิลแล้ว", data: { total } }
   } catch (error) {
     if (error instanceof CustomerAbort) return { ok: false, ...error.failure }

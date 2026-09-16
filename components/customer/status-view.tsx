@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useRealtime } from "@/components/use-realtime"
 import Link from "next/link"
 import { formatBaht, formatClock, formatNumber } from "@/lib/format"
 import type { CustomerOrderView, OrderItemRow } from "@/lib/queries"
@@ -31,31 +32,34 @@ const ITEM_LABEL: Record<OrderItemRow["status"], string> = {
   CANCELLED: "ยกเลิกแล้ว",
 }
 
-/// โพลสถานะทุก 4 วินาทีผ่าน route handler — ฝั่งลูกค้าไม่ใช้ WebSocket โดยตั้งใจ (§6a Realtime)
+/// สถานะออร์เดอร์: SSE จาก /api/order/[qrToken]/events บอกว่ามีอะไรเปลี่ยน → ดึงสถานะใหม่ทันที · polling เป็นทางสำรอง
+/// (4 วิเมื่อต่อ SSE ไม่ได้ · 20 วิเมื่อต่อได้) — ฝั่งลูกค้าไม่ใช้ WebSocket โดยตั้งใจ (§6a Realtime)
 export function StatusView({ qrToken, initial }: { qrToken: string; initial: CustomerOrderView }) {
   const [view, setView] = useState(initial)
+  const cancelledRef = useRef(false)
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function poll() {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
-      try {
-        const response = await fetch(`/api/order/${qrToken}/status`, { cache: "no-store" })
-        if (!response.ok) return
-        const data = (await response.json()) as { ok: boolean; view?: CustomerOrderView }
-        if (!cancelled && data.ok && data.view) setView(data.view)
-      } catch {
-        // เน็ตมือถือสะดุดเป็นเรื่องปกติ — รอบถัดไปดึงใหม่เอง
-      }
-    }
-
-    const timer = setInterval(poll, 4000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
+  const poll = useCallback(async () => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+    try {
+      const response = await fetch(`/api/order/${qrToken}/status`, { cache: "no-store" })
+      if (!response.ok) return
+      const data = (await response.json()) as { ok: boolean; view?: CustomerOrderView }
+      if (!cancelledRef.current && data.ok && data.view) setView(data.view)
+    } catch {
+      // เน็ตมือถือสะดุดเป็นเรื่องปกติ — รอบถัดไปดึงใหม่เอง
     }
   }, [qrToken])
+
+  const connected = useRealtime(`/api/order/${qrToken}/events`, poll)
+
+  useEffect(() => {
+    cancelledRef.current = false
+    const timer = setInterval(poll, connected ? 20_000 : 4000)
+    return () => {
+      cancelledRef.current = true
+      clearInterval(timer)
+    }
+  }, [poll, connected])
 
   const items = view.orders.flatMap((o) => o.items).filter((i) => i.status !== "CANCELLED")
   const minStep = items.length === 0 ? 0 : Math.min(...items.map((i) => stepOf(i.status)))

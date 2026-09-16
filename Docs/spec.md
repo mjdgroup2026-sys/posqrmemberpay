@@ -44,7 +44,7 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | Database | PostgreSQL |
 | UI | Tailwind CSS v4 + shadcn/ui |
 | Package Manager | pnpm |
-| Realtime (Staff/Kitchen) | Socket.IO (ต่อคู่กับ custom Next.js server เดิม) |
+| Realtime (Staff/Kitchen/ลูกค้า) | **SSE** (`lib/realtime.ts` + route handler — ตัดสินใจ 2026-09-16 แทน Socket.IO ที่ต้องมี custom server) + polling สำรอง |
 | แจ้งเตือนลูกค้า | LINE Messaging API |
 | QR Code Generation | `qrcode` (npm) |
 | การชำระเงินออนไลน์ | PromptPay Webhook (bank/provider ยืนยันอัตโนมัติ) |
@@ -932,11 +932,18 @@ enum ResourceKey {
 - เพิ่มกลุ่มเมนู **"MJD Mobile Order"** → ผังโต๊ะ / การแจ้งเตือน (พร้อม badge นับ `Notification` ที่ `PENDING`) /
   จัดการ QR / ตั้งค่า — แสดงให้ผู้ใช้ที่ล็อกอินแล้วทุกคนเท่ากัน (v1 ยังไม่มี RBAC เหมือนเมนูอื่น)
 
-### Realtime Transport
-- **Staff/Kitchen**: Socket.IO ที่รันคู่กับ custom Next.js server เดิม (แอปโฮสต์เองบน VPS อยู่แล้ว ไม่ใช่
-  serverless) — ใช้ push ออร์เดอร์ใหม่, เปลี่ยนสถานะรายการ, และแจ้งเตือนเรียกพนักงาน/เช็กบิล ระหว่าง POS ↔ ครัว
-  แบบเรียลไทม์
-- **Customer**: ใช้ polling แทน WebSocket ฝั่งลูกค้า เพื่อความทนทานบนเครือข่ายมือถือที่ไม่เสถียร
+### Realtime Transport (ตัดสินใจใหม่ 2026-09-16 — ทำแล้ว)
+- **SSE (Server-Sent Events) แทน Socket.IO** เพราะ Socket.IO ต้องมี custom server ซึ่งชนกับ `output: "standalone"` + blue/green
+  ส่วน SSE เป็น route handler ธรรมดา และทุกอย่างที่ต้อง realtime ในระบบนี้เป็นทางเดียว server → หน้าจอ (การกดทั้งหมดผ่าน Server Action)
+- **`lib/realtime.ts`** — event bus ในโปรเซสต่อร้าน (`publishStoreEvent(storeId, topic)` · topic: tables/orders/notifications/payments/menu)
+  · **event ไม่พกข้อมูล** แค่บอกว่าอะไรเปลี่ยน ผู้รับไป refresh/fetch เองผ่านด่านสิทธิ์ปกติ → ไม่มีทางรั่วข้ามร้าน · action/ปิดบิลทุกเส้นทาง
+  publish หลังเขียน DB สำเร็จ (helper `revalidateXPages(storeId)` + `closeSessionWithPayment`)
+- **Staff/Kitchen**: `GET /api/events` (ต้องล็อกอิน+อยู่ในร้าน ช่องผูกกับ storeId ของ context) → `components/auto-refresh.tsx`
+  ใช้ `useRealtime()` → `router.refresh()` ทันที (debounce 300 ms) · **polling ยังอยู่เป็นทางสำรอง** (ชะลอเป็น 60 วิเมื่อต่อได้)
+  เพราะ bus อยู่ในโปรเซสเดียว — ตอนสลับสี blue/green event อาจหล่นช่วงสั้น ๆ · รันหลายอินสแตนซ์เมื่อไหร่ค่อยย้ายไป Postgres LISTEN/NOTIFY
+- **Customer**: `GET /api/order/[qrToken]/events` (ยึด qrToken · ได้เฉพาะ topic orders/payments/tables) → หน้า สถานะ/ชำระเงิน ดึงใหม่ทันที
+  · polling สำรอง 4 วิ → 20 วิเมื่อต่อได้ · ต่อได้แม้ QR ถูก invalidate แล้ว (หน้า pay ต้องเห็น "จ่ายสำเร็จ")
+- heartbeat 25 วิ + header `X-Accel-Buffering: no` → ผ่าน nginx ได้โดยไม่แก้ config · เทส `realtime.test.ts` + `realtime-routes.test.ts`
 
 ---
 
@@ -1299,11 +1306,8 @@ enum ResourceKey {
 - [x] หน้า `/mobile-order/kitchen` (KDS 3 คอลัมน์ + ปุ่มเริ่มทำ/เสร็จ)
 - [x] Fallback ไม่มี KDS: ปุ่ม "เสิร์ฟอาหารแล้ว" บน `/mobile-order/tables/[tableId]`
 - [x] ปุ่มยกเลิกรายการ (เฉพาะ `AWAITING_KITCHEN`) บนหน้ารายละเอียดออร์เดอร์โต๊ะ
-- [ ] Socket.IO server ติดตั้งคู่กับ custom Next.js server สำหรับ push สถานะ POS↔ครัว
-      > 🔧 **ยังไม่ทำ — ต้องตัดสินใจเรื่องสถาปัตยกรรมก่อน**: Socket.IO ต้องมี custom server ซึ่งใช้ร่วมกับ
-      > `output: "standalone"` + blue/green ตอน deploy ไม่ได้ตรง ๆ · ตอนนี้ใช้ทางสำรองที่ทำงานได้จริงแทน:
-      > `components/auto-refresh.tsx` (ดึงซ้ำทุก 10 วิ บน KDS, 15 วิ บนผังโต๊ะ, หยุดเมื่อแท็บถูกซ่อน)
-      > `+ GET /api/mobile-order/events?since=…` ที่สเปกกำหนดไว้เป็น fallback อยู่แล้ว
+- [x] ~~Socket.IO server~~ → **SSE realtime (2026-09-16)** — `lib/realtime.ts` + `/api/events` + `/api/order/[qrToken]/events`
+      ดู §6a "Realtime Transport" · polling เดิมใน `auto-refresh.tsx` คงไว้เป็นทางสำรอง
 - [x] ตรวจสอบ: ยกเลิกรายการหลังครัวกดเริ่มทำแล้ว → ถูกปฏิเสธเสมอ (ทดสอบ concurrent)
       — `__tests__/integration/order-items.test.ts` ยิงยกเลิกพร้อมกับ "เริ่มปรุง" ต้องสำเร็จฝั่งเดียวเสมอ
 
