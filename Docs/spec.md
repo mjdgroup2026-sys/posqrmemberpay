@@ -1766,23 +1766,51 @@ enum ResourceKey {
       - ยืนยัน 2 คำขอพร้อมกันกับแถว PENDING เดียว → ผ่านแค่ 1 (`updateMany` + `where: { status: 'PENDING' }`
         กติกาเดียวกับข้อ 7)
 
-### ⏭️ Phase 15 — ตั้งค่ารับเงินต่อร้าน 3 ระดับ (ก / ก+ / ข)
-> ร่างคร่าว ๆ · ตัดสินใจแล้วว่า**ไม่ใช้ payment gateway แบบโอนต่อ (marketplace)** เพราะค่าธรรมเนียม/รอบโอน
+### 🔨 Phase 15 — ตั้งค่ารับเงินต่อร้าน 3 ระดับ (ก / ก+ / ข)
+> ตัดสินใจแล้วว่า**ไม่ใช้ payment gateway แบบโอนต่อ (marketplace)** เพราะค่าธรรมเนียม/รอบโอน
 > ไม่เหมาะกับร้านเป้าหมาย — เงินต้องเข้าบัญชีร้านโดยตรงทุกระดับ
-- [ ] `Store.paymentMode` enum `{PROMPTPAY_DIRECT, PROMPTPAY_SLIP, SCB_BILLER}` + `StorePaymentConfig`
-      (เลขพร้อมเพย์, เลขบัญชี/ชื่อบัญชีไว้เทียบผู้รับ, credential SCB ต่อร้าน**เข้ารหัส**ด้วย key ใน env)
-      — แก้ได้เฉพาะ OWNER
-- [ ] **ก — พร้อมเพย์ตรง**: ย้าย `PROMPTPAY_ID` จาก env → ต่อร้าน · พนักงานกดยืนยัน (flow เดิม) · ค่าเริ่มต้นของทุกร้าน
+> **แบ่งเป็น 3 PR เหมือน Phase 14 (ตัดสินใจ 2026-09-16)**: **15a = ก** (ทำได้ทันที ไม่พึ่งของภายนอก — ✅ โค้ด+เทสเสร็จ
+> 2026-09-16, branch `feat/phase-15a-payment-config`) → **15b = ก+** (ต้องเลือกผู้ให้บริการตรวจสลิป + API key ก่อน) →
+> **15c = ข** (ต้อง credential SCB ต่อร้าน / ผล partner program) · 15b/15c **ยังไม่เริ่ม รอเจ้าของระบบตัดสินใจ**
+>
+> **การตัดสินใจตอนทำ 15a (ล็อกแล้ว 2026-09-16)**:
+> 1. `StoreSettings.promptPayId` **ย้ายคอลัมน์** ไป `StorePaymentConfig.promptPayId` (migration backfill แล้วค่อย DROP —
+>    Prisma ร่างเป็น DROP เฉย ๆ ห้ามใช้) · `claimTrial()` เขียนลงตารางใหม่ · `TrialClaim` ไม่เปลี่ยน
+> 2. **ก่อน 15a ทุกร้านออก QR ของร้าน default** (env `PROMPTPAY_ID`/`SCB_*` เป็นระดับแพลตฟอร์ม) = ลูกค้าร้านอื่นจ่ายเข้า
+>    บัญชีร้าน default — 15a ปิดบั๊กนี้: `getStorePaymentProfile(storeId)` ใน `lib/payment-methods.ts` เป็นกติกาเดียว
+>    (`qrAvailable`/`autoSettle`) · `isQrPaymentAvailable()` + `isPromptPayConfigured()` + env `PROMPTPAY_ID` ถูกถอด ·
+>    `buildPromptPayPayload(amount, promptPayId)` **ไม่มี default จาก env** อีกแล้ว
+> 3. migration ตั้ง `paymentMode = SCB_BILLER` ให้ร้าน slug `default` เท่านั้น (Biller ID ใน env เป็นของร้านนี้) ร้านอื่น
+>    เป็น `PROMPTPAY_DIRECT` · ใน 15a โหมด SCB ยังใช้ credential จาก env ของแพลตฟอร์ม จึง**ตั้งได้เฉพาะผู้ดูแลแพลตฟอร์ม**
+>    (`setStorePaymentMode` ใน `app/actions/admin.ts` · ต้อง `isScbConfigured()` ก่อน) — เจ้าของร้านเลือกได้แค่ ก ·
+>    ร้านที่อยู่โหมด SCB บันทึกเลขพร้อมเพย์สำรองได้ (fallback ตอนธนาคารล่ม → พนักงานกดยืนยัน) แต่สลับโหมดเองไม่ได้
+> 4. `PROMPTPAY_SLIP` มีใน enum แล้วแต่ทั้งเจ้าของและผู้ดูแลยังเลือกไม่ได้ (รอ 15b) · ถ้าถูกตั้งไว้จะทำงานเหมือน DIRECT
+> 5. `accountName`/`bankAccountNumber` เก็บไว้ก่อน (ไว้เทียบผู้รับตอนตรวจสลิป 15b) ยังไม่ถูกใช้
+> 6. เทส `__tests__/integration/payment-config.test.ts` (10) + unit `payment-methods.test.ts` เขียนใหม่รอบ `resolvePaymentProfile()`
+>    + `tenant-isolation` seed `StorePaymentConfig` ทั้งสองร้าน · **ตอน deploy**: ไม่มี env ใหม่ · ถอด `PROMPTPAY_ID` ออกจาก
+>    compose แล้ว · migration แตะ `store_settings` (DROP คอลัมน์) → `pg_dump` + ซ้อมบนสำเนาก่อน (ซ้อมแล้ว 2026-09-16 diff สะอาด)
+
+#### ✅ 15a — ก พร้อมเพย์ตรงต่อร้าน (โค้ด+เทสเสร็จ 2026-09-16)
+- [x] `Store.paymentMode` enum `{PROMPTPAY_DIRECT, PROMPTPAY_SLIP, SCB_BILLER}` + `StorePaymentConfig`
+      (เลขพร้อมเพย์, เลขบัญชี/ชื่อบัญชีไว้เทียบผู้รับ · credential SCB ต่อร้าน**เข้ารหัส**ด้วย key ใน env → 15c)
+      — แก้ได้เฉพาะ OWNER (`updatePaymentConfig` · การ์ด "การรับเงินจากลูกค้า" บน `/mobile-order/settings`)
+- [x] **ก — พร้อมเพย์ตรง**: ย้าย `PROMPTPAY_ID` จาก env → ต่อร้าน · พนักงานกดยืนยัน (flow เดิม) · ค่าเริ่มต้นของทุกร้าน
+- [x] `lib/payment-provider/` → interface กลางเลือกตาม `Store.paymentMode` (`getStorePaymentProfile()`) · หน้า `pay` +
+      `pay/promptpay` ฝั่งลูกค้าใช้โหมดของร้านเจ้าของ QR · `isScbConfigured()` ยังอ่าน env (15c เลิก)
+- [x] ผู้ดูแลแพลตฟอร์มตั้งโหมดให้ร้านที่ `/admin/stores/[id]` (`setStorePaymentMode`)
+
+#### ⏭️ 15b — ก+ ตรวจสลิปอัตโนมัติ (ยังไม่เริ่ม — รอเลือกผู้ให้บริการ)
 - [ ] **ก+ — พร้อมเพย์ตรง + ตรวจสลิปอัตโนมัติ**: หน้า `pay/promptpay` เพิ่ม "แนบสลิป" → อ่าน QR บนสลิป**ฝั่ง
       เบราว์เซอร์** (ไม่อัปโหลดรูป) → action `verifySlipAndSettle()` เรียก API ตรวจสลิป (เลือกผู้ให้บริการ: SlipOK /
       EasySlip — ขอราคาเทียบก่อน) → เทียบ 4 เงื่อนไข: ผู้รับตรงบัญชีร้าน · ยอด ≥ บิล · รหัสอ้างอิงไม่เคยใช้
       (`Sale.paymentReference` unique) · เวลาไม่เกิน N นาที → `closeSessionWithPayment()` ตัวเดิม ·
       API ล่ม → ตกไปปิดมือแบบ ก
+#### ⏭️ 15c — ข SCB Biller ต่อร้าน (ยังไม่เริ่ม — รอ credential/partner program)
 - [ ] **ข — SCB Biller ID ของร้าน**: token cache ต่อร้าน, `inquireBillPayment` ใช้ credential ของร้านเจ้าของ intent,
       webhook URL ต่อร้าน `/api/payments/webhook/scb/[storeWebhookToken]` · **ปุ่ม "ทดสอบการเชื่อมต่อ"** ออก QR
       1 บาทให้เจ้าของจ่ายแล้วรอ callback ≤ 2 นาที — **ผ่านแล้วเท่านั้นถึงเปิดปิดบิลอัตโนมัติ** · ระหว่างนี้ติดต่อ SCB
       เรื่อง partner program (แอปเดียวของเรา ผูกหลาย Biller ID) ถ้าได้จะตัดการถือ credential ของร้านทิ้ง
-- [ ] `lib/payment-provider/` → interface กลางเลือกตาม `Store.paymentMode` · `isScbConfigured()` เลิกอ่าน env
+- [ ] `isScbConfigured()` เลิกอ่าน env → อ่าน credential ของร้านเจ้าของ intent · ผู้ดูแลไม่ต้องเป็นคนตั้งโหมดอีก
 - [ ] เทส: สลิปซ้ำไม่ปิดบิลซ้ำ · สลิปโอนเข้าบัญชีร้านอื่นถูกปฏิเสธ · ยอดขาดถูกส่งให้พนักงาน · webhook ร้าน A ปิดบิล
       ร้าน B ไม่ได้
 

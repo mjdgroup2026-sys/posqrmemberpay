@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import { getCustomerPaymentStatus, getStoreSettings } from "@/lib/queries"
 import { findStoreByQrToken } from "@/lib/store-resolve"
-import { isQrPaymentAvailable } from "@/lib/payment-methods"
+import { getStorePaymentProfile } from "@/lib/payment-methods"
 import { CustomerShell, CustomerNotice } from "@/components/customer/customer-shell"
 import { PayView } from "@/components/customer/pay-view"
 
@@ -33,6 +33,9 @@ export default async function PayPage({ params }: PageProps<"/order/[qrToken]/pa
     )
   }
 
+  // วิธีรับเงินเป็นของร้านนี้ (Phase 15a) — ไม่ใช่ env กลางที่ทุกร้านใช้ร่วมกันอีกแล้ว
+  const payment = await getStorePaymentProfile(status.storeId)
+
   return (
     <CustomerShell
       storeName={settings?.storeName ?? "MJD Mobile Order"}
@@ -48,7 +51,7 @@ export default async function PayPage({ params }: PageProps<"/order/[qrToken]/pa
           serviceCharge: status.serviceCharge,
           total: status.total,
         }}
-        promptPayReady={isQrPaymentAvailable()}
+        promptPayReady={payment.qrAvailable}
       />
     </CustomerShell>
   )

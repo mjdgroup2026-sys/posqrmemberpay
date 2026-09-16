@@ -43,8 +43,8 @@ x-app-base: &app-base
     RESEND_API_KEY: ${RESEND_API_KEY:-}
     MAIL_FROM: ${MAIL_FROM:-}
     MAIL_REPLY_TO: ${MAIL_REPLY_TO:-}
-    # ชำระเงิน MJD Mobile Order (Phase 10) — ไม่ตั้ง = ปุ่มพร้อมเพย์ปิด และ webhook ตอบ 503
-    PROMPTPAY_ID: ${PROMPTPAY_ID:-}
+    # ชำระเงิน MJD Mobile Order (Phase 10) — ไม่ตั้ง PAYMENT_WEBHOOK_SECRET = webhook ตอบ 503
+    # (PROMPTPAY_ID เดิมถอดออกใน Phase 15a — เลขพร้อมเพย์เป็นของร้าน อยู่ในฐานข้อมูล)
     PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
     # ค่าใช้งานแบบต่ออายุ (Phase 14b) — พร้อมเพย์ของแพลตฟอร์ม + secret ของ cron เตือนหมดอายุ
     PLATFORM_PROMPTPAY_ID: ${PLATFORM_PROMPTPAY_ID:-}

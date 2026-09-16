@@ -592,3 +592,24 @@ export const voidBatchSchema = z.object({
   batchId: requiredId("ไม่พบใบจ่ายรวมที่ต้องการยกเลิก"),
   reason: z.string({ error: "กรุณาระบุเหตุผล" }).trim().min(3, "กรุณาระบุเหตุผลอย่างน้อย 3 ตัวอักษร").max(200, "เหตุผลยาวเกินไป"),
 })
+
+// ───────────────────── บัญชีรับเงินของร้าน (Phase 15a) ─────────────────────
+
+/// ฝั่งเจ้าของร้าน — เลือกได้เฉพาะโหมดพร้อมเพย์ตรง (ก) · ก+ รอ 15b · ข ให้ผู้ดูแลตั้ง (setStorePaymentMode)
+export const paymentConfigSchema = z.object({
+  paymentMode: z.enum(["PROMPTPAY_DIRECT", "PROMPTPAY_SLIP", "SCB_BILLER"], { error: "กรุณาเลือกวิธีรับเงิน" }),
+  promptPayId: z.string().trim().max(32, "เลขพร้อมเพย์ยาวเกินไป").default(""),
+  accountName: z.string().trim().max(100, "ชื่อบัญชียาวเกินไป").default(""),
+  bankAccountNumber: z
+    .string()
+    .trim()
+    .max(20, "เลขบัญชียาวเกินไป")
+    .refine((v) => v === "" || /^[0-9-]{6,20}$/.test(v), "เลขบัญชีต้องเป็นตัวเลข (ใส่ - ได้)")
+    .default(""),
+})
+
+/// ฝั่งผู้ดูแลแพลตฟอร์ม — เปลี่ยนโหมดให้ร้านใดก็ได้ (รวม SCB_BILLER)
+export const adminPaymentModeSchema = z.object({
+  storeId: requiredId("ไม่พบร้านที่ต้องการตั้งค่า"),
+  paymentMode: z.enum(["PROMPTPAY_DIRECT", "PROMPTPAY_SLIP", "SCB_BILLER"], { error: "กรุณาเลือกวิธีรับเงิน" }),
+})

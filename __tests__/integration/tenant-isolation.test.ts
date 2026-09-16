@@ -97,6 +97,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       billing: await import("@/app/actions/billing"),
       "admin-billing": await import("@/app/actions/admin-billing"),
       brand: await import("@/app/actions/brand"),
+      "payment-config": await import("@/app/actions/payment-config"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -245,6 +246,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       },
     })
 
+    // บัญชีรับเงินของร้าน (Phase 15a) — ชื่อบัญชีมี tag ("ร้าน A/B" อยู่ใน fingerprint แล้ว)
+    await db.storePaymentConfig.create({ data: { storeId, promptPayId: tag === "A" ? "0811111111" : "0822222222", accountName: `บัญชีร้าน ${tag}` } })
+
     // คำขอค่าใช้งานที่รอยืนยัน (Phase 14b) — requestRef มี tag ไว้จับการรั่ว
     const subscription = await db.storeSubscription.create({
       data: {
@@ -386,6 +390,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["listPendingInvites", (q, a) => q.listPendingInvites(a.storeId)],
     ["listSubscriptionHistory", (q, a) => q.listSubscriptionHistory(a.storeId)],
     ["getBillingOverview", (q, a) => q.getBillingOverview(a.storeId)],
+    ["getPaymentConfig", (q, a) => q.getPaymentConfig(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -469,6 +474,10 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "cancelBrandBatch",
     "confirmSubscriptionBatch",
     "voidSubscriptionBatch",
+    // Phase 15a: ตั้งค่ารับเงินของร้านที่ทำงานอยู่ (ไม่รับ id) · ผู้ดูแลแพลตฟอร์มตั้งโหมดข้ามร้านโดยตั้งใจ
+    // (เทสสิทธิ์/แยกร้านอยู่ที่ payment-config.test.ts)
+    "updatePaymentConfig",
+    "setStorePaymentMode",
   ]
 
   type ActionCase = [

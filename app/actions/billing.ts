@@ -138,7 +138,12 @@ export async function claimTrial(formData: FormData): Promise<ActionResult<{ exp
         where: { id: ctx.storeId },
         data: { planTier: TRIAL_TIER, tableLimit: spec.tableLimit, planExpiresAt: end, expiryNoticeLevel: 0 },
       })
-      await tx.storeSettings.update({ where: { storeId: ctx.storeId }, data: { promptPayId: normalized } })
+      // เลขพร้อมเพย์ของร้านอยู่ที่ StorePaymentConfig (Phase 15a) — เป็นบัญชีรับเงินจากลูกค้าด้วยในโหมด PROMPTPAY_DIRECT
+      await tx.storePaymentConfig.upsert({
+        where: { storeId: ctx.storeId },
+        update: { promptPayId: normalized, updatedById: ctx.user.id },
+        create: { storeId: ctx.storeId, promptPayId: normalized, updatedById: ctx.user.id },
+      })
       return end
     })
 

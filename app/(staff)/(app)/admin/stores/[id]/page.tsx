@@ -5,6 +5,8 @@ import { getStoreForAdmin, listStoreLedgerForAdmin } from "@/lib/admin-queries"
 import { remainingDays, TIER_SPEC } from "@/lib/subscription"
 import { formatBaht, formatDate, formatDateTime } from "@/lib/format"
 import { AdminStoreStatusButton } from "@/components/admin-store-status-button"
+import { AdminPaymentModeForm } from "@/components/admin-payment-mode-form"
+import { isScbConfigured } from "@/lib/payment-provider/scb"
 import { ConfirmSubscriptionForm, GrantCustomDaysForm, SetTableLimitForm, VoidSubscriptionButton } from "@/components/admin-billing-controls"
 import { IconBack, IconShield } from "@/components/icons"
 
@@ -89,6 +91,16 @@ export default async function AdminStoreDetailPage({ params }: PageProps<"/admin
           </span>
         </div>
       </div>
+
+      {/* วิธีรับเงินของร้าน (Phase 15a) — SCB_BILLER ตั้งได้ที่นี่ที่เดียว */}
+      <section className="card-ui card-pad">
+        <h2 className="t-h2">วิธีรับเงินจากลูกค้า</h2>
+        <p className="t-caption" style={{ margin: "4px 0 10px" }}>
+          ปัจจุบัน: <strong>{store.paymentMode}</strong> · โหมด SCB ใช้ SCB_BILLER_ID จาก env ของแพลตฟอร์ม — เปิดให้เฉพาะร้านที่ Biller ID นั้นเป็นของร้านจริง
+          (15c จะย้ายเป็น credential ต่อร้าน)
+        </p>
+        <AdminPaymentModeForm storeId={store.id} current={store.paymentMode} scbReady={isScbConfigured()} />
+      </section>
 
       {pendingRows.length > 0 ? (
         <section className="card-ui card-pad" style={{ borderColor: "var(--brand)" }}>

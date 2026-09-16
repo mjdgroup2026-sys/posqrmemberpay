@@ -108,8 +108,9 @@ describe.skipIf(!dbReady)("ค่าใช้งานแบบต่ออา�
       expect(row).toMatchObject({ kind: "TRIAL", status: "PAID", paymentMethod: "FREE", tier: "S", days: 7 })
       expect(Number(row.amount)).toBe(0)
 
-      const settings = await testPrisma().storeSettings.findUniqueOrThrow({ where: { storeId: TEST_STORE_ID } })
-      expect(settings.promptPayId).toBe("0812345678")
+      // Phase 15a: เลขพร้อมเพย์อยู่ที่ StorePaymentConfig
+      const config = await testPrisma().storePaymentConfig.findUniqueOrThrow({ where: { storeId: TEST_STORE_ID } })
+      expect(config.promptPayId).toBe("0812345678")
 
       const claims = await testPrisma().trialClaim.findMany()
       expect(claims).toHaveLength(1)

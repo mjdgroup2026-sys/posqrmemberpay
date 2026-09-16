@@ -4,7 +4,8 @@ import { getCustomerPaymentStatus, getStoreSettings } from "@/lib/queries"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { buildPromptPayPayload } from "@/lib/promptpay"
 import { issuePaymentIntent } from "@/lib/payment-intent"
-import { createQrCode, isScbConfigured } from "@/lib/payment-provider/scb"
+import { createQrCode } from "@/lib/payment-provider/scb"
+import { getStorePaymentProfile } from "@/lib/payment-methods"
 import { CustomerShell, CustomerNotice } from "@/components/customer/customer-shell"
 import { PromptPayView } from "@/components/customer/promptpay-view"
 
@@ -20,13 +21,14 @@ export default async function PromptPayPage({ params }: PageProps<"/order/[qrTok
 
   // payload สร้างสดทุกครั้งที่เข้าหน้า — ยอดจึงตรงกับบิลปัจจุบันเสมอแม้ลูกค้าสั่งเพิ่มระหว่างทาง
   //
-  // ต่อธนาคารไว้ = ให้ SCB ออก QR ให้ เพราะใบนั้นพก ref1 ติดไปกับรายการ ธนาคารจึงบอกกลับมาได้ว่า
-  // เงินก้อนนี้เป็นของโต๊ะไหน แล้วปิดบิลอัตโนมัติได้ · ไม่ได้ต่อ (หรือธนาคารล่ม) ก็ถอยไปใช้ QR
-  // พร้อมเพย์ที่สร้างเองซึ่งจ่ายได้เหมือนกัน เพียงแต่ต้องให้พนักงานกดยืนยันเอง — ซึ่ง
+  // วิธีรับเงินเป็นของร้าน (Phase 15a): โหมด SCB_BILLER = ให้ SCB ออก QR ให้ เพราะใบนั้นพก ref1 ติดไปกับรายการ
+  // ธนาคารจึงบอกกลับมาได้ว่าเงินก้อนนี้เป็นของโต๊ะไหน แล้วปิดบิลอัตโนมัติได้ · โหมดพร้อมเพย์ตรง (หรือธนาคารล่ม)
+  // ใช้ QR พร้อมเพย์ของร้านที่สร้างเองซึ่งจ่ายได้เหมือนกัน เพียงแต่ต้องให้พนักงานกดยืนยันเอง — ซึ่ง
   // startCustomerPayment() แจ้งพนักงานไว้ให้แล้วตั้งแต่ลูกค้ากดเลือกวิธีชำระเงิน
+  const payment = await getStorePaymentProfile(status.storeId)
   let payload: string | null = null
 
-  if (isScbConfigured()) {
+  if (payment.autoSettle) {
     const intent = await issuePaymentIntent(status.storeId, status.sessionId, status.total)
     const issued = await createQrCode({ amount: status.total, ref1: intent.ref1 })
     if (issued.ok) {
@@ -36,7 +38,7 @@ export default async function PromptPayPage({ params }: PageProps<"/order/[qrTok
     }
   }
 
-  payload ??= buildPromptPayPayload(status.total)
+  payload ??= buildPromptPayPayload(status.total, payment.promptPayId)
 
   if (!payload) {
     return (

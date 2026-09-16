@@ -37,6 +37,7 @@ export const STORE_SCOPED_MODELS: ReadonlySet<string> = new Set([
   "StoreMember",
   "StoreInvite",
   "StoreSubscription",
+  "StorePaymentConfig",
   // ตั้งใจไม่ใส่ TrialClaim (Phase 14b) — ต้องค้นข้ามร้านเพื่อกันใช้สิทธิ์ทดลองซ้ำ · SubscriptionPlan เป็นของแพลตฟอร์ม
 ])
 
