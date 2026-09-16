@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { requirePlatformAdmin, storeErrorMessage } from "@/lib/session"
 import { isScbConfigured } from "@/lib/payment-provider/scb"
+import { isSlipVerificationConfigured } from "@/lib/slip-provider"
 import { adminPaymentModeSchema, firstIssueMessage, storeStatusSchema } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -52,7 +53,9 @@ export async function setStorePaymentMode(formData: FormData): Promise<ActionRes
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
   const { storeId, paymentMode } = parsed.data
 
-  if (paymentMode === "PROMPTPAY_SLIP") return { ok: false, error: "โหมดตรวจสลิปอัตโนมัติยังไม่เปิดให้ใช้ (Phase 15b)" }
+  if (paymentMode === "PROMPTPAY_SLIP" && !isSlipVerificationConfigured()) {
+    return { ok: false, error: "ยังไม่ได้ตั้ง SLIP_PROVIDER/SLIP_API_KEY ใน env — ตั้งครบก่อนจึงเปิดโหมดตรวจสลิปได้" }
+  }
   if (paymentMode === "SCB_BILLER" && !isScbConfigured()) {
     return { ok: false, error: "ยังไม่ได้ตั้ง SCB_API_* / SCB_BILLER_ID ใน env — ตั้งครบก่อนจึงเปิดโหมดนี้ให้ร้านได้" }
   }
@@ -67,5 +70,11 @@ export async function setStorePaymentMode(formData: FormData): Promise<ActionRes
   revalidatePath(`/admin/stores/${storeId}`)
   revalidatePath("/mobile-order/settings")
   revalidatePath("/order", "layout")
-  return { ok: true, message: paymentMode === "SCB_BILLER" ? "เปิดรับเงินผ่าน SCB ให้ร้านแล้ว — ปิดบิลอัตโนมัติจาก callback" : "เปลี่ยนเป็นพร้อมเพย์ตรงของร้านแล้ว" }
+  const message =
+    paymentMode === "SCB_BILLER"
+      ? "เปิดรับเงินผ่าน SCB ให้ร้านแล้ว — ปิดบิลอัตโนมัติจาก callback"
+      : paymentMode === "PROMPTPAY_SLIP"
+        ? "เปิดโหมดตรวจสลิปอัตโนมัติให้ร้านแล้ว"
+        : "เปลี่ยนเป็นพร้อมเพย์ตรงของร้านแล้ว"
+  return { ok: true, message }
 }

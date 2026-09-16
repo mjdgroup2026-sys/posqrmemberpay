@@ -46,6 +46,11 @@ x-app-base: &app-base
     # ชำระเงิน MJD Mobile Order (Phase 10) — ไม่ตั้ง PAYMENT_WEBHOOK_SECRET = webhook ตอบ 503
     # (PROMPTPAY_ID เดิมถอดออกใน Phase 15a — เลขพร้อมเพย์เป็นของร้าน อยู่ในฐานข้อมูล)
     PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
+    # ตรวจสลิปอัตโนมัติ (Phase 15b) — ไม่ตั้ง SLIP_PROVIDER = โหมดตรวจสลิปปิด · ห้ามตั้ง mock บน production
+    SLIP_PROVIDER: ${SLIP_PROVIDER:-}
+    SLIP_API_KEY: ${SLIP_API_KEY:-}
+    SLIP_API_BRANCH_ID: ${SLIP_API_BRANCH_ID:-}
+    SLIP_MAX_AGE_MINUTES: ${SLIP_MAX_AGE_MINUTES:-30}
     # ค่าใช้งานแบบต่ออายุ (Phase 14b) — พร้อมเพย์ของแพลตฟอร์ม + secret ของ cron เตือนหมดอายุ
     PLATFORM_PROMPTPAY_ID: ${PLATFORM_PROMPTPAY_ID:-}
     CRON_SECRET: ${CRON_SECRET:-}

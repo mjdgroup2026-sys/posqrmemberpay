@@ -20,10 +20,13 @@ export function PromptPayView({
   qrToken,
   total,
   imageDataUrl,
+  autoSettle = true,
 }: {
   qrToken: string
   total: number
   imageDataUrl: string
+  /// true = ธนาคาร callback ปิดบิลให้ (SCB) · false = พร้อมเพย์ของร้าน พนักงานยืนยัน (หรือลูกค้าแนบสลิปใน Phase 15b)
+  autoSettle?: boolean
 }) {
   const [remaining, setRemaining] = useState(EXPIRE_SECONDS)
   const expiredClock = remaining === 0
@@ -66,7 +69,8 @@ export function PromptPayView({
         </div>
 
         <p className="t-caption" style={{ marginTop: 10 }}>
-          เปิดแอปธนาคาร → สแกน QR → ชำระเงิน · ระบบจะปิดบิลให้อัตโนมัติเมื่อได้รับการยืนยันจากธนาคาร
+          เปิดแอปธนาคาร → สแกน QR → ชำระเงิน ·{" "}
+          {autoSettle ? "ระบบจะปิดบิลให้อัตโนมัติเมื่อได้รับการยืนยันจากธนาคาร" : "โอนแล้วแจ้งพนักงาน หรือแนบสลิปด้านล่างเพื่อปิดบิลทันที"}
         </p>
       </section>
 
@@ -89,7 +93,7 @@ export function PromptPayView({
       ) : (
         <p className="row t-small" style={{ justifyContent: "center", gap: 8 }}>
           <IconSpinner size={16} className="animate-spin" aria-hidden />
-          รอการยืนยันจากธนาคาร · QR หมดอายุใน <span className="num">{mmss(remaining)}</span>
+          {autoSettle ? "รอการยืนยันจากธนาคาร" : "รอการยืนยันการชำระเงิน"} · QR หมดอายุใน <span className="num">{mmss(remaining)}</span>
         </p>
       )}
 

@@ -5,11 +5,14 @@ import { forStore } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { findStoreByQrToken } from "@/lib/store-resolve"
+import { slipPaymentReference, verifySlipAndSettle } from "@/lib/slip-settle"
+import { parseSlipQr } from "@/lib/slip-qr"
 import { closeSessionWithPayment, computeBillTotals } from "@/lib/close-session"
 import { toNumber } from "@/lib/format"
 import {
   confirmPaymentSchema,
   startPaymentSchema,
+  submitSlipSchema,
   firstIssueMessage,
   zodToFieldErrors,
 } from "@/lib/validation"
@@ -176,4 +179,47 @@ export async function startCustomerPayment(
     if (error instanceof PaymentAbort) return { ok: false, error: error.reason }
     return { ok: false, error: "เริ่มการชำระเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
+}
+
+/// ลูกค้าแนบสลิปโอนเงิน (Phase 15b — โหมด ก+) → ตรวจกับผู้ให้บริการ → ปิดบิลเองถ้าผ่านครบ 4 ด่าน (lib/slip-settle.ts)
+/// ตัวระบุตัวตนคือ qrToken เหมือน startCustomerPayment · ไม่ผ่าน = ไม่ปิดบิล บอกเหตุผล (ยอดขาด/ผู้ให้บริการล่ม → แจ้งพนักงานแล้ว)
+export async function submitPaymentSlip(formData: FormData): Promise<ActionResult<{ saleNumber: string }>> {
+  const parsed = submitSlipSchema.safeParse({ qrToken: formData.get("qrToken") ?? "", payload: formData.get("payload") ?? "" })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
+  const { qrToken, payload } = parsed.data
+
+  const store = await findStoreByQrToken(qrToken)
+  if (!store) return { ok: false, error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" }
+  if (store.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" }
+
+  const qr = await forStore(store.storeId).qRCode.findUnique({
+    where: { token: qrToken },
+    select: { status: true, tableId: true, table: { select: { primaryTableId: true } } },
+  })
+  if (!qr) return { ok: false, error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" }
+  const tableId = qr.table.primaryTableId ?? qr.tableId
+  const session = await forStore(store.storeId).tableSession.findFirst({
+    where: { tableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+    orderBy: { openedAt: "desc" },
+    select: { id: true },
+  })
+  if (!session) {
+    // ลูกค้ากดส่งซ้ำหลังบิลปิดไปแล้ว (เน็ตช้า/กดสองครั้ง) — ถ้าสลิปใบนี้คือใบที่ปิดโต๊ะนี้ ให้ตอบสำเร็จซ้ำ ไม่ใช่ error
+    const parsed = parseSlipQr(payload)
+    const paid = parsed
+      ? await forStore(store.storeId).sale.findFirst({
+          where: { paymentReference: slipPaymentReference(parsed.transRef), session: { tableId } },
+          select: { saleNumber: true },
+        })
+      : null
+    if (paid) return { ok: true, message: "บิลนี้ชำระแล้ว", data: { saleNumber: paid.saleNumber } }
+    return { ok: false, error: "โต๊ะนี้ปิดบิลไปแล้ว หรือยังไม่ได้เปิดใช้งาน" }
+  }
+
+  const result = await verifySlipAndSettle({ storeId: store.storeId, sessionId: session.id, payload })
+  if (!result.ok) return { ok: false, error: result.reason }
+
+  revalidatePath(`/order/${qrToken}`, "layout")
+  revalidatePath("/mobile-order/tables")
+  return { ok: true, message: result.alreadyClosed ? "บิลนี้ชำระแล้ว" : "ตรวจสลิปผ่าน — ปิดบิลเรียบร้อยแล้ว", data: { saleNumber: result.saleNumber } }
 }

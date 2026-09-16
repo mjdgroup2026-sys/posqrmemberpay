@@ -6,6 +6,7 @@ import {
   getOpenSessionCount,
 } from "@/lib/queries"
 import { getStorePaymentProfile } from "@/lib/payment-methods"
+import { isSlipVerificationConfigured } from "@/lib/slip-provider"
 import { requireStorePage } from "@/lib/permissions"
 import { StoreSettingsForm } from "@/components/store-settings-form"
 import { PaymentConfigForm } from "@/components/payment-config-form"
@@ -45,6 +46,7 @@ export default async function StoreSettingsPage() {
       <PaymentConfigForm
         config={paymentConfig}
         scbAutoSettle={paymentProfile.autoSettle}
+        slipReady={isSlipVerificationConfigured()}
       />
     </>
   )

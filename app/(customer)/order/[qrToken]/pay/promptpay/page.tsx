@@ -8,6 +8,8 @@ import { createQrCode } from "@/lib/payment-provider/scb"
 import { getStorePaymentProfile } from "@/lib/payment-methods"
 import { CustomerShell, CustomerNotice } from "@/components/customer/customer-shell"
 import { PromptPayView } from "@/components/customer/promptpay-view"
+import { SlipUpload } from "@/components/customer/slip-upload"
+import { slipProviderName } from "@/lib/slip-provider"
 
 export const metadata = { title: "ชำระด้วยพร้อมเพย์" }
 
@@ -62,7 +64,9 @@ export default async function PromptPayPage({ params }: PageProps<"/order/[qrTok
       backHref={`/order/${qrToken}/pay`}
       title="ชำระด้วยพร้อมเพย์"
     >
-      <PromptPayView qrToken={qrToken} total={status.total} imageDataUrl={imageDataUrl} />
+      <PromptPayView qrToken={qrToken} total={status.total} imageDataUrl={imageDataUrl} autoSettle={payment.autoSettle} />
+      {/* โหมด ก+ (Phase 15b) — ลูกค้าแนบสลิปให้ระบบตรวจแล้วปิดบิลเอง ไม่ต้องรอพนักงาน */}
+      {payment.slipVerification ? <SlipUpload qrToken={qrToken} mockMode={slipProviderName() === "mock"} /> : null}
     </CustomerShell>
   )
 }

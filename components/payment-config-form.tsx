@@ -16,15 +16,17 @@ type Props = {
   config: PaymentConfigView
   /// ร้านนี้ถูกผู้ดูแลตั้งเป็น SCB_BILLER — ระบบปิดบิลเองจาก callback ของธนาคาร
   scbAutoSettle: boolean
+  /// แพลตฟอร์มตั้งผู้ให้บริการตรวจสลิปแล้ว (Phase 15b) — เจ้าของเลือกโหมด ก+ ได้
+  slipReady: boolean
 }
 
 const MODE_LABEL = {
   PROMPTPAY_DIRECT: "พร้อมเพย์ตรง — ลูกค้าสแกน QR ของร้าน พนักงานกดยืนยัน",
-  PROMPTPAY_SLIP: "พร้อมเพย์ตรง + ตรวจสลิปอัตโนมัติ (เร็ว ๆ นี้)",
+  PROMPTPAY_SLIP: "พร้อมเพย์ตรง + ลูกค้าแนบสลิปแล้วระบบตรวจ/ปิดบิลเอง",
   SCB_BILLER: "รับผ่าน SCB Biller — ธนาคารยืนยันแล้วปิดบิลเอง (ผู้ดูแลระบบเป็นผู้เปิด)",
 } as const
 
-export function PaymentConfigForm({ config, scbAutoSettle }: Props) {
+export function PaymentConfigForm({ config, scbAutoSettle, slipReady }: Props) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
@@ -75,11 +77,14 @@ export function PaymentConfigForm({ config, scbAutoSettle }: Props) {
             วิธีรับเงิน
           </legend>
           {(Object.keys(MODE_LABEL) as (keyof typeof MODE_LABEL)[]).map((mode) => {
-            const disabled = mode === "PROMPTPAY_SLIP" || mode === "SCB_BILLER" || lockedToScb
+            const disabled = (mode === "PROMPTPAY_SLIP" && !slipReady) || mode === "SCB_BILLER" || lockedToScb
             return (
               <label key={mode} className="checkbox-row" style={{ opacity: disabled && config.paymentMode !== mode ? 0.6 : 1 }}>
                 <input type="radio" name="paymentMode" value={mode} defaultChecked={config.paymentMode === mode} disabled={disabled} />
-                <span>{MODE_LABEL[mode]}</span>
+                <span>
+                  {MODE_LABEL[mode]}
+                  {mode === "PROMPTPAY_SLIP" && !slipReady ? " (ยังไม่เปิดให้ใช้)" : ""}
+                </span>
               </label>
             )
           })}
@@ -108,7 +113,7 @@ export function PaymentConfigForm({ config, scbAutoSettle }: Props) {
               ชื่อบัญชี (ไม่บังคับ)
             </label>
             <input id="accountName" name="accountName" className="input" defaultValue={config.accountName ?? ""} maxLength={100} />
-            <span className="field-hint">ไว้เทียบชื่อผู้รับตอนตรวจสลิปอัตโนมัติ (เร็ว ๆ นี้)</span>
+            <span className="field-hint">ข้อมูลประกอบ — ระบบเทียบผู้รับสลิปด้วยเลขพร้อมเพย์/เลขบัญชี</span>
             {fieldErrors.accountName ? <span className="field-hint error">{fieldErrors.accountName}</span> : null}
           </div>
           <div className="field">
