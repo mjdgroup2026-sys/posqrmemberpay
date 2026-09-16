@@ -1812,7 +1812,7 @@ enum ResourceKey {
 - [ ] เทส: สลิปซ้ำไม่ปิดบิลซ้ำ · สลิปโอนเข้าบัญชีร้านอื่นถูกปฏิเสธ · ยอดขาดถูกส่งให้พนักงาน · webhook ร้าน A ปิดบิล
       ร้าน B ไม่ได้
 
-### ✅ Phase 16 — Role-Based Permission เต็มรูปแบบ — โค้ด+เทสเสร็จ 2026-09-16 (branch `feat/phase-16-mobile-order-rbac` — รอ merge)
+### ✅ Phase 16 — Role-Based Permission เต็มรูปแบบ — ขึ้น production แล้ว 2026-09-16 (PR #8)
 > = หัวข้อ "Phase ถัดไป — Role-Based Permission" ข้างบน ปรับให้ `Role` อยู่ใต้ `Store` (ร้านกำหนดบทบาทเอง) ·
 > ส่วน F1–F9 ทำไปแล้วใน Phase 13 · **Phase 16 = ขยายให้ครอบ MJD Mobile Order (F11–F22)** ซึ่งก่อนหน้านี้สมาชิกร้านทุกคนเข้าได้หมด
 > · **การตัดสินใจ (ล็อกแล้ว 2026-09-16)**:
