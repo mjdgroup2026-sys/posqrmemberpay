@@ -19,6 +19,8 @@ export type StoreSettingsValues = {
   serviceChargePercent: number
   hasKDS: boolean
   crmEnabled: boolean
+  /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
+  posDefaultMode: "TABLE" | "TAKEAWAY"
 }
 
 export function StoreSettingsForm({
@@ -39,6 +41,7 @@ export function StoreSettingsForm({
   const [coverImageUrl, setCoverImageUrl] = useState(settings.coverImageUrl ?? "")
   const [hasKDS, setHasKDS] = useState(settings.hasKDS)
   const [crmEnabled, setCrmEnabled] = useState(settings.crmEnabled)
+  const [posDefaultMode, setPosDefaultMode] = useState<"TABLE" | "TAKEAWAY">(settings.posDefaultMode)
 
   const [featured, setFeatured] = useState<string[]>(
     menu.filter((m) => m.isFeatured).map((m) => m.id),
@@ -55,6 +58,7 @@ export function StoreSettingsForm({
     const formData = new FormData(event.currentTarget)
     formData.set("themeColor", themeColor)
     formData.set("hasKDS", String(hasKDS))
+    formData.set("posDefaultMode", posDefaultMode)
     formData.set("crmEnabled", String(crmEnabled))
 
     try {
@@ -225,6 +229,29 @@ export function StoreSettingsForm({
                 </span>
               </span>
             </label>
+
+            <div className="field">
+              <span className="t-small">โหมดเริ่มต้นของจอขายอาหาร</span>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${posDefaultMode === "TABLE" ? "btn-primary" : "btn-subtle"}`}
+                  onClick={() => setPosDefaultMode("TABLE")}
+                >
+                  ขายเข้าโต๊ะ
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${posDefaultMode === "TAKEAWAY" ? "btn-primary" : "btn-subtle"}`}
+                  onClick={() => setPosDefaultMode("TAKEAWAY")}
+                >
+                  กลับบ้าน (รับเงินตอนสั่ง)
+                </button>
+              </div>
+              <span className="field-hint">
+                หน้า “ขายอาหาร” จะเปิดในโหมดนี้ทุกครั้ง — สลับได้ในหน้านั้นเหมือนเดิม · เข้าจากปุ่ม “สั่งเพิ่ม” ของโต๊ะยังเป็นโหมดโต๊ะเสมอ
+              </span>
+            </div>
 
             <label className="checkbox-row">
               <input type="checkbox" checked={crmEnabled} onChange={(e) => setCrmEnabled(e.target.checked)} />

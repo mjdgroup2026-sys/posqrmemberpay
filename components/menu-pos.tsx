@@ -51,11 +51,14 @@ export function MenuPos({
   tables,
   allowed = FULL_ACCESS,
   initialTableId,
+  defaultMode = "TABLE",
 }: {
   menu: { featured: MenuItemCard[]; all: MenuItemCard[] }
   tables: PosTableOption[]
   /// โต๊ะที่ถูกเลือกไว้ล่วงหน้า — มาจากปุ่ม "สั่งเพิ่ม" บนหน้าโต๊ะ (F13)
   initialTableId?: string
+  /// โหมดเริ่มต้นจากตั้งค่าร้าน (2026-09-17) — มาพร้อม ?table= จะเป็นโหมดโต๊ะเสมอ
+  defaultMode?: "TABLE" | "TAKEAWAY"
   /// สิทธิ์บนจอขายอาหาร — ADD = กดขาย/ส่งเข้าครัว (§4) · ไม่มี = ดูเมนูได้แต่ส่งออร์เดอร์ไม่ได้
   allowed?: AllowedActions
 }) {
@@ -69,7 +72,7 @@ export function MenuPos({
   const [customizing, setCustomizing] = useState<MenuItemCard | null>(null)
 
   /// TABLE = สั่งเข้าโต๊ะแล้วปิดบิลทีหลัง · TAKEAWAY = กลับบ้าน รับเงินตอนสั่ง (Phase 17c)
-  const [mode, setMode] = useState<"TABLE" | "TAKEAWAY">("TABLE")
+  const [mode, setMode] = useState<"TABLE" | "TAKEAWAY">(initialTableId ? "TABLE" : defaultMode)
   const [customerLabel, setCustomerLabel] = useState("")
   const [payOpen, setPayOpen] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodValue>("CASH")

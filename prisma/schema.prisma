@@ -644,6 +644,8 @@ model StoreSettings {
   hasKDS               Boolean  @default(false)
   serviceChargePercent Decimal  @default(0) @db.Decimal(5, 2)
   crmEnabled           Boolean  @default(false)
+  /// โหมดเริ่มต้นของจอขายอาหาร /mobile-order/pos (2026-09-17) — ร้านกลับบ้านเป็นหลักไม่ต้องสลับทุกบิล
+  posDefaultMode       PosDefaultMode @default(TABLE)
   updatedAt            DateTime @updatedAt
   updatedById          String?
 
@@ -651,6 +653,12 @@ model StoreSettings {
   updatedBy User? @relation("StoreSettingsUpdatedBy", fields: [updatedById], references: [id])
 
   @@map("store_settings")
+}
+
+/// โหมดเริ่มต้นของจอขายอาหารฝั่งพนักงาน — TABLE = ขายเข้าโต๊ะ · TAKEAWAY = กลับบ้าน (รับเงินตอนสั่ง)
+enum PosDefaultMode {
+  TABLE
+  TAKEAWAY
 }
 
 model Member {
