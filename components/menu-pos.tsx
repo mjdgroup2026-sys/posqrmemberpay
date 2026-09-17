@@ -50,9 +50,12 @@ export function MenuPos({
   menu,
   tables,
   allowed = FULL_ACCESS,
+  initialTableId,
 }: {
   menu: { featured: MenuItemCard[]; all: MenuItemCard[] }
   tables: PosTableOption[]
+  /// โต๊ะที่ถูกเลือกไว้ล่วงหน้า — มาจากปุ่ม "สั่งเพิ่ม" บนหน้าโต๊ะ (F13)
+  initialTableId?: string
   /// สิทธิ์บนจอขายอาหาร — ADD = กดขาย/ส่งเข้าครัว (§4) · ไม่มี = ดูเมนูได้แต่ส่งออร์เดอร์ไม่ได้
   allowed?: AllowedActions
 }) {
@@ -61,7 +64,7 @@ export function MenuPos({
 
   const [search, setSearch] = useState("")
   const [cart, setCart] = useState<CartLine[]>([])
-  const [tableId, setTableId] = useState("")
+  const [tableId, setTableId] = useState(initialTableId ?? "")
   const [pending, setPending] = useState(false)
   const [customizing, setCustomizing] = useState<MenuItemCard | null>(null)
 

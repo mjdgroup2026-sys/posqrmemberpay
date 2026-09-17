@@ -31,6 +31,7 @@ export default async function TableDetailPage({ params }: PageProps<"/mobile-ord
       allowed={granted.MO_TABLES ?? []}
       canAcknowledge={granted.MO_NOTIFICATIONS?.includes("EDIT") ?? false}
       canKitchen={granted.MO_KITCHEN?.includes("EDIT") ?? false}
+      canOrderMore={granted.MO_POS?.includes("ADD") ?? false}
     />
   )
 }

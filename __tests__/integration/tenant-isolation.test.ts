@@ -609,6 +609,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       async (b) => expect((await testPrisma().mobileOrderItem.findUniqueOrThrow({ where: { id: b.orderItemId } })).status).toBe("AWAITING_KITCHEN"),
     ],
     [
+      "reduceOrderItemQuantity",
+      (b) => makeFormData({ id: b.orderItemId, quantity: "1" }),
+      async (b) => expect((await testPrisma().mobileOrderItem.findUniqueOrThrow({ where: { id: b.orderItemId } })).status).toBe("AWAITING_KITCHEN"),
+    ],
+    [
       "cancelOrderItem",
       (b) => makeFormData({ id: b.orderItemId, reason: "ร้าน A พยายามยกเลิก" }),
       async (b) => expect((await testPrisma().mobileOrderItem.findUniqueOrThrow({ where: { id: b.orderItemId } })).status).toBe("AWAITING_KITCHEN"),

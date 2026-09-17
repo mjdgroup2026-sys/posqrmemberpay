@@ -6,7 +6,7 @@ import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { orderTicketLabel } from "@/lib/order-label"
-import { idSchema, cancelOrderItemSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
+import { idSchema, cancelOrderItemSchema, reduceOrderItemSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { OrderItemStatus } from "@/generated/prisma/client"
 import { isPrinterConfigured, printKitchenTicket } from "@/lib/kitchen-printer"
 import type { ActionResult } from "@/lib/types"
@@ -171,6 +171,107 @@ export async function cancelOrderItem(formData: FormData): Promise<ActionResult>
     cancelledById: user.id,
     cancelReason: parsed.data.reason,
   })
+}
+
+/// ลดจำนวนรายการอาหารหลังส่งครัวแล้ว (F13 — ตัดสินใจ 2026-09-17)
+///
+/// กติกา: ลดได้เฉพาะรายการที่ครัว**ยังไม่รับ** (AWAITING_KITCHEN) เท่านั้น — ของที่ครัวเริ่มทำแล้วต้องคิดเงิน ·
+/// ทำแบบ ledger: **ยกเลิกแถวเดิม + สร้างแถวใหม่ตามจำนวนใหม่** ในทรานแซคชันเดียว ไม่แก้ `quantity` ทับ
+/// เพื่อให้ย้อนดูได้ว่าใครลด จากเท่าไรเป็นเท่าไร (`cancelledById` + `cancelReason` ของแถวเดิม) ·
+/// ด่านกัน race กับครัวคือ conditional update ตัวเดียวกับยกเลิกรายการ (กติกาข้อ 7) ·
+/// ลดเหลือ 0 = ยกเลิก ให้ใช้ `cancelOrderItem` แทน (ต้องมีเหตุผล) · เพิ่มจำนวน = สั่งเพิ่มเป็นรอบใหม่ผ่านจอขาย
+/// (ครัวได้ทิกเก็ตใหม่ ไม่ต้องจำว่าใบเดิมเพิ่มแล้ว) จึงไม่มี action "เพิ่ม" ในไฟล์นี้
+export async function reduceOrderItemQuantity(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
+  try {
+    // ลดจำนวน = ยกเลิกบางส่วน — ใช้สิทธิ์เดียวกับปุ่มยกเลิกรายการ
+    ctx = await requireStoreAccess(["MO_TABLES", "DELETE"])
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+  const user = ctx.user
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
+
+  const parsed = reduceOrderItemSchema.safeParse({
+    id: formData.get("id") ?? "",
+    quantity: formData.get("quantity") ?? "",
+  })
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: firstIssueMessage(parsed.error),
+      fieldErrors: zodToFieldErrors(parsed.error),
+    }
+  }
+  const { id, quantity } = parsed.data
+
+  try {
+    const outcome = await db.$transaction(async (tx) => {
+      // MobileOrderItem ไม่มี storeId — กรองผ่าน order.storeId เองเสมอ (เหมือน transition())
+      const item = await tx.mobileOrderItem.findFirst({
+        where: { id, order: { storeId } },
+        select: {
+          id: true,
+          mobileOrderId: true,
+          menuItemId: true,
+          quantity: true,
+          unitPrice: true,
+          selectedOptionsSnapshot: true,
+          note: true,
+          status: true,
+          menuItem: { select: { name: true } },
+        },
+      })
+      if (!item) return { ok: false as const, error: "ไม่พบรายการอาหารนี้" }
+
+      if (quantity >= item.quantity) {
+        return {
+          ok: false as const,
+          error: `จำนวนใหม่ต้องน้อยกว่าจำนวนเดิม (${item.quantity}) — ถ้าต้องการเพิ่ม ให้กด "สั่งเพิ่ม" เป็นรอบใหม่`,
+        }
+      }
+
+      // ★ conditional update — ถ้าครัวกด "เริ่มทำ" ไปก่อนเสี้ยววินาที count จะเป็น 0 และไม่มีแถวใหม่เกิดขึ้น
+      const cancelled = await tx.mobileOrderItem.updateMany({
+        where: { id: item.id, order: { storeId }, status: "AWAITING_KITCHEN" },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelledById: user.id,
+          cancelReason: `ลดจำนวนจาก ${item.quantity} เป็น ${quantity}`,
+        },
+      })
+      if (cancelled.count === 0) {
+        return {
+          ok: false as const,
+          error: `ลดจำนวน ${item.menuItem.name} ไม่ได้ — ครัวรับรายการนี้ไปแล้ว (ตอนนี้เป็น "${STATUS_LABEL[item.status]}")`,
+        }
+      }
+
+      // แถวใหม่คง snapshot ราคา/ตัวเลือก/โน้ตเดิมทั้งหมด — ลูกค้าสั่งของเดิม แค่จำนวนน้อยลง
+      await tx.mobileOrderItem.create({
+        data: {
+          mobileOrderId: item.mobileOrderId,
+          menuItemId: item.menuItemId,
+          quantity,
+          unitPrice: item.unitPrice,
+          selectedOptionsSnapshot: item.selectedOptionsSnapshot ?? [],
+          note: item.note,
+          status: "AWAITING_KITCHEN",
+        },
+      })
+
+      return { ok: true as const, name: item.menuItem.name, from: item.quantity }
+    })
+
+    if (!outcome.ok) return { ok: false, error: outcome.error }
+
+    revalidateOrderPages(storeId)
+    return { ok: true, message: `${outcome.name} — ลดจำนวนจาก ${outcome.from} เป็น ${quantity} แล้ว` }
+  } catch {
+    return { ok: false, error: "ลดจำนวนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
 }
 
 /// เปลี่ยนสถานะทั้งทิกเก็ตในครั้งเดียว (ปุ่มบน KDS เป็นระดับใบสั่ง ไม่ใช่รายรายการ)
