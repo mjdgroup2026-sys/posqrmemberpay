@@ -108,6 +108,8 @@ enum ResourceKey {
   MO_NOTIFICATIONS
   MO_MENU
   MO_SETUP
+  /// Phase 17b — จอขายอาหารฝั่งพนักงาน (VIEW เข้าหน้า · ADD กดขาย/ส่งเข้าครัว)
+  MO_POS
 }
 
 /// บทบาทเป็นของร้าน (Phase 13) — แต่ละร้านมีชุดของตัวเอง ร้านใหม่ได้ 3 บทบาทระบบตอนสร้าง
@@ -166,6 +168,7 @@ model User {
   storeSettingsUpdates      StoreSettings[]   @relation("StoreSettingsUpdatedBy")
   sentInvites               StoreInvite[]     @relation("StoreInviteInvitedBy")
   acceptedInvites           StoreInvite[]     @relation("StoreInviteAcceptedBy")
+  uploadedAssets            StoreAsset[]      @relation("AssetUploadedBy")
   closings                  CashierClosing[]
 
   @@map("user")
@@ -269,6 +272,8 @@ model Sale {
   voidedBy     User?                   @relation("SaleVoidedBy", fields: [voidedById], references: [id])
   items        SaleItem[]
   transactions StockTransaction[]
+  /// ออร์เดอร์ครัวของบิลกลับบ้าน (Phase 17c) — บิลหน้าร้าน/บิลโต๊ะเป็น null
+  takeawayOrder MobileOrder?
 
   @@unique([storeId, saleNumber])
   @@index([storeId])
@@ -337,6 +342,8 @@ model CashierClosing {
 enum SaleChannel {
   RETAIL_POS
   MOBILE_ORDER
+  /// Phase 17c — พนักงานขายอาหารกลับบ้านหน้าเคาน์เตอร์ (ไม่มีโต๊ะ/ไม่มี TableSession)
+  TAKEAWAY
 }
 
 enum TableStatus {
@@ -507,10 +514,22 @@ model ModifierOption {
   @@map("modifier_option")
 }
 
+/// ประเภทออร์เดอร์ (Phase 17c) — กินที่ร้าน (ผูกโต๊ะ) หรือกลับบ้าน (ไม่มีโต๊ะ ผูกกับบิลที่จ่ายแล้ว)
+enum MobileOrderType {
+  DINE_IN
+  TAKEAWAY
+}
+
 model MobileOrder {
-  id             String    @id @default(cuid())
+  id             String          @id @default(cuid())
   storeId        String
-  tableSessionId String
+  orderType      MobileOrderType @default(DINE_IN)
+  /// null = ออร์เดอร์กลับบ้าน (ไม่มีโต๊ะ) — ก่อน Phase 17c ทุกแถวผูกโต๊ะเสมอ
+  tableSessionId String?
+  /// บิลของออร์เดอร์กลับบ้าน (จ่ายเงินตอนสั่ง) — ออร์เดอร์ที่โต๊ะเป็น null เพราะบิลออกตอนปิดโต๊ะ
+  saleId         String?         @unique
+  /// ชื่อ/เบอร์ 4 ตัวท้ายไว้เรียกลูกค้ามารับ — ใช้แทนเลขโต๊ะบนทิกเก็ตครัว
+  customerLabel  String?
   /// เลขรอบสั่งภายใน session เดียวกัน (1, 2, 3, …) ใช้แยกทิกเก็ตครัว
   orderNumber    Int
   submittedAt    DateTime  @default(now())
@@ -518,7 +537,9 @@ model MobileOrder {
   createdAt      DateTime  @default(now())
 
   store   Store             @relation(fields: [storeId], references: [id])
-  session TableSession      @relation(fields: [tableSessionId], references: [id], onDelete: Cascade)
+  session TableSession?     @relation(fields: [tableSessionId], references: [id], onDelete: Cascade)
+  /// บิลของออร์เดอร์กลับบ้าน — RESTRICT เพราะประวัติการขายต้องไม่ชี้ไปที่ว่าง (เหมือน SaleItem.product)
+  sale    Sale?             @relation(fields: [saleId], references: [id], onDelete: Restrict)
   items   MobileOrderItem[]
 
   @@unique([tableSessionId, orderNumber])
@@ -768,6 +789,7 @@ model Store {
   paymentIntents    PaymentIntent[]
   invites           StoreInvite[]
   paymentConfig     StorePaymentConfig?
+  assets            StoreAsset[]
 
   @@index([brandId])
   @@map("store")
@@ -1033,4 +1055,26 @@ model TrialClaim {
   claimedAt       DateTime @default(now())
 
   @@map("trial_claim")
+}
+
+/// รูปภาพที่ร้านอัปโหลดเอง (Phase 17a) — เก็บไบต์ลงฐานข้อมูลโดยตั้งใจ
+///
+/// VPS รันแบบ blue/green คนละคอนเทนเนอร์และไม่มี volume → ไฟล์ที่เขียนลงดิสก์หายทุกรอบ deploy
+/// ส่วน object storage ต้องสมัครบริการ + credential ใหม่ · รูปเมนู/โลโก้ถูกย่อในเบราว์เซอร์ให้ ≤ 300KB
+/// ก่อนอัปโหลดเสมอ (lib/assets.ts) ฐานจึงโตช้าพอที่จะรับได้ · เสิร์ฟผ่าน /api/assets/[id]
+model StoreAsset {
+  id           String   @id @default(cuid())
+  storeId      String
+  /// ชนิดที่ "ตรวจจากไบต์จริง" แล้ว ไม่ใช่ค่าที่เบราว์เซอร์ส่งมา
+  contentType  String
+  byteSize     Int
+  data         Bytes
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  store      Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  uploadedBy User? @relation("AssetUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([storeId])
+  @@map("store_asset")
 }

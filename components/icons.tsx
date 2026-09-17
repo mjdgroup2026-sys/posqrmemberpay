@@ -47,4 +47,6 @@ export {
   Building2 as IconBrand,
   // Phase 15b — แนบสลิป
   Camera as IconCamera,
+  // Phase 17a — อัปโหลดรูปเมนู/โลโก้
+  ImagePlus as IconImagePlus,
 } from "lucide-react"

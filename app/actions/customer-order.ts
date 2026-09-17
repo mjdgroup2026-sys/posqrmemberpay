@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { publishStoreEvent } from "@/lib/realtime"
+import { buildOrderLines, OrderLineError } from "@/lib/order-lines"
 import { isPlanActive } from "@/lib/subscription"
 import { toNumber } from "@/lib/format"
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
@@ -98,57 +99,7 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
         throw new CustomerAbort({ error: "โต๊ะนี้ขอเช็กบิลแล้ว สั่งอาหารเพิ่มไม่ได้ กรุณาแจ้งพนักงาน" })
       }
 
-      const menuItems = await tx.menuItem.findMany({
-        where: { id: { in: items.map((i) => i.menuItemId) }, isActive: true },
-        include: { modifierGroups: { include: { options: true } } },
-      })
-      const menuById = new Map(menuItems.map((m) => [m.id, m]))
-
-      const rows = items.map((line) => {
-        const menuItem = menuById.get(line.menuItemId)
-        if (!menuItem) throw new CustomerAbort({ error: "มีเมนูบางรายการปิดขายไปแล้ว กรุณาตรวจตะกร้าอีกครั้ง" })
-
-        const optionById = new Map(
-          menuItem.modifierGroups.flatMap((group) =>
-            group.options.map((option) => [option.id, { option, group }] as const),
-          ),
-        )
-
-        const chosen = line.optionIds.map((id) => {
-          const found = optionById.get(id)
-          if (!found) throw new CustomerAbort({ error: `ตัวเลือกของ ${menuItem.name} ไม่ถูกต้อง กรุณาเลือกใหม่` })
-          return found
-        })
-
-        // กลุ่มที่บังคับเลือกต้องมีอย่างน้อย 1 ตัวเลือกเสมอ — ตรวจซ้ำฝั่ง server ไม่เชื่อ UI
-        for (const group of menuItem.modifierGroups) {
-          if (!group.required) continue
-          const picked = chosen.filter((c) => c.group.id === group.id)
-          if (picked.length === 0) {
-            throw new CustomerAbort({ error: `กรุณาเลือก "${group.name}" ของ ${menuItem.name}` })
-          }
-          if (group.selectionType === "SINGLE" && picked.length > 1) {
-            throw new CustomerAbort({ error: `"${group.name}" ของ ${menuItem.name} เลือกได้อย่างเดียว` })
-          }
-        }
-
-        const basePrice = toNumber(menuItem.price)
-        const extra = chosen.reduce((sum, c) => sum + toNumber(c.option.priceDelta), 0)
-        const unitPrice = Math.round((basePrice + extra + Number.EPSILON) * 100) / 100
-
-        return {
-          menuItemId: menuItem.id,
-          menuItemName: menuItem.name,
-          quantity: line.quantity,
-          unitPrice,
-          note: line.note ?? null,
-          options: chosen.map((c) => ({
-            groupName: c.group.name,
-            optionName: c.option.name,
-            priceDelta: toNumber(c.option.priceDelta),
-          })),
-        }
-      })
+      const rows = await buildOrderLines(tx, items)
 
       // เลขรอบสั่งต่อ session — unique (tableSessionId, orderNumber) เป็นด่านจริงถ้ากดยืนยันซ้อนกัน
       const last = await tx.mobileOrder.findFirst({
@@ -216,6 +167,8 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
     }
   } catch (error) {
     if (error instanceof CustomerAbort) return { ok: false, ...error.failure }
+    // ข้อความจากตัวคิดบรรทัดออร์เดอร์ที่ใช้ร่วมกับฝั่งพนักงาน (lib/order-lines.ts) เป็นภาษาไทยอยู่แล้ว
+    if (error instanceof OrderLineError) return { ok: false, error: error.reason }
     return { ok: false, error: "ส่งออร์เดอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 }

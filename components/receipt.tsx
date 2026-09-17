@@ -45,7 +45,9 @@ export function Receipt({ data, storeName = "MJD Mobile Order" }: { data: Receip
                 {item.name}
                 <br />
                 <span className="t-caption num">
-                  {item.sku} · ฿{formatBaht(item.unitPrice)}/{item.unit}
+                  {/* บิลอาหาร (Phase 17c) ไม่มี SKU/หน่วยนับ — โชว์เฉพาะราคาต่อหน่วย */}
+                  {item.sku ? `${item.sku} · ` : ""}฿{formatBaht(item.unitPrice)}
+                  {item.unit ? `/${item.unit}` : ""}
                 </span>
               </td>
               <td className="num" style={{ padding: "6px 0", textAlign: "right", verticalAlign: "top" }}>

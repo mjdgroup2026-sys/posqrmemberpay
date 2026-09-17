@@ -5,6 +5,7 @@ import { forStore, type StoreTx } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
+import { parseAssetId } from "@/lib/assets"
 import { menuItemSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -137,6 +138,19 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
     const groups = parseGroups(formData.get("modifierGroups"))
 
     await db.$transaction(async (tx) => {
+      // รูปเดิมที่ถูกแทนที่ต้องถูกลบในทรานแซคชันเดียวกัน ไม่งั้นไบต์รูปค้างในฐานไปเรื่อย ๆ (Phase 17a)
+      // ลบเฉพาะรูปที่เก็บในระบบ (`/api/assets/<id>`) — ลิงก์ภายนอกที่ร้านวางเองไม่ใช่ของเรา
+      if (data.id) {
+        const previous = await tx.menuItem.findUnique({
+          where: { id: data.id },
+          select: { imageUrl: true },
+        })
+        const staleId = parseAssetId(previous?.imageUrl)
+        if (staleId && staleId !== parseAssetId(data.imageUrl)) {
+          await tx.storeAsset.deleteMany({ where: { id: staleId } })
+        }
+      }
+
       const menuItemId = data.id
         ? (
             await tx.menuItem.update({
@@ -194,7 +208,7 @@ export async function deleteMenuItem(formData: FormData): Promise<ActionResult> 
     await db.$transaction(async (tx) => {
       const item = await tx.menuItem.findUnique({
         where: { id: parsed.data.id },
-        select: { name: true, _count: { select: { orderItems: true, saleItems: true } } },
+        select: { name: true, imageUrl: true, _count: { select: { orderItems: true, saleItems: true } } },
       })
       if (!item) throw new MenuAbort("ไม่พบเมนูที่ต้องการลบ")
 
@@ -208,6 +222,10 @@ export async function deleteMenuItem(formData: FormData): Promise<ActionResult> 
       }
 
       await tx.menuItem.delete({ where: { id: parsed.data.id } })
+
+      // ลบรูปของเมนูที่ถูกลบไปด้วย (Phase 17a) — ไม่มีใครอ้างถึงอีกแล้ว
+      const assetId = parseAssetId(item.imageUrl)
+      if (assetId) await tx.storeAsset.deleteMany({ where: { id: assetId } })
     })
   } catch (error) {
     if (error instanceof MenuAbort) return { ok: false, error: error.reason }

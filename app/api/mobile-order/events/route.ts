@@ -73,9 +73,10 @@ export async function GET(request: NextRequest) {
       orderNumber: o.orderNumber,
       submittedAt: o.submittedAt,
       printedAt: o.printedAt,
-      sessionId: o.session.id,
-      tableId: o.session.table.id,
-      tableCode: o.session.table.code,
+      // ออร์เดอร์กลับบ้านไม่มีโต๊ะ (Phase 17c) — ปลายทางที่โพลอยู่ต้องรับ null ได้
+      sessionId: o.session?.id ?? null,
+      tableId: o.session?.table.id ?? null,
+      tableCode: o.session?.table.code ?? null,
     })),
     items: items.map((i) => ({
       id: i.id,

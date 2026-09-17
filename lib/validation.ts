@@ -211,6 +211,31 @@ export const submitOrderSchema = z.object({
     .max(100, "รายการในตะกร้ามากเกินไป"),
 })
 
+/// พนักงานกดสั่งแทนลูกค้าจากจอขาย (Phase 17b) — ตะกร้าชุดเดียวกับฝั่งลูกค้า ต่างกันแค่ตัวระบุโต๊ะ
+export const staffTableOrderSchema = z.object({
+  tableId: requiredId("กรุณาเลือกโต๊ะ"),
+  items: z
+    .array(cartLineSchema, { error: "ตะกร้าไม่ถูกต้อง" })
+    .min(1, "กรุณาเลือกเมนูก่อนส่งออร์เดอร์")
+    .max(100, "รายการในตะกร้ามากเกินไป"),
+})
+
+/// ขายอาหารกลับบ้าน (Phase 17c) — ไม่มีโต๊ะ รับเงินตอนสั่ง จึงต้องมีวิธีจ่ายและเงินที่รับเหมือนหน้า POS
+export const takeawaySaleSchema = z.object({
+  items: z
+    .array(cartLineSchema, { error: "ตะกร้าไม่ถูกต้อง" })
+    .min(1, "กรุณาเลือกเมนูก่อนรับเงิน")
+    .max(100, "รายการในตะกร้ามากเกินไป"),
+  paymentMethod: z.enum(["CASH", "TRANSFER", "QR"], { error: "กรุณาเลือกวิธีชำระเงิน" }),
+  amountReceived: z.coerce.number({ error: "จำนวนเงินที่รับต้องเป็นตัวเลข" }).min(0, "จำนวนเงินที่รับต้องไม่ติดลบ"),
+  customerLabel: z
+    .string({ error: "ชื่อลูกค้าไม่ถูกต้อง" })
+    .trim()
+    .max(40, "ชื่อลูกค้ายาวเกินไป")
+    .nullish()
+    .transform((v) => (v === "" || v === null ? undefined : v)),
+})
+
 export const callStaffSchema = z.object({
   qrToken: requiredId("ไม่พบ QR Code ของโต๊ะนี้"),
   reason: z

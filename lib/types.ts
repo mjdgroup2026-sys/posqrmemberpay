@@ -25,10 +25,12 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethodValue, string> = {
 }
 
 export type ReceiptLine = {
+  /// รหัสสินค้าคลัง — บิลอาหาร (Phase 17c) ใช้ menuItemId แทน
   productId: string
-  sku: string
+  /// SKU/หน่วยนับมีเฉพาะสินค้าคลัง — เมนูอาหารไม่มี จึงเป็น optional
+  sku?: string
   name: string
-  unit: string
+  unit?: string
   quantity: number
   unitPrice: number
   subtotal: number

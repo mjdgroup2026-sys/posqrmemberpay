@@ -5,6 +5,7 @@ import { hashInviteToken } from "@/lib/invite-token"
 import { isPlanActive } from "@/lib/subscription"
 import { inviteTokenSchema } from "@/lib/validation"
 import { toNumber } from "@/lib/format"
+import { orderTicketLabel } from "@/lib/order-label"
 import { decodeStoreScb, getStoreScb } from "@/lib/scb-store"
 import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { businessDayRange, businessDateOnly } from "@/lib/day"
@@ -299,7 +300,7 @@ export type SaleListItem = {
   createdAt: Date
   cashierName: string
   /// ช่องทางที่ออกบิล — บิลจาก MJD Mobile Order ปนอยู่ในตารางเดียวกับบิลหน้าร้าน (กติกาข้อ 8)
-  channel: "RETAIL_POS" | "MOBILE_ORDER"
+  channel: "RETAIL_POS" | "MOBILE_ORDER" | "TAKEAWAY"
   /// รหัสโต๊ะของบิล Mobile Order — บิลหน้าร้านเป็น null
   tableCode: string | null
   voidedAt: Date | null
@@ -998,7 +999,9 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
 export type KitchenTicket = {
   orderId: string
   orderNumber: number
+  /// ป้ายที่ครัวเห็น — รหัสโต๊ะ หรือ "กลับบ้าน #n" (Phase 17c)
   tableCode: string
+  orderType: "DINE_IN" | "TAKEAWAY"
   submittedAt: Date
   printedAt: Date | null
   items: OrderItemRow[]
@@ -1009,7 +1012,8 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
   const db = forStore(storeId)
   const orders = await db.mobileOrder.findMany({
     where: {
-      session: { status: { in: ["OPEN", "AWAITING_BILL"] } },
+      // ออร์เดอร์ที่โต๊ะต้องมี session ที่ยังเปิดอยู่ · ออร์เดอร์กลับบ้านไม่มีโต๊ะเลย (Phase 17c)
+      OR: [{ session: { status: { in: ["OPEN", "AWAITING_BILL"] } } }, { orderType: "TAKEAWAY" }],
       items: { some: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY"] } } },
     },
     orderBy: { submittedAt: "asc" },
@@ -1026,7 +1030,13 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
   return orders.map((order) => ({
     orderId: order.id,
     orderNumber: order.orderNumber,
-    tableCode: order.session.table.code,
+    tableCode: orderTicketLabel({
+      orderType: order.orderType,
+      tableCode: order.session?.table.code ?? null,
+      orderNumber: order.orderNumber,
+      customerLabel: order.customerLabel,
+    }),
+    orderType: order.orderType,
     submittedAt: order.submittedAt,
     printedAt: order.printedAt,
     items: order.items.map<OrderItemRow>((item) => ({
@@ -1508,7 +1518,9 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
 export type KitchenTicketDoc = {
   orderId: string
   orderNumber: number
+  /// ป้ายที่ครัวเห็น — รหัสโต๊ะ หรือ "กลับบ้าน #n" (Phase 17c)
   tableCode: string
+  orderType: "DINE_IN" | "TAKEAWAY"
   mergedTableCodes: string[]
   submittedAt: Date
   printedAt: Date | null
@@ -1527,6 +1539,8 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
       orderNumber: true,
       submittedAt: true,
       printedAt: true,
+      orderType: true,
+      customerLabel: true,
       session: { select: { tableId: true, table: { select: { code: true } } } },
       items: {
         where: { status: { not: "CANCELLED" } },
@@ -1545,13 +1559,22 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
 
   const [settings, merged] = await Promise.all([
     db.storeSettings.findUnique({ where: { storeId }, select: { storeName: true } }),
-    db.table.findMany({ where: { primaryTableId: order.session.tableId }, select: { code: true } }),
+    // ออร์เดอร์กลับบ้านไม่มีโต๊ะ จึงไม่มีโต๊ะที่ถูกรวมให้ไล่หา (Phase 17c)
+    order.session
+      ? db.table.findMany({ where: { primaryTableId: order.session.tableId }, select: { code: true } })
+      : Promise.resolve([]),
   ])
 
   return {
     orderId: order.id,
     orderNumber: order.orderNumber,
-    tableCode: order.session.table.code,
+    tableCode: orderTicketLabel({
+      orderType: order.orderType,
+      tableCode: order.session?.table.code ?? null,
+      orderNumber: order.orderNumber,
+      customerLabel: order.customerLabel,
+    }),
+    orderType: order.orderType,
     mergedTableCodes: merged.map((m) => m.code),
     submittedAt: order.submittedAt,
     printedAt: order.printedAt,
@@ -2037,4 +2060,52 @@ export async function getScbConfig(storeId: string): Promise<ScbConfigView> {
     testStartedAt: row?.scbTestStartedAt ?? null,
     activeSource: active?.source ?? null,
   }
+}
+
+// ───────────────────── จอขายอาหารฝั่งพนักงาน (Phase 17b) ─────────────────────
+
+export type PosTableOption = {
+  id: string
+  code: string
+  status: TableCardStatus
+  /// มีบิลเปิดอยู่แล้วไหม — จอขายบอกพนักงานว่า "สั่งเพิ่มเข้าบิลเดิม" หรือ "เปิดโต๊ะใหม่"
+  hasOpenSession: boolean
+  /// โต๊ะที่ขอเช็กบิลแล้วสั่งเพิ่มไม่ได้ (กติกาเดียวกับฝั่งลูกค้า) — จอขายต้องปิดปุ่มไว้ก่อนถึง server
+  awaitingBill: boolean
+  /// โต๊ะที่ถูกรวมเข้าโต๊ะอื่น — ทุกอย่างวิ่งไปที่โต๊ะหลัก จึงไม่ให้เลือกโดยตรง
+  mergedIntoCode: string | null
+  /// ยอดปัจจุบันของบิลที่เปิดอยู่ (0 ถ้ายังไม่มีรายการ)
+  currentTotal: number
+}
+
+/// รายชื่อโต๊ะสำหรับจอขาย `/mobile-order/pos` — พนักงานเลือกโต๊ะก่อนส่งออร์เดอร์เข้าครัว
+export async function listTablesForPos(storeId: string): Promise<PosTableOption[]> {
+  const db = forStore(storeId)
+  const [tables, sessions, totals] = await Promise.all([
+    db.table.findMany({
+      orderBy: { code: "asc" },
+      select: { id: true, code: true, status: true, primaryTable: { select: { code: true } } },
+    }),
+    db.tableSession.findMany({
+      where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
+      orderBy: { openedAt: "desc" },
+      select: { id: true, tableId: true, status: true },
+    }),
+    liveSessionTotals(storeId),
+  ])
+
+  const sessionByTable = new Map(sessions.map((s) => [s.tableId, s]))
+
+  return tables.map((table) => {
+    const session = sessionByTable.get(table.id)
+    return {
+      id: table.id,
+      code: table.code,
+      status: table.status,
+      hasOpenSession: Boolean(session),
+      awaitingBill: session?.status === "AWAITING_BILL",
+      mergedIntoCode: table.primaryTable?.code ?? null,
+      currentTotal: session ? (totals.get(session.id)?.total ?? 0) : 0,
+    }
+  })
 }

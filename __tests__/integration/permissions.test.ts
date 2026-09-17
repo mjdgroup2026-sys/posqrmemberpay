@@ -432,12 +432,12 @@ describe.skipIf(!dbReady)("ระบบสิทธิ์ตามบทบา�
     })
 
     it("matrix ใน RESOURCE_ACTIONS มี MO_* ครบและทุก preset ระบบครอบ MO_* (ไม่มีบทบาทที่เงียบหาย)", async () => {
-      for (const key of ["MO_TABLES", "MO_KITCHEN", "MO_NOTIFICATIONS", "MO_MENU", "MO_SETUP"] as const) {
+      for (const key of ["MO_TABLES", "MO_KITCHEN", "MO_NOTIFICATIONS", "MO_MENU", "MO_SETUP", "MO_POS"] as const) {
         expect(permissions.RESOURCE_ACTIONS[key]).toContain("VIEW")
         expect(permissions.RESOURCE_LABEL[key]).toBeTruthy()
       }
       for (const preset of provision.SYSTEM_ROLE_PRESETS) {
-        expect(Object.keys(preset.permissions).filter((k) => k.startsWith("MO_")), preset.name).toHaveLength(5)
+        expect(Object.keys(preset.permissions).filter((k) => k.startsWith("MO_")), preset.name).toHaveLength(6)
       }
       // provisionStore() ของร้านทดสอบต้องสร้าง "พนักงานเสิร์ฟ" ให้ด้วย
       expect(await testPrisma().role.count({ where: { storeId: TEST_STORE_ID, name: "พนักงานเสิร์ฟ" } })).toBe(1)

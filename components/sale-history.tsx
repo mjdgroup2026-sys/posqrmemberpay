@@ -195,11 +195,13 @@ export function SaleHistory({ sales, from, to, status, search, allowed = FULL_AC
                     </td>
                     <td style={{ padding: "12px" }}>
                       {PAYMENT_METHOD_LABEL[sale.paymentMethod]}
-                      {sale.channel === "MOBILE_ORDER" ? (
+                      {sale.channel !== "RETAIL_POS" ? (
                         <>
                           <br />
                           <span className="t-caption">
-                            Mobile Order{sale.tableCode ? ` · โต๊ะ ${sale.tableCode}` : ""}
+                            {sale.channel === "TAKEAWAY"
+                              ? "อาหารกลับบ้าน"
+                              : `Mobile Order${sale.tableCode ? ` · โต๊ะ ${sale.tableCode}` : ""}`}
                           </span>
                         </>
                       ) : null}
@@ -301,9 +303,11 @@ export function SaleHistory({ sales, from, to, status, search, allowed = FULL_AC
                   <span>ชำระโดย</span>
                   <span>
                     {PAYMENT_METHOD_LABEL[detail.paymentMethod]}
-                    {detail.channel === "MOBILE_ORDER"
-                      ? ` · Mobile Order${detail.tableCode ? ` โต๊ะ ${detail.tableCode}` : ""}`
-                      : ""}
+                    {detail.channel === "TAKEAWAY"
+                      ? " · อาหารกลับบ้าน"
+                      : detail.channel === "MOBILE_ORDER"
+                        ? ` · Mobile Order${detail.tableCode ? ` โต๊ะ ${detail.tableCode}` : ""}`
+                        : ""}
                   </span>
                 </span>
                 {detail.paymentMethod === "CASH" ? (

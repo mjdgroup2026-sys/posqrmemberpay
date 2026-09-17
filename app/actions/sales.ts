@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { nextSaleNumber } from "@/lib/sale-number"
 import { guardAction } from "@/lib/permissions"
+import { publishStoreEvent } from "@/lib/realtime"
 import { toNumber } from "@/lib/format"
 import { businessDateOnly, isSameBusinessDay } from "@/lib/day"
 import {
@@ -284,6 +285,18 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
       })
       if (marked.count === 0) throw new SaleAbort({ error: `บิล ${sale.saleNumber} ถูกยกเลิกไปแล้ว` })
 
+      // ★ บิลกลับบ้าน (Phase 17c) จ่ายเงินตอนสั่ง ครัวจึงกำลังทำอยู่ — void แล้วต้องหยุดครัวด้วย
+      //   ไม่งั้นอาหารของบิลที่ยกเลิกไปแล้วยังถูกทำต่อจนเสร็จ · รายการที่ยกเลิกไปก่อนหน้าไม่ถูกแตะซ้ำ
+      await tx.mobileOrderItem.updateMany({
+        where: { order: { saleId: sale.id }, status: { not: "CANCELLED" } },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelledById: user.id,
+          cancelReason: `ยกเลิกบิล ${sale.saleNumber}`,
+        },
+      })
+
       // คืนสต็อกด้วยรายการชดเชย — ห้ามลบ/แก้ StockTransaction(OUT) เดิม (ledger append-only)
       for (const item of sale.items) {
         // บรรทัดที่มาจาก MJD Mobile Order อ้าง MenuItem ไม่ใช่ Product จึงไม่มีสต็อกให้คืน (Phase 10)
@@ -309,6 +322,9 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
     })
 
     revalidateSalePages()
+    // บิลกลับบ้านที่ถูก void ทำให้รายการในครัวถูกยกเลิกไปด้วย — KDS ต้องเห็นทันที (กติกาข้อ 12)
+    publishStoreEvent(storeId, "orders")
+    revalidatePath("/mobile-order/kitchen")
     return { ok: true, message: `ยกเลิกบิล ${saleNumber} และคืนสต็อกเรียบร้อยแล้ว` }
   } catch (error) {
     if (error instanceof SaleAbort) return { ok: false, ...error.failure }

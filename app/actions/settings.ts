@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { requireOwner, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
+import { parseAssetId } from "@/lib/assets"
 import {
   storeSettingsSchema,
   featuredMenuSchema,
@@ -57,8 +58,19 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
     await db.$transaction(async (tx) => {
       const current = await tx.storeSettings.findUnique({
         where: { storeId },
-        select: { hasKDS: true },
+        select: { hasKDS: true, logoUrl: true, coverImageUrl: true },
       })
+
+      // รูปที่ถูกแทนที่ต้องถูกลบในทรานแซคชันเดียวกับการบันทึก (Phase 17a) — เฉพาะรูปที่เก็บในระบบ
+      for (const [before, after] of [
+        [current?.logoUrl, data.logoUrl],
+        [current?.coverImageUrl, data.coverImageUrl],
+      ] as const) {
+        const staleId = parseAssetId(before)
+        if (staleId && staleId !== parseAssetId(after)) {
+          await tx.storeAsset.deleteMany({ where: { id: staleId } })
+        }
+      }
 
       // ★ ห้ามสลับ hasKDS ขณะมีโต๊ะเปิดอยู่ — รายการที่ค้างอยู่ระหว่าง COOKING/READY จะกำพร้า
       //   เพราะปุ่มที่ใช้เดินสถานะต่อ (KDS หรือปุ่ม "เสิร์ฟแล้ว" บนหน้าโต๊ะ) หายไปพร้อมกับ UI

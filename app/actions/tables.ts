@@ -8,6 +8,7 @@ import { publishStoreEvent } from "@/lib/realtime"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { isPlanActive } from "@/lib/subscription"
 import { assertTableCapacity, TableLimitExceeded } from "@/lib/table-limit"
+import { openOrReuseSession, SessionError, LIVE_SESSION_STATUS } from "@/lib/table-session"
 import {
   openTableSchema,
   mergeTablesSchema,
@@ -20,12 +21,9 @@ import {
   firstIssueMessage,
   zodToFieldErrors,
 } from "@/lib/validation"
-import type { TableSessionStatus } from "@/generated/prisma/client"
 import type { ActionResult, FieldErrors } from "@/lib/types"
 
 
-/// สถานะ session ที่ยังถือว่า "โต๊ะเปิดอยู่"
-const LIVE_SESSION_STATUS: TableSessionStatus[] = ["OPEN", "AWAITING_BILL"]
 
 /// revalidate + ส่งสัญญาณ SSE (Phase 8 realtime) — เรียกหลังเขียน DB สำเร็จเท่านั้น
 function revalidateTablePages(storeId: string) {
@@ -105,59 +103,10 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
         targetTableId = qr.tableId
       }
 
-      const table = await tx.table.findUnique({
-        where: { id: targetTableId },
-        select: { id: true, code: true, status: true, primaryTableId: true },
-      })
-      if (!table) throw new TableAbort({ error: "ไม่พบโต๊ะที่ต้องการเปิด" })
+      // zod บังคับให้มีอย่างน้อยหนึ่งใน tableId/qrToken อยู่แล้ว — กันไว้อีกชั้นให้ชนิดข้อมูลชัดเจน
+      if (!targetTableId) throw new TableAbort({ error: "ไม่พบโต๊ะที่ต้องการเปิด" })
 
-      // โต๊ะรองที่ถูกรวมแล้ว — ทุกอย่างวิ่งไปที่ session ของโต๊ะหลัก
-      const effectiveTableId = table.primaryTableId ?? table.id
-      const effectiveTable =
-        table.primaryTableId === null
-          ? table
-          : await tx.table.findUniqueOrThrow({
-              where: { id: table.primaryTableId },
-              select: { id: true, code: true, status: true, primaryTableId: true },
-            })
-
-      const existing = await tx.tableSession.findFirst({
-        where: { tableId: effectiveTableId, status: { in: LIVE_SESSION_STATUS } },
-        orderBy: { openedAt: "desc" },
-        select: { id: true },
-      })
-      if (existing) {
-        return { sessionId: existing.id, tableId: effectiveTableId, tableCode: effectiveTable.code, reused: true }
-      }
-
-      if (table.primaryTableId !== null) {
-        throw new TableAbort({ error: `โต๊ะ ${table.code} ถูกรวมกับโต๊ะ ${effectiveTable.code} อยู่ กรุณาแจ้งพนักงาน` })
-      }
-
-      // ★ conditional update — ด่านเดียวที่กันการสร้าง session ซ้ำตอนสแกนพร้อมกันสองเครื่อง
-      //   (pattern เดียวกับกันขายเกินสต็อกในกติกาข้อ 4)
-      const claimed = await tx.table.updateMany({
-        where: { id: effectiveTableId, status: "EMPTY" },
-        data: { status: "OPEN_NO_ORDER" },
-      })
-      if (claimed.count === 0) {
-        const again = await tx.tableSession.findFirst({
-          where: { tableId: effectiveTableId, status: { in: LIVE_SESSION_STATUS } },
-          orderBy: { openedAt: "desc" },
-          select: { id: true },
-        })
-        if (again) {
-          return { sessionId: again.id, tableId: effectiveTableId, tableCode: effectiveTable.code, reused: true }
-        }
-        throw new TableAbort({ error: `โต๊ะ ${effectiveTable.code} ไม่พร้อมเปิด กรุณาแจ้งพนักงาน` })
-      }
-
-      const session = await tx.tableSession.create({
-        data: { storeId, tableId: effectiveTableId, qrCodeId },
-        select: { id: true },
-      })
-
-      return { sessionId: session.id, tableId: effectiveTableId, tableCode: effectiveTable.code, reused: false }
+      return openOrReuseSession(tx, storeId, { tableId: targetTableId, qrCodeId })
     })
 
     revalidateTablePages(storeId)
@@ -168,6 +117,8 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
     }
   } catch (error) {
     if (error instanceof TableAbort) return { ok: false, ...error.failure }
+    // ข้อความจากตัวเปิดโต๊ะที่ใช้ร่วมกับจอขาย (lib/table-session.ts) เป็นภาษาไทยอยู่แล้ว
+    if (error instanceof SessionError) return { ok: false, error: error.reason }
     return { ok: false, error: "เปิดโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 }

@@ -5,6 +5,7 @@ import { forStore } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
+import { orderTicketLabel } from "@/lib/order-label"
 import { idSchema, cancelOrderItemSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { OrderItemStatus } from "@/generated/prisma/client"
 import { isPrinterConfigured, printKitchenTicket } from "@/lib/kitchen-printer"
@@ -281,7 +282,12 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
   }
 
   const printed = await printKitchenTicket({
-    tableCode: order.session.table.code,
+    tableCode: orderTicketLabel({
+      orderType: order.orderType,
+      tableCode: order.session?.table.code ?? null,
+      orderNumber: order.orderNumber,
+      customerLabel: order.customerLabel,
+    }),
     orderNumber: order.orderNumber,
     submittedAt: order.submittedAt,
     items: order.items.map((item) => ({

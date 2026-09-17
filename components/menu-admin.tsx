@@ -8,6 +8,7 @@ import { formatBaht, formatNumber } from "@/lib/format"
 import type { ManagedMenuItem } from "@/lib/queries"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconPlus, IconSpinner, IconTrash } from "@/components/icons"
+import { ImagePicker } from "@/components/image-picker"
 import {
   Dialog,
   DialogContent,
@@ -296,20 +297,13 @@ export function MenuAdmin({ items, allowed = FULL_ACCESS }: { items: ManagedMenu
               />
             </div>
 
-            <div className="field">
-              <label className="t-small" htmlFor="menuImage">
-                ลิงก์รูป (ไม่บังคับ)
-              </label>
-              <input
-                id="menuImage"
-                className="input"
-                maxLength={500}
-                placeholder="https://… หรือ /menu/pad-thai.jpg"
-                value={draft.imageUrl}
-                onChange={(e) => setDraft({ ...draft, imageUrl: e.target.value })}
-              />
-              {fieldErrors.imageUrl ? <span className="field-hint error">{fieldErrors.imageUrl}</span> : null}
-            </div>
+            <ImagePicker
+              name="imageUrl"
+              label="รูปเมนู (ไม่บังคับ)"
+              value={draft.imageUrl}
+              onChange={(value) => setDraft({ ...draft, imageUrl: value })}
+              error={fieldErrors.imageUrl}
+            />
 
             <label className="checkbox-row">
               <input
