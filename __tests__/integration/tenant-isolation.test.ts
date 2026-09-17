@@ -508,6 +508,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     // Phase 17c: ขายกลับบ้านไม่มีโต๊ะ — id เดียวที่รับคือ menuItemId ซึ่งถูกกรองด้วย forStore() อยู่แล้ว
     // (เมนูของร้านอื่น → buildOrderLines หาไม่เจอ → ปฏิเสธ · เทสอยู่ที่ takeaway-sale.test.ts)
     "createTakeawaySale",
+    // QR พร้อมเพย์ของร้านที่ทำงานอยู่ — รับแค่ยอดเงิน ไม่รับ id (เทสอยู่ที่ takeaway-sale.test.ts)
+    "buildStorePromptPayQr",
   ]
 
   type ActionCase = [

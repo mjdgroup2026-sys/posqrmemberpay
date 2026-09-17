@@ -111,7 +111,7 @@ export function KitchenDisplay({ tickets, canEdit = true }: { tickets: KitchenTi
         {pending ? <IconSpinner size={20} className="animate-spin" aria-hidden /> : null}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, alignItems: "start" }}>
+      <div className="kds-columns">
         {columns.map((column) => {
           const columnTickets = ticketsFor(column.key)
           const itemCount = columnTickets.reduce((sum, t) => sum + t.items.length, 0)

@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createSale } from "@/app/actions/sales"
+import { buildStorePromptPayQr, type StorePromptPayQr } from "@/app/actions/staff-order"
 import { formatBaht, formatNumber } from "@/lib/format"
 import type { ProductOption } from "@/lib/queries"
 import {
@@ -63,6 +64,19 @@ export function PosTerminal({
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
+  /// QR พร้อมเพย์ของร้านตามยอดสุทธิ — ขอตอนเลือก "สแกน QR" (2026-09-17)
+  const [qr, setQr] = useState<StorePromptPayQr | null>(null)
+  const [qrError, setQrError] = useState<string | null>(null)
+
+  async function loadQr(amount: number) {
+    setQr(null)
+    setQrError(null)
+    const fd = new FormData()
+    fd.set("amount", String(amount))
+    const result = await buildStorePromptPayQr(fd)
+    if (result.ok && result.data) setQr(result.data)
+    else setQrError(result.ok ? "สร้าง QR ไม่สำเร็จ" : result.error)
+  }
 
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products])
 
@@ -142,6 +156,8 @@ export function PosTerminal({
     setNote("")
     setReceivedText("")
     setPaymentMethod("CASH")
+    setQr(null)
+    setQrError(null)
     setFieldErrors({})
     setReceipt(null)
     searchRef.current?.focus()
@@ -220,7 +236,7 @@ export function PosTerminal({
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr minmax(320px, 400px)", gap: 20, alignItems: "start" }}>
+      <div className="pos-layout">
         <section className="card-ui">
           <div className="panel-head" style={{ flexWrap: "wrap", gap: 10 }}>
             <form className="row" style={{ gap: 10 }} onSubmit={handleSearchSubmit}>
@@ -477,7 +493,10 @@ export function PosTerminal({
                     key={method}
                     type="button"
                     className={method === paymentMethod ? "btn btn-primary btn-sm" : "btn btn-subtle btn-sm"}
-                    onClick={() => setPaymentMethod(method)}
+                    onClick={() => {
+                      setPaymentMethod(method)
+                      if (method === "QR") void loadQr(total)
+                    }}
                   >
                     {PAYMENT_METHOD_LABEL[method]}
                   </button>
@@ -523,6 +542,23 @@ export function PosTerminal({
                   </span>
                 </div>
               </>
+            ) : paymentMethod === "QR" ? (
+              <div className="field" style={{ alignItems: "center", textAlign: "center" }}>
+                {qr ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element -- data URL ที่สร้างสด */}
+                    <img src={qr.dataUrl} alt="QR พร้อมเพย์สำหรับชำระเงิน" width={220} height={220} style={{ borderRadius: 12, border: "1px solid var(--line)" }} />
+                    <span className="t-body">ให้ลูกค้าสแกนจ่าย <strong className="num">฿{formatBaht(qr.amount)}</strong></span>
+                    <span className="t-caption num">พร้อมเพย์ร้าน {qr.maskedId} · เห็นเงินเข้าแล้วค่อยกดยืนยัน</span>
+                  </>
+                ) : qrError ? (
+                  <div className="alert-banner warning">{qrError}</div>
+                ) : (
+                  <span className="t-caption">
+                    <IconSpinner size={16} className="animate-spin" aria-hidden /> กำลังสร้าง QR…
+                  </span>
+                )}
+              </div>
             ) : (
               <p className="t-small">
                 รับเงินเท่ายอดสุทธิ ฿{formatBaht(total)} — ไม่มีเงินทอนสำหรับการชำระแบบ

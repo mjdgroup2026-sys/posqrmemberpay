@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { createStaffTableOrder, createTakeawaySale } from "@/app/actions/staff-order"
+import { buildStorePromptPayQr, createStaffTableOrder, createTakeawaySale, type StorePromptPayQr } from "@/app/actions/staff-order"
 import { formatBaht } from "@/lib/format"
 import type { MenuItemCard, PosTableOption } from "@/lib/queries"
 import {
@@ -75,6 +75,9 @@ export function MenuPos({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodValue>("CASH")
   const [receivedText, setReceivedText] = useState("")
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
+  /// QR พร้อมเพย์ของร้านตามยอดในตะกร้า — ขอจาก server ตอนเลือก "สแกน QR" (ยอดเปลี่ยน = QR เปลี่ยน)
+  const [qr, setQr] = useState<StorePromptPayQr | null>(null)
+  const [qrError, setQrError] = useState<string | null>(null)
 
   const visibleMenu = useMemo(() => {
     const keyword = search.trim().toLowerCase()
@@ -160,6 +163,17 @@ export function MenuPos({
 
   const received = Number(receivedText === "" ? 0 : receivedText)
   const changeDue = paymentMethod === "CASH" ? round2(received - total) : 0
+
+  /// ขอ QR ตามยอดปัจจุบันตอนพนักงานเลือก "สแกน QR" — ยอดในกล่องรับเงินเปลี่ยนไม่ได้ระหว่างเปิด จึงไม่ต้องขอซ้ำ
+  async function loadQr() {
+    setQr(null)
+    setQrError(null)
+    const fd = new FormData()
+    fd.set("amount", String(total))
+    const result = await buildStorePromptPayQr(fd)
+    if (result.ok && result.data) setQr(result.data)
+    else setQrError(result.ok ? "สร้าง QR ไม่สำเร็จ" : result.error)
+  }
 
   async function submitTakeaway() {
     setPending(true)
@@ -417,6 +431,8 @@ export function MenuPos({
             onClick={() => {
               setReceivedText("")
               setPaymentMethod("CASH")
+              setQr(null)
+              setQrError(null)
               setPayOpen(true)
             }}
           >
@@ -458,7 +474,10 @@ export function MenuPos({
                   key={method}
                   type="button"
                   className={`btn btn-sm ${paymentMethod === method ? "btn-primary" : "btn-subtle"}`}
-                  onClick={() => setPaymentMethod(method)}
+                  onClick={() => {
+                    setPaymentMethod(method)
+                    if (method === "QR") void loadQr()
+                  }}
                 >
                   {PAYMENT_METHOD_LABEL[method]}
                 </button>
@@ -483,6 +502,23 @@ export function MenuPos({
                 เงินทอน ฿{formatBaht(changeDue > 0 ? changeDue : 0)}
                 {received > 0 && received < total ? " · เงินที่รับยังไม่พอ" : ""}
               </span>
+            </div>
+          ) : paymentMethod === "QR" ? (
+            <div className="field" style={{ alignItems: "center", textAlign: "center" }}>
+              {qr ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- data URL ที่สร้างสด */}
+                  <img src={qr.dataUrl} alt="QR พร้อมเพย์สำหรับชำระเงิน" width={220} height={220} style={{ borderRadius: 12, border: "1px solid var(--line)" }} />
+                  <span className="t-body">ให้ลูกค้าสแกนจ่าย <strong className="num">฿{formatBaht(qr.amount)}</strong></span>
+                  <span className="t-caption num">พร้อมเพย์ร้าน {qr.maskedId} · เห็นเงินเข้าแล้วค่อยกดยืนยัน</span>
+                </>
+              ) : qrError ? (
+                <div className="alert-banner warning">{qrError}</div>
+              ) : (
+                <span className="t-caption">
+                  <IconSpinner size={16} className="animate-spin" aria-hidden /> กำลังสร้าง QR…
+                </span>
+              )}
             </div>
           ) : (
             <p className="t-body">เก็บเงินเต็มจำนวน ฿{formatBaht(total)} — ไม่มีเงินทอน</p>

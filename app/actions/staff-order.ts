@@ -11,6 +11,9 @@ import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
 import { nextSaleNumber } from "@/lib/sale-number"
 import { businessDayRange } from "@/lib/day"
 import { orderTicketLabel } from "@/lib/order-label"
+import { getStorePaymentProfile } from "@/lib/payment-methods"
+import { buildPromptPayPayload } from "@/lib/promptpay"
+import QRCode from "qrcode"
 import {
   staffTableOrderSchema,
   takeawaySaleSchema,
@@ -365,4 +368,47 @@ function revalidateTakeawayPages(storeId: string) {
   revalidatePath("/pos/closing")
   revalidatePath("/reports")
   revalidatePath("/")
+}
+
+// ───────────────────── QR พร้อมเพย์ให้ลูกค้าสแกนที่หน้าร้าน (2026-09-17) ─────────────────────
+
+export type StorePromptPayQr = {
+  /// รูป QR (data URL) ที่ฝัง payload EMVCo ของร้าน + ยอดที่ต้องจ่าย
+  dataUrl: string
+  /// เลขพร้อมเพย์ปิดบางหลัก ไว้ให้พนักงานอ่านยืนยันกับลูกค้า
+  maskedId: string
+  amount: number
+}
+
+/// สร้าง QR พร้อมเพย์ของร้านตามยอดที่พนักงานกำลังรับเงิน — ใช้ทั้งจอขายอาหาร (กลับบ้าน) และ POS หน้าร้าน
+///
+/// เลขผู้รับมาจาก `getStorePaymentProfile()` เท่านั้น (กติกาข้อ 10) — ไม่มี default จาก env · เป็น QR แบบ "ให้ลูกค้าสแกน
+/// แล้วพนักงานกดยืนยันเอง" ไม่มี callback ปิดบิล (เหมือนโหมด PROMPTPAY_DIRECT ฝั่งลูกค้า) · ร้านที่ยังไม่ตั้งเลข
+/// ได้ข้อความบอกทางไปตั้งค่า ไม่ใช่ QR เปล่า
+export async function buildStorePromptPayQr(formData: FormData): Promise<ActionResult<StorePromptPayQr>> {
+  let ctx: StoreContext
+  try {
+    ctx = await requireStoreAccess(["MO_POS", "ADD"], ["POS", "ADD"])
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+
+  const amount = Number(formData.get("amount") ?? 0)
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "ยอดที่ต้องชำระไม่ถูกต้อง" }
+
+  const profile = await getStorePaymentProfile(ctx.storeId)
+  if (!profile.promptPayId) {
+    return {
+      ok: false,
+      error: "ร้านยังไม่ได้ตั้งเลขพร้อมเพย์ — เจ้าของร้านตั้งได้ที่ ตั้งค่าร้าน → การรับเงินจากลูกค้า",
+    }
+  }
+
+  const payload = buildPromptPayPayload(round2(amount), profile.promptPayId)
+  if (!payload) return { ok: false, error: "เลขพร้อมเพย์ของร้านใช้สร้าง QR ไม่ได้ กรุณาตรวจสอบที่ตั้งค่าร้าน" }
+
+  const dataUrl = await QRCode.toDataURL(payload, { margin: 1, width: 260 })
+  const id = profile.promptPayId
+  const maskedId = id.length > 6 ? `${id.slice(0, 3)}xxxx${id.slice(-3)}` : id
+  return { ok: true, message: "สร้าง QR แล้ว", data: { dataUrl, maskedId, amount: round2(amount) } }
 }
