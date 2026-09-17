@@ -512,22 +512,22 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 ทางสำรอง** (ชะลอเป็น 60 วิเมื่อต่อ SSE ได้) · action ทุกตัวของ Mobile Order + `closeSessionWithPayment` publish event หลังเขียน DB สำเร็จ ·
 เทสใหม่ `realtime.test.ts` (3) + `realtime-routes.test.ts` (4) · ทั้งชุด 522 เทสผ่าน · ดูกติกาข้อ 12
 
-**🚧 Phase 17 กำลังทำ — พนักงานกดขายอาหารเองได้ (มีโต๊ะ/กลับบ้าน) + รูปที่ร้านอัปโหลดเอง** (แบ่ง 3 PR: 17a รูปภาพ →
+**✅ Phase 17 ขึ้น production แล้ว (2026-09-17, PR #16 · CI run 35183575404 · backup `posmobileorderdb-20260917-114435.dump` · migration 5 ไฟล์ applied · ซ้อมบนสำเนา production แล้ว diff สะอาด · ตรวจในฐานจริงหลัง deploy: `_prisma_migrations` = 23 · `MO_POS` = {VIEW,ADD} ครบ 4 บทบาท · `/api/assets/<id>` ตอบ 404 จาก handler ไม่ใช่ 307 = ยืนยันว่าโค้ดใหม่รับ traffic จริง) — พนักงานกดขายอาหารเองได้ (มีโต๊ะ/กลับบ้าน) + รูปที่ร้านอัปโหลดเอง** (ทำเป็น 3 ก้อนใน PR เดียว: 17a รูปภาพ →
 17b ขายผ่านโต๊ะ → 17c ขายกลับบ้าน · ตัดสินใจ 2026-09-17: จอขายใหม่ขายเมนูอาหารอย่างเดียวไม่ยุ่งกับสต็อก · ออร์เดอร์
-กลับบ้านขึ้น KDS ด้วย · แบบมีโต๊ะสั่งก่อน–ปิดบิลทีหลังด้วยเส้นทางเดิม) — **17a เสร็จแล้ว**: `StoreAsset` เก็บไบต์รูปในฐาน
+กลับบ้านขึ้น KDS ด้วย · แบบมีโต๊ะสั่งก่อน–ปิดบิลทีหลังด้วยเส้นทางเดิม) — **17a**: `StoreAsset` เก็บไบต์รูปในฐาน
 (blue/green ไม่มี volume ไฟล์บนดิสก์หายทุก deploy) · `lib/assets.ts` ตรวจชนิดจาก magic bytes **ไม่รับ SVG** เพดาน 300KB ·
 `uploadStoreAsset`/`deleteStoreAsset` · `GET /api/assets/[id]` public + แคช immutable · `components/image-picker.tsx`
 ย่อรูปด้วย canvas ก่อนส่ง ใช้ทั้งฟอร์มเมนูและโลโก้/ปกในตั้งค่าร้าน · รูปเก่าถูกลบในทรานแซคชันเดียวกับการบันทึก ·
 เทส 14 ใหม่ · migration `20260917090000_add_store_asset` additive ล้วน · ไม่มี env ใหม่
 
-**17b เสร็จแล้ว**: resource ใหม่ `MO_POS` (VIEW/ADD · migration 2 ไฟล์ — ADD VALUE แยกจาก backfill ตามข้อบังคับของ PostgreSQL ·
+**17b**: resource ใหม่ `MO_POS` (VIEW/ADD · migration 2 ไฟล์ — ADD VALUE แยกจาก backfill ตามข้อบังคับของ PostgreSQL ·
 backfill ให้บทบาทที่มี `MO_TABLES` อยู่แล้ว) · หน้า `/mobile-order/pos` + `components/menu-pos.tsx` (กริดเมนูมีรูป · dialog
 ตัวเลือกเสริม · ตะกร้า · เลือกโต๊ะ) · `createStaffTableOrder` ใน `app/actions/staff-order.ts` (`MO_POS:ADD` + `requireSellingStore()`
 — **เพิ่มในรายการ action ที่ต้องผ่าน requireSellingStore ตามกติกาข้อ 5**) · **ตรรกะที่ใช้ร่วมห้ามลอก**: `lib/order-lines.ts`
 (`buildOrderLines` — ตรวจ modifier + คิดราคา ใช้ทั้งลูกค้าและพนักงาน) และ `lib/table-session.ts` (`openOrReuseSession` — เปิด/หา
 session ใช้ทั้งสแกน QR, ผังโต๊ะ, จอขาย) · ปิดบิลยังเป็นเส้นทางเดิมทั้งหมด · เทส `staff-table-order.test.ts` 9 เคส
 
-**17c เสร็จแล้ว**: ขายอาหารกลับบ้าน — `Sale.channel = TAKEAWAY` (ไม่มี `tableSessionId` จึงแยกจาก `MOBILE_ORDER` ตามกติกาข้อ 8) ·
+**17c**: ขายอาหารกลับบ้าน — `Sale.channel = TAKEAWAY` (ไม่มี `tableSessionId` จึงแยกจาก `MOBILE_ORDER` ตามกติกาข้อ 8) ·
 `MobileOrder.tableSessionId` เป็น optional แล้ว + `orderType`/`saleId`(unique)/`customerLabel` · `createTakeawaySale` ออกบิล+ออร์เดอร์ครัว
 ในทรานแซคชันเดียว (เลขบิลใต้ advisory lock เดิม · เลขคิว "กลับบ้าน #n" ต่อวันต่อร้านคำนวณใต้ lock ตัวเดียวกัน · **ไม่คิดค่าบริการ
 และไม่แตะสต็อก**) · `voidSale` ยกเลิกรายการในครัวของบิลกลับบ้านด้วย · **ป้ายทิกเก็ตประกอบที่ `lib/order-label.ts` ที่เดียว** —
