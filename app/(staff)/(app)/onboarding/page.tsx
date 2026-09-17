@@ -18,7 +18,9 @@ export default async function OnboardingPage({ searchParams }: PageProps<"/onboa
   // Phase 14c — ถ้ามีแบรนด์ ให้เลือกสร้างเป็นสาขาใต้แบรนด์ + คัดลอกเมนูจากสาขาที่เป็นเจ้าของ
   const brand = await prisma.brand.findFirst({ where: { ownerId: session.user.id }, select: { id: true, name: true } })
   const ownedStores = memberships.filter((m) => m.role === "OWNER").map((m) => ({ id: m.storeId, name: m.name }))
-  const joinBrandDefault = params.brand === "1"
+  // มีแบรนด์อยู่แล้ว = ติ๊ก "สาขาใต้แบรนด์" ให้เป็นค่าเริ่มต้นไม่ว่าเข้าจากปุ่ม + หรือหน้าแบรนด์ (2026-09-17 — เจ้าของระบบ
+  // กด + แล้วสับสนว่าต่างกันยังไง) · คนที่ต้องการร้านอิสระเอาติ๊กออกเอง หรือเปิดด้วย ?brand=0
+  const joinBrandDefault = brand !== null && params.brand !== "0"
 
   return (
     <>
