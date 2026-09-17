@@ -5,14 +5,14 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { cancelOrderItem, markItemServed, reprintKitchenTicket } from "@/app/actions/orders"
+import { cancelOrderItem, markItemServed, reduceOrderItemQuantity, reprintKitchenTicket } from "@/app/actions/orders"
 import { cancelTableSession } from "@/app/actions/tables"
 import { acknowledgeNotification } from "@/app/actions/notifications"
 import { formatBaht, formatClock, formatDateTime, formatNumber } from "@/lib/format"
 import type { OrderItemRow, TableDetail as TableDetailData } from "@/lib/queries"
 import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
-import { IconBack, IconReceipt, IconSpinner } from "@/components/icons"
+import { IconBack, IconPlus, IconReceipt, IconSpinner } from "@/components/icons"
 import {
   Dialog,
   DialogContent,
@@ -35,6 +35,7 @@ export function TableDetail({
   allowed = FULL_ACCESS,
   canAcknowledge = true,
   canKitchen = true,
+  canOrderMore = true,
 }: {
   detail: TableDetailData
   /// สิทธิ์บน MO_TABLES: EDIT ปิดบิล/กดเสิร์ฟ/พิมพ์ทิกเก็ต · DELETE ยกเลิกโต๊ะ/รายการ
@@ -43,12 +44,17 @@ export function TableDetail({
   canAcknowledge?: boolean
   /// MO_KITCHEN:EDIT — กดเสิร์ฟ/พิมพ์ทิกเก็ตได้อีกทาง (action รับได้ทั้งสองสิทธิ์)
   canKitchen?: boolean
+  /// MO_POS:ADD — ปุ่ม "สั่งเพิ่ม" พาไปจอขายโดยเลือกโต๊ะนี้ให้ (F13: เพิ่มจำนวน = รอบใหม่ ทิกเก็ตใหม่)
+  canOrderMore?: boolean
 }) {
   const canServe = allowed.includes("EDIT") || canKitchen
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [cancellingItem, setCancellingItem] = useState<OrderItemRow | null>(null)
   const [itemReason, setItemReason] = useState("")
+  // ลดจำนวน (F13) — ได้เฉพาะรายการที่ครัวยังไม่รับ · เพิ่มจำนวน = ปุ่ม "สั่งเพิ่ม" ไปจอขายเป็นรอบใหม่
+  const [reducingItem, setReducingItem] = useState<OrderItemRow | null>(null)
+  const [reduceTo, setReduceTo] = useState(1)
   const [cancellingTable, setCancellingTable] = useState(false)
   const [tableReason, setTableReason] = useState("")
 
@@ -103,6 +109,16 @@ export function TableDetail({
     }
   }
 
+  async function submitItemReduce(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!reducingItem) return
+    const formData = new FormData()
+    formData.set("id", reducingItem.id)
+    formData.set("quantity", String(reduceTo))
+    const done = await run(() => reduceOrderItemQuantity(formData))
+    if (done) setReducingItem(null)
+  }
+
   async function submitTableCancel(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const formData = new FormData()
@@ -141,6 +157,12 @@ export function TableDetail({
             <span className="dot" />
             ยอดรวม ฿<span className="num">{formatBaht(detail.total)}</span>
           </span>
+          {canOrderMore && detail.status !== "AWAITING_BILL" ? (
+            <Link href={`/mobile-order/pos?table=${detail.tableId}`} className="btn btn-subtle">
+              <IconPlus size={17} aria-hidden />
+              สั่งเพิ่ม
+            </Link>
+          ) : null}
           {allowed.includes("EDIT") ? (
             <Link href={`/mobile-order/tables/${detail.tableId}/billing`} className="btn btn-primary">
               <IconReceipt size={17} aria-hidden />
@@ -280,6 +302,21 @@ export function TableDetail({
                       </button>
                     ) : null}
 
+                    {/* ลดจำนวน (F13) — เฉพาะรายการที่ครัวยังไม่รับและมีมากกว่า 1 · สิทธิ์เดียวกับยกเลิกรายการ */}
+                    {item.status === "AWAITING_KITCHEN" && item.quantity > 1 && allowed.includes("DELETE") ? (
+                      <button
+                        type="button"
+                        className="btn btn-subtle btn-sm"
+                        disabled={pending}
+                        onClick={() => {
+                          setReduceTo(item.quantity - 1)
+                          setReducingItem(item)
+                        }}
+                      >
+                        ลดจำนวน
+                      </button>
+                    ) : null}
+
                     {/* ร้านที่ไม่มี KDS ข้ามจากรอครัวรับไป "เสิร์ฟแล้ว" ได้เลย */}
                     {canServe && (item.status === "READY" || (!detail.hasKDS && item.status === "AWAITING_KITCHEN")) ? (
                       <button
@@ -331,6 +368,53 @@ export function TableDetail({
               <button type="submit" className="btn btn-danger-solid" disabled={pending}>
                 {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : null}
                 ยืนยันยกเลิกรายการ
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reducingItem !== null} onOpenChange={(open) => !open && setReducingItem(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>ลดจำนวน {reducingItem?.menuItemName}</DialogTitle>
+            <DialogDescription>
+              ลดได้เฉพาะรายการที่ครัวยังไม่รับ — ระบบจะบันทึกว่าใครลดจากเท่าไรเป็นเท่าไร · ถ้าต้องการเพิ่ม
+              ให้กด &ldquo;สั่งเพิ่ม&rdquo; เป็นรอบใหม่แทน
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={submitItemReduce} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="field">
+              <label className="t-small" htmlFor="reduceTo">
+                จำนวนใหม่ (เดิม {reducingItem?.quantity ?? 0})
+              </label>
+              <input
+                id="reduceTo"
+                className="input num"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={(reducingItem?.quantity ?? 2) - 1}
+                required
+                autoFocus
+                value={reduceTo}
+                onChange={(e) => setReduceTo(Math.max(1, Number(e.target.value) || 1))}
+              />
+              <span className="field-hint">ลดเหลือ 0 = ใช้ปุ่ม &ldquo;ยกเลิกรายการ&rdquo; แทน (ต้องระบุเหตุผล)</span>
+            </div>
+
+            <DialogFooter>
+              <button type="button" className="btn btn-ghost" onClick={() => setReducingItem(null)}>
+                ยกเลิก
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={pending || !reducingItem || reduceTo >= reducingItem.quantity}
+              >
+                {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : null}
+                ยืนยันลดเหลือ {reduceTo}
               </button>
             </DialogFooter>
           </form>

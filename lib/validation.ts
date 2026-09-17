@@ -180,6 +180,12 @@ export const cancelSessionSchema = z.object({
     .max(200, "เหตุผลยาวเกินไป"),
 })
 
+/// ลดจำนวนรายการอาหารหลังส่งครัวแล้ว (F13) — ทำได้เฉพาะรายการที่ครัวยังไม่รับ
+export const reduceOrderItemSchema = z.object({
+  id: requiredId("ไม่พบรายการอาหารที่ต้องการลดจำนวน"),
+  quantity: positiveInt("จำนวนใหม่"),
+})
+
 export const cancelOrderItemSchema = z.object({
   id: requiredId("ไม่พบรายการอาหารที่ต้องการยกเลิก"),
   reason: z
