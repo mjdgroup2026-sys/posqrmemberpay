@@ -10,6 +10,7 @@ import { ACTIVE_STORE_COOKIE, requireUser, storeErrorMessage } from "@/lib/sessi
 import { provisionStore } from "@/lib/store-provision"
 import { loadStoreContext } from "@/lib/store-context"
 import { copyMenu } from "@/lib/menu-copy"
+import { SAMPLE_MENU_PREFIX } from "@/lib/sample-menu"
 import { createStoreSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -22,9 +23,11 @@ import type { ActionResult } from "@/lib/types"
 /// ข้อมูลตัวอย่างชุดเล็กให้กดเล่นได้ทันทีหลังสร้างร้าน — ร้านลบ/แก้ได้เองทีหลัง
 const SAMPLE_TABLE_CODES = ["T1", "T2", "T3", "T4"] as const
 const SAMPLE_MENU = [
-  { name: "ข้าวผัดกะเพราไก่ไข่ดาว", description: "เมนูตัวอย่าง — แก้ชื่อ/ราคาได้ที่ จัดการเมนูอาหาร", price: "65.00" },
-  { name: "ผัดไทยกุ้งสด", description: "เมนูตัวอย่าง", price: "80.00" },
-  { name: "ชาไทยเย็น", description: "เมนูตัวอย่าง", price: "35.00" },
+  // ชื่อขึ้นต้น "[ตัวอย่าง]" ให้เห็นชัดทุกที่ที่ชื่อเมนูโผล่ (จัดการเมนู/จอขาย/หน้าลูกค้า) — เจ้าของร้านใหม่เคยงงว่า
+  // เมนูมาจากไหน (2026-09-17) · SAMPLE_MENU_PREFIX ใช้ตรวจว่าร้านยังมีเมนูตัวอย่างค้างอยู่ไหม
+  { name: `${SAMPLE_MENU_PREFIX} ข้าวผัดกะเพราไก่ไข่ดาว`, description: "เมนูตัวอย่าง — แก้ชื่อ/ราคา หรือลบทิ้งได้ที่ จัดการเมนูอาหาร", price: "65.00" },
+  { name: `${SAMPLE_MENU_PREFIX} ผัดไทยกุ้งสด`, description: "เมนูตัวอย่าง", price: "80.00" },
+  { name: `${SAMPLE_MENU_PREFIX} ชาไทยเย็น`, description: "เมนูตัวอย่าง", price: "35.00" },
 ] as const
 
 function qrToken() {
@@ -45,11 +48,12 @@ export async function createStore(formData: FormData): Promise<ActionResult<{ st
     themeColor: formData.get("themeColor"),
     joinBrand: formData.get("joinBrand"),
     copyMenuFromStoreId: formData.get("copyMenuFromStoreId"),
+    sampleMenu: formData.get("sampleMenu"),
   })
   if (!parsed.success) {
     return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
   }
-  const { name, slug, themeColor, joinBrand, copyMenuFromStoreId } = parsed.data
+  const { name, slug, themeColor, joinBrand, copyMenuFromStoreId, sampleMenu } = parsed.data
 
   // Phase 14c — แบรนด์ของผู้ใช้ (1 คน = 1 แบรนด์) และสาขาต้นทางที่คัดลอกเมนูได้ (ต้องเป็น OWNER)
   let brandId: string | null = null
@@ -90,6 +94,9 @@ export async function createStore(formData: FormData): Promise<ActionResult<{ st
         await copyMenu(tx, copyMenuFromStoreId, created.id)
         return created.id
       }
+
+      // เจ้าของเลือกไม่ใส่เมนูตัวอย่าง → เริ่มจากเมนูว่าง (โต๊ะ/QR ตัวอย่างยังใส่ให้ ไม่งั้นทดลองสั่งไม่ได้เลย)
+      if (!sampleMenu) return created.id
 
       let order = 0
       for (const item of SAMPLE_MENU) {

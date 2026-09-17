@@ -32,6 +32,7 @@ export function BillingPanel({
   pendingQr,
   platformPromptPay,
   now,
+  trialUsedAt = [],
 }: {
   overview: BillingOverview
   history: SubscriptionRow[]
@@ -39,6 +40,8 @@ export function BillingPanel({
   pendingQr: string | null
   platformPromptPay: string | null
   now: Date
+  /// ร้านอื่นของเจ้าของคนนี้ที่รับสิทธิ์ทดลองไปแล้ว — ใช้เลขพร้อมเพย์เดิมรับซ้ำไม่ได้
+  trialUsedAt?: string[]
 }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
@@ -121,7 +124,9 @@ export function BillingPanel({
         <div className="alert-banner danger">
           {overview.planExpiresAt
             ? "แพ็กเกจหมดอายุแล้ว — ดูข้อมูลเดิมได้ แต่เปิดโต๊ะ/ขาย/รับออเดอร์ใหม่ไม่ได้จนกว่าจะต่ออายุ"
-            : "ร้านยังไม่เปิดใช้งาน — รับสิทธิ์ทดลองฟรี 7 วันด้านล่าง หรือเลือกแพ็กเกจ แล้วจึงเปิดโต๊ะ/ขายได้"}
+            : trialUsedAt.length > 0
+              ? `ร้านยังไม่เปิดใช้งาน — คุณใช้สิทธิ์ทดลองฟรีไปแล้วที่ร้าน ${trialUsedAt.join(", ")} ร้านนี้จึงรับซ้ำด้วยเลขพร้อมเพย์เดิมไม่ได้ เลือกแพ็กเกจด้านล่างเพื่อเปิดใช้งาน`
+              : "ร้านยังไม่เปิดใช้งาน — รับสิทธิ์ทดลองฟรี 7 วันด้านล่าง หรือเลือกแพ็กเกจ แล้วจึงเปิดโต๊ะ/ขายได้"}
         </div>
       ) : null}
 
@@ -132,6 +137,11 @@ export function BillingPanel({
           <p className="t-body" style={{ marginTop: 6 }}>
             กรอกเลขพร้อมเพย์ของร้าน (ที่จะใช้รับเงินจากลูกค้า) เพื่อเปิดใช้งานทันที — 1 เลขพร้อมเพย์รับสิทธิ์ทดลองได้ครั้งเดียว
           </p>
+          {trialUsedAt.length > 0 ? (
+            <div className="alert-banner warning" style={{ marginTop: 10 }}>
+              เลขพร้อมเพย์ที่ใช้รับทดลองที่ร้าน {trialUsedAt.join(", ")} ไปแล้ว ใช้ซ้ำที่นี่ไม่ได้ — ต้องเป็นเลขอื่นที่ยังไม่เคยใช้ ไม่งั้นให้เลือกแพ็กเกจแทน
+            </div>
+          ) : null}
           <form
             onSubmit={(e) => {
               e.preventDefault()

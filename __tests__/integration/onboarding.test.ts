@@ -65,9 +65,22 @@ describe.skipIf(!dbReady)("createStore — สร้างร้านใหม�
     const menu = await db.menuItem.findMany({ where: { storeId } })
     expect(menu).toHaveLength(3)
     expect(menu.every((m) => m.isFeatured && m.isActive)).toBe(true)
+    // ชื่อต้องบอกชัดว่าเป็นตัวอย่าง (2026-09-17 — เจ้าของร้านใหม่เคยงงว่าเมนูมาจากไหน)
+    expect(menu.every((m) => m.name.startsWith("[ตัวอย่าง]"))).toBe(true)
 
     // พาไปทำงานกับร้านใหม่ทันที
     expect(cookieSet).toHaveBeenCalledWith("activeStoreId", storeId, expect.objectContaining({ httpOnly: true }))
+  })
+
+  it("เลือกไม่ใส่เมนูตัวอย่าง → ร้านเริ่มจากเมนูว่าง แต่โต๊ะ/QR ตัวอย่างยังมี", async () => {
+    const db = testPrisma()
+    const result = await createStore(
+      makeFormData({ name: "ครัวคุณแม่", slug: "mom-kitchen", themeColor: "#E8571F", sampleMenu: "off" }),
+    )
+    expect(result.ok).toBe(true)
+    const store = await db.store.findUniqueOrThrow({ where: { slug: "mom-kitchen" } })
+    expect(await db.menuItem.count({ where: { storeId: store.id } })).toBe(0)
+    expect(await db.table.count({ where: { storeId: store.id } })).toBe(4)
   })
 
   it("slug ซ้ำกับร้านที่มีอยู่ → ok:false และไม่มีร้านเพิ่ม", async () => {

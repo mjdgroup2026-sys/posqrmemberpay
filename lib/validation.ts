@@ -481,6 +481,8 @@ export const createStoreSchema = z.object({
   /// Phase 14c: "on" = สร้างเป็นสาขาใต้แบรนด์ของผู้ใช้ · copyMenuFromStoreId = คัดลอกเมนูจากสาขานั้นแทนเมนูตัวอย่าง
   joinBrand: z.union([z.literal("on"), z.literal("")]).nullish().transform((v) => v === "on"),
   copyMenuFromStoreId: z.string().trim().max(64).nullish().transform((v) => v || null),
+  /// ใส่เมนูตัวอย่าง 3 รายการให้ลองใช้ไหม (2026-09-17) — "off" = ไม่ใส่ · ไม่ส่งมา = ใส่ (ของเดิม) · ถูกข้ามเมื่อคัดลอกเมนู
+  sampleMenu: z.union([z.literal("on"), z.literal("off"), z.literal("")]).nullish().transform((v) => v !== "off"),
 })
 
 export const inviteMemberSchema = z.object({

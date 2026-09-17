@@ -3,7 +3,7 @@ import { redirect } from "next/navigation"
 import { resolveStoreContext } from "@/lib/session"
 import { redirectForMissingStore } from "@/lib/permissions"
 import { getBillingOverview, listSubscriptionHistory } from "@/lib/queries"
-import { listActivePlans } from "@/lib/plan-queries"
+import { listActivePlans, listStoresWithTrialClaim } from "@/lib/plan-queries"
 import { buildPromptPayPayload } from "@/lib/promptpay"
 import { BillingPanel } from "@/components/billing-panel"
 
@@ -17,11 +17,15 @@ export default async function BillingPage() {
   const ctx = result.context
   if (ctx.role !== "OWNER") redirect("/access-denied?resource=BILLING")
 
-  const [overview, history, plans] = await Promise.all([
+  // ร้านอื่นของเจ้าของคนนี้ที่รับทดลองไปแล้ว — บอกให้ชัดว่าใช้เลขพร้อมเพย์เดิมรับซ้ำไม่ได้ ก่อนกดแล้วเจอ error (2026-09-17)
+  const otherOwnedIds = ctx.memberships.filter((m) => m.role === "OWNER" && m.storeId !== ctx.storeId).map((m) => m.storeId)
+  const [overview, history, plans, trialUsedIds] = await Promise.all([
     getBillingOverview(ctx.storeId),
     listSubscriptionHistory(ctx.storeId),
     listActivePlans(),
+    listStoresWithTrialClaim(otherOwnedIds),
   ])
+  const trialUsedAt = ctx.memberships.filter((m) => trialUsedIds.includes(m.storeId)).map((m) => m.name)
 
   let pendingQr: string | null = null
   const platformPromptPay = process.env.PLATFORM_PROMPTPAY_ID?.trim() || null
@@ -49,6 +53,7 @@ export default async function BillingPage() {
         pendingQr={pendingQr}
         platformPromptPay={platformPromptPay}
         now={new Date()}
+        trialUsedAt={trialUsedAt}
       />
     </>
   )
