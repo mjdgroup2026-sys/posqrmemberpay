@@ -53,6 +53,7 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
   {
     title: "MJD Mobile Order",
     items: [
+      { href: "/mobile-order/pos", label: "ขายอาหาร", Icon: IconPos, resource: "MO_POS" },
       { href: "/mobile-order/tables", label: "ผังโต๊ะ", Icon: IconTable, resource: "MO_TABLES" },
       { href: "/mobile-order/notifications", label: "การแจ้งเตือน", Icon: IconBell, badge: "pending", resource: "MO_NOTIFICATIONS" },
       { href: "/mobile-order/kitchen", label: "หน้าจอครัว (KDS)", Icon: IconKitchen, resource: "MO_KITCHEN" },

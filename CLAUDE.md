@@ -85,7 +85,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    `switchActiveStore` ก็ใช้ `loadStoreContext()` ตรวจ ไม่ใช่ `StoreMember` ตรง ๆ
    · **(Phase 14b) action ที่ "ขายใหม่" ต้องผ่าน `requireSellingStore()`** (หรือ `guardAction(..., { selling: true })` สำหรับ POS)
    ไม่ใช่ `requireStore()` — แพ็กเกจหมดอายุ = อ่านได้ ขายไม่ได้ (`STORE_EXPIRED`) · ที่ใช้อยู่: `createSale`, `openTableSession`
-   ทั้งสองทาง, `submitOrder` · ห้ามใส่กับปิดบิล/void/รายงาน
+   ทั้งสองทาง, `submitOrder`, `createStaffTableOrder` (Phase 17b) · ห้ามใส่กับปิดบิล/void/รายงาน
 6. **ข้อความที่ผู้ใช้เห็นเป็นภาษาไทยทั้งหมด** รวมถึงข้อความ validation และ error
 7. **(Phase 6+, MJD Mobile Order) เปลี่ยน `MobileOrderItem.status` ต้องเป็น conditional update**
    (`updateMany` + `where: { status: 'AWAITING_KITCHEN' }`) เหมือนกติกากันขายเกินสต็อกในข้อ 4 — ป้องกัน race
@@ -515,7 +515,14 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 (blue/green ไม่มี volume ไฟล์บนดิสก์หายทุก deploy) · `lib/assets.ts` ตรวจชนิดจาก magic bytes **ไม่รับ SVG** เพดาน 300KB ·
 `uploadStoreAsset`/`deleteStoreAsset` · `GET /api/assets/[id]` public + แคช immutable · `components/image-picker.tsx`
 ย่อรูปด้วย canvas ก่อนส่ง ใช้ทั้งฟอร์มเมนูและโลโก้/ปกในตั้งค่าร้าน · รูปเก่าถูกลบในทรานแซคชันเดียวกับการบันทึก ·
-เทส 14 ใหม่ (538 ทั้งชุด) · migration `20260917090000_add_store_asset` additive ล้วน · ไม่มี env ใหม่
+เทส 14 ใหม่ · migration `20260917090000_add_store_asset` additive ล้วน · ไม่มี env ใหม่
+
+**17b เสร็จแล้ว**: resource ใหม่ `MO_POS` (VIEW/ADD · migration 2 ไฟล์ — ADD VALUE แยกจาก backfill ตามข้อบังคับของ PostgreSQL ·
+backfill ให้บทบาทที่มี `MO_TABLES` อยู่แล้ว) · หน้า `/mobile-order/pos` + `components/menu-pos.tsx` (กริดเมนูมีรูป · dialog
+ตัวเลือกเสริม · ตะกร้า · เลือกโต๊ะ) · `createStaffTableOrder` ใน `app/actions/staff-order.ts` (`MO_POS:ADD` + `requireSellingStore()`
+— **เพิ่มในรายการ action ที่ต้องผ่าน requireSellingStore ตามกติกาข้อ 5**) · **ตรรกะที่ใช้ร่วมห้ามลอก**: `lib/order-lines.ts`
+(`buildOrderLines` — ตรวจ modifier + คิดราคา ใช้ทั้งลูกค้าและพนักงาน) และ `lib/table-session.ts` (`openOrReuseSession` — เปิด/หา
+session ใช้ทั้งสแกน QR, ผังโต๊ะ, จอขาย) · ปิดบิลยังเป็นเส้นทางเดิมทั้งหมด · เทส `staff-table-order.test.ts` 9 เคส (549 ทั้งชุด)
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน ·
 **ตัวปรับจำนวนรายการอาหารในหน้า F13** (badge ครบแล้ว — แก้จำนวนหลังส่งครัวต้องมีกติกาชดเชยของตัวเอง รอเจ้าของระบบยืนยันขอบเขต) · ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) —

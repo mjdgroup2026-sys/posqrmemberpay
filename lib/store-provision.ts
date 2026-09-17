@@ -37,6 +37,7 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       MO_NOTIFICATIONS: ["VIEW", "EDIT"],
       MO_MENU: ["VIEW", "ADD", "EDIT", "DELETE"],
       MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_POS: ["VIEW", "ADD"],
     },
   },
   {
@@ -59,6 +60,7 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       MO_NOTIFICATIONS: ["VIEW", "EDIT"],
       MO_MENU: ["VIEW", "ADD", "EDIT", "DELETE"],
       MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
+      MO_POS: ["VIEW", "ADD"],
     },
   },
   {
@@ -78,6 +80,7 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       MO_NOTIFICATIONS: ["VIEW", "EDIT"],
       MO_MENU: ["VIEW"],
       MO_SETUP: ["VIEW"],
+      MO_POS: ["VIEW", "ADD"],
     },
   },
   // Phase 16 — พนักงานที่ทำงานเฉพาะฝั่ง Mobile Order (ไม่เห็นคลังสินค้า/POS) · migration backfill ผูกให้ STAFF
@@ -92,6 +95,7 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       MO_NOTIFICATIONS: ["VIEW", "EDIT"],
       MO_MENU: ["VIEW"],
       MO_SETUP: ["VIEW"],
+      MO_POS: ["VIEW", "ADD"],
     },
   },
 ]

@@ -101,6 +101,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "payment-config": await import("@/app/actions/payment-config"),
       "scb-config": await import("@/app/actions/scb-config"),
       assets: await import("@/app/actions/assets"),
+      "staff-order": await import("@/app/actions/staff-order"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -407,6 +408,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getBillingOverview", (q, a) => q.getBillingOverview(a.storeId)],
     ["getPaymentConfig", (q, a) => q.getPaymentConfig(a.storeId)],
     ["getScbConfig", (q, a) => q.getScbConfig(a.storeId)],
+    ["listTablesForPos", (q, a) => q.listTablesForPos(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -760,6 +762,16 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         return fd
       },
       async (b) => expect(await testPrisma().storeSubscription.count({ where: { storeId: b.storeId, batchId: { not: null } } })).toBe(0),
+    ],
+    [
+      "createStaffTableOrder",
+      (b, a) => {
+        const fd = new FormData()
+        fd.set("tableId", b.tableId)
+        fd.set("items", JSON.stringify([{ menuItemId: a.menuItemId, quantity: 1, optionIds: [] }]))
+        return fd
+      },
+      async (b) => expect(await testPrisma().mobileOrder.count({ where: { storeId: b.storeId } })).toBe(1),
     ],
     [
       "deleteStoreAsset",

@@ -211,6 +211,15 @@ export const submitOrderSchema = z.object({
     .max(100, "รายการในตะกร้ามากเกินไป"),
 })
 
+/// พนักงานกดสั่งแทนลูกค้าจากจอขาย (Phase 17b) — ตะกร้าชุดเดียวกับฝั่งลูกค้า ต่างกันแค่ตัวระบุโต๊ะ
+export const staffTableOrderSchema = z.object({
+  tableId: requiredId("กรุณาเลือกโต๊ะ"),
+  items: z
+    .array(cartLineSchema, { error: "ตะกร้าไม่ถูกต้อง" })
+    .min(1, "กรุณาเลือกเมนูก่อนส่งออร์เดอร์")
+    .max(100, "รายการในตะกร้ามากเกินไป"),
+})
+
 export const callStaffSchema = z.object({
   qrToken: requiredId("ไม่พบ QR Code ของโต๊ะนี้"),
   reason: z

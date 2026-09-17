@@ -1921,15 +1921,18 @@ enum ResourceKey {
 - [x] เก็บกวาดรูปเก่าในทรานแซคชันเดียวกับ `saveMenuItem`/`deleteMenuItem`/`updateStoreSettings`
 - [x] เทส: `__tests__/unit/assets.test.ts` (7) + `__tests__/integration/assets.test.ts` (7) + เพิ่มใน `tenant-isolation`
 
-#### ⏭️ Phase 17b — ขายผ่านโต๊ะ (พนักงานสั่งแทนลูกค้า)
-- [ ] resource ใหม่ `MO_POS` (VIEW/ADD) + backfill ให้บทบาทที่มี `MO_TABLES:ADD`
-- [ ] `lib/order-lines.ts` — ย้ายตัวตรวจ modifier + คิด `unitPrice` ออกจาก `submitOrder` มาใช้ร่วมสองฝั่ง
-- [ ] `createStaffTableOrder` (`app/actions/staff-order.ts`) — `MO_POS:ADD` + `requireSellingStore()` ·
+#### ✅ Phase 17b — ขายผ่านโต๊ะ (พนักงานสั่งแทนลูกค้า)
+- [x] resource ใหม่ `MO_POS` (VIEW/ADD) + migration 2 ไฟล์ (ADD VALUE แยกจาก backfill) ให้บทบาทที่มี `MO_TABLES`
+      — ADD ครบได้ VIEW+ADD · ดูอย่างเดียวได้ VIEW · preset ทุกตัวใน `lib/store-provision.ts` ได้ VIEW+ADD
+- [x] `lib/order-lines.ts` — ย้ายตัวตรวจ modifier + คิด `unitPrice` ออกจาก `submitOrder` มาใช้ร่วมสองฝั่ง
+- [x] `createStaffTableOrder` (`app/actions/staff-order.ts`) — `MO_POS:ADD` + `requireSellingStore()` ·
       หา/เปิด session ของโต๊ะ (คง `assertTableCapacity()`) · กันโต๊ะที่ `AWAITING_BILL` · พิมพ์ทิกเก็ต + SSE หลัง commit
-- [ ] หน้า `/mobile-order/pos` + `components/menu-pos.tsx` (กริดเมนูมีรูป · dialog modifier · ตะกร้า · เลือกโต๊ะ)
+- [x] หน้า `/mobile-order/pos` + `components/menu-pos.tsx` + เมนูใน sidebar (กริดเมนูมีรูป · dialog modifier · ตะกร้า · เลือกโต๊ะ)
       · ปิดบิลใช้เส้นทางเดิม (`/mobile-order/tables/[tableId]/billing`)
-- [ ] เทส `staff-table-order.test.ts` — เปิดโต๊ะใหม่ · สั่งเพิ่มเข้า session เดิม · โต๊ะรอเช็กบิลสั่งไม่ได้ ·
-      ไม่มีสิทธิ์/แพ็กเกจหมดอายุถูกปฏิเสธ
+- [x] เทส `staff-table-order.test.ts` 9 เคส — เปิดโต๊ะใหม่ · สั่งเพิ่มเข้า session เดิม · โต๊ะรอเช็กบิลสั่งไม่ได้ ·
+      ไม่มีสิทธิ์/แพ็กเกจหมดอายุถูกปฏิเสธ · เมนูปิดขาย/ไม่เลือกตัวเลือกบังคับถูกปฏิเสธ · โต๊ะที่ถูกรวมวิ่งเข้าบิลโต๊ะหลัก
+- [x] `lib/table-session.ts` (`openOrReuseSession`) — ตรรกะเปิด/หา session เดียวที่ใช้ร่วมกันทั้งลูกค้าสแกน QR,
+      ผังโต๊ะ และจอขาย (เดิมฝังอยู่ใน `openTableSession` ที่เดียว)
 
 #### ⏭️ Phase 17c — ขายกลับบ้าน (ไม่มีโต๊ะ) + KDS รองรับ
 - [ ] schema: `MobileOrderType` · `MobileOrder.tableSessionId` เป็น optional + `saleId?`/`customerLabel?` ·

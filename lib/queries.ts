@@ -2038,3 +2038,51 @@ export async function getScbConfig(storeId: string): Promise<ScbConfigView> {
     activeSource: active?.source ?? null,
   }
 }
+
+// ───────────────────── จอขายอาหารฝั่งพนักงาน (Phase 17b) ─────────────────────
+
+export type PosTableOption = {
+  id: string
+  code: string
+  status: TableCardStatus
+  /// มีบิลเปิดอยู่แล้วไหม — จอขายบอกพนักงานว่า "สั่งเพิ่มเข้าบิลเดิม" หรือ "เปิดโต๊ะใหม่"
+  hasOpenSession: boolean
+  /// โต๊ะที่ขอเช็กบิลแล้วสั่งเพิ่มไม่ได้ (กติกาเดียวกับฝั่งลูกค้า) — จอขายต้องปิดปุ่มไว้ก่อนถึง server
+  awaitingBill: boolean
+  /// โต๊ะที่ถูกรวมเข้าโต๊ะอื่น — ทุกอย่างวิ่งไปที่โต๊ะหลัก จึงไม่ให้เลือกโดยตรง
+  mergedIntoCode: string | null
+  /// ยอดปัจจุบันของบิลที่เปิดอยู่ (0 ถ้ายังไม่มีรายการ)
+  currentTotal: number
+}
+
+/// รายชื่อโต๊ะสำหรับจอขาย `/mobile-order/pos` — พนักงานเลือกโต๊ะก่อนส่งออร์เดอร์เข้าครัว
+export async function listTablesForPos(storeId: string): Promise<PosTableOption[]> {
+  const db = forStore(storeId)
+  const [tables, sessions, totals] = await Promise.all([
+    db.table.findMany({
+      orderBy: { code: "asc" },
+      select: { id: true, code: true, status: true, primaryTable: { select: { code: true } } },
+    }),
+    db.tableSession.findMany({
+      where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
+      orderBy: { openedAt: "desc" },
+      select: { id: true, tableId: true, status: true },
+    }),
+    liveSessionTotals(storeId),
+  ])
+
+  const sessionByTable = new Map(sessions.map((s) => [s.tableId, s]))
+
+  return tables.map((table) => {
+    const session = sessionByTable.get(table.id)
+    return {
+      id: table.id,
+      code: table.code,
+      status: table.status,
+      hasOpenSession: Boolean(session),
+      awaitingBill: session?.status === "AWAITING_BILL",
+      mergedIntoCode: table.primaryTable?.code ?? null,
+      currentTotal: session ? (totals.get(session.id)?.total ?? 0) : 0,
+    }
+  })
+}

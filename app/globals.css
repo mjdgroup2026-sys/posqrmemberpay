@@ -556,6 +556,59 @@
   }
 }
 
+/* จอขายอาหารฝั่งพนักงาน (Phase 17b) — กริดเมนูมีรูป + ตะกร้าเกาะขวา */
+.pos-layout {
+  display: grid;
+  grid-template-columns: 1fr minmax(320px, 400px);
+  gap: 20px;
+  align-items: start;
+}
+
+.menu-pos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.menu-pos-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.menu-pos-card:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+
+.menu-pos-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.menu-pos-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+
+.menu-pos-thumb-empty {
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+}
+
+/* จอเล็ก (แท็บเล็ตแนวตั้ง/มือถือ) — ตะกร้าลงมาอยู่ใต้เมนูแทนที่จะบีบจนอ่านไม่ออก */
+@media (max-width: 900px) {
+  .pos-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* พิมพ์แผ่น QR Code (Phase 9) — ซ่อนโครงหน้าหลังร้าน เหลือเฉพาะการ์ด QR */
 @media print {
   .qr-sheet {

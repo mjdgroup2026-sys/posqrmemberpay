@@ -48,6 +48,8 @@ export const RESOURCE_ACTIONS: Record<ResourceKey, PermissionAction[]> = {
   MO_MENU: ["VIEW", "ADD", "EDIT", "DELETE"],
   // จัดการโต๊ะ + QR Code: ADD = สร้างโต๊ะ/ออก QR · EDIT = เปลี่ยนชื่อโต๊ะ/พิมพ์ QR ซ้ำ · DELETE = ลบโต๊ะ/ยกเลิก QR
   MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
+  // Phase 17b — จอขายอาหารฝั่งพนักงาน: ADD = กดขาย/ส่งออร์เดอร์เข้าครัว
+  MO_POS: ["VIEW", "ADD"],
 }
 
 export const RESOURCE_LABEL: Record<ResourceKey, string> = {
@@ -66,6 +68,7 @@ export const RESOURCE_LABEL: Record<ResourceKey, string> = {
   MO_NOTIFICATIONS: "การแจ้งเตือน",
   MO_MENU: "จัดการเมนูอาหาร",
   MO_SETUP: "จัดการโต๊ะและ QR Code",
+  MO_POS: "ขายอาหารหน้าร้าน",
 }
 
 export const ACTION_LABEL: Record<PermissionAction, string> = {
@@ -88,6 +91,7 @@ export const ACTION_HINT: Partial<Record<`${ResourceKey}:${PermissionAction}`, s
   "MO_NOTIFICATIONS:EDIT": "กดรับทราบการแจ้งเตือน",
   "MO_SETUP:ADD": "สร้างโต๊ะ/ออก QR Code",
   "MO_SETUP:DELETE": "ลบโต๊ะ/ยกเลิก QR Code",
+  "MO_POS:ADD": "กดขายอาหาร/ส่งออร์เดอร์เข้าครัว",
 }
 
 export type CurrentUserPermissions = {
