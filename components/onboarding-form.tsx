@@ -32,12 +32,25 @@ export type OnboardingBrandProps = {
   ownedStores: { id: string; name: string }[]
   /// เปิดหน้าด้วย ?brand=1 (มาจากหน้าแบรนด์) → ติ๊ก "อยู่ใต้แบรนด์" ให้ล่วงหน้า
   joinBrandDefault: boolean
+  /// ชื่อร้านของผู้ใช้ที่เคยรับสิทธิ์ทดลอง 7 วันไปแล้ว — ว่าง = ยังไม่เคย · ร้านใหม่รับซ้ำด้วยเลขพร้อมเพย์เดิมไม่ได้
+  trialUsedAt?: string[]
 }
 
-export function OnboardingForm({ hasExistingStore, brand, ownedStores, joinBrandDefault }: { hasExistingStore: boolean } & OnboardingBrandProps) {
+export function OnboardingForm({
+  hasExistingStore,
+  brand,
+  ownedStores,
+  joinBrandDefault,
+  trialUsedAt = [],
+}: { hasExistingStore: boolean } & OnboardingBrandProps) {
   const router = useRouter()
   const [joinBrand, setJoinBrand] = useState(joinBrandDefault && brand !== null)
+  // ร้านที่ 2 ขึ้นไปต้องรับรู้ก่อนว่าจะยังขายไม่ได้จนกว่าจะเปิดแพ็กเกจ — กันสร้างเสร็จแล้วงงว่าทำไมเปิดใช้งานไม่ได้
+  const trialUsed = trialUsedAt.length > 0
+  const [ackNoTrial, setAckNoTrial] = useState(!trialUsed)
   const [copyFrom, setCopyFrom] = useState("")
+  // ใส่เมนูตัวอย่าง 3 รายการไหม (2026-09-17) — ค่าเริ่มต้นใส่ · ถูกข้ามอัตโนมัติเมื่อคัดลอกเมนูจากสาขาอื่น
+  const [sampleMenu, setSampleMenu] = useState(true)
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [name, setName] = useState("")
@@ -61,6 +74,7 @@ export function OnboardingForm({ hasExistingStore, brand, ownedStores, joinBrand
     formData.set("themeColor", themeColor)
     if (joinBrand && brand) formData.set("joinBrand", "on")
     if (copyFrom) formData.set("copyMenuFromStoreId", copyFrom)
+    formData.set("sampleMenu", sampleMenu ? "on" : "off")
 
     try {
       const result = await createStore(formData)
@@ -177,8 +191,36 @@ export function OnboardingForm({ hasExistingStore, brand, ownedStores, joinBrand
         </div>
       ) : null}
 
+      {copyFrom ? null : (
+        <label className="checkbox-row">
+          <input type="checkbox" checked={sampleMenu} onChange={(e) => setSampleMenu(e.target.checked)} />
+          <span>
+            ใส่เมนูตัวอย่าง 3 รายการให้ลองใช้
+            <span className="t-caption" style={{ display: "block" }}>
+              ชื่อเมนูจะขึ้นต้นด้วย “[ตัวอย่าง]” ให้รู้ว่าไม่ใช่เมนูจริง — ลบทิ้งได้ที่ จัดการเมนูอาหาร เมื่อเพิ่มเมนูของร้านแล้ว
+            </span>
+          </span>
+        </label>
+      )}
+
+      {trialUsed ? (
+        <div className="alert-banner warning" style={{ display: "block" }}>
+          <strong>ร้านใหม่นี้จะรับสิทธิ์ทดลองฟรี 7 วันซ้ำไม่ได้</strong> — คุณใช้สิทธิ์ไปแล้วที่ร้าน {trialUsedAt.join(", ")}
+          (สิทธิ์ทดลองใช้ได้ครั้งเดียวต่อเลขพร้อมเพย์ ทั่วทั้งระบบ) · สร้างร้านได้ แต่จะ<strong>เปิดโต๊ะ/ขาย/รับออเดอร์ไม่ได้</strong>
+          จนกว่าจะเลือกแพ็กเกจที่หน้า ค่าใช้งาน ของร้านนั้น หรือรับทดลองด้วยเลขพร้อมเพย์อื่นที่ยังไม่เคยใช้
+          <label className="checkbox-row" style={{ marginTop: 10 }}>
+            <input type="checkbox" checked={ackNoTrial} onChange={(e) => setAckNoTrial(e.target.checked)} />
+            <span>เข้าใจแล้ว — ร้านใหม่ต้องเปิดแพ็กเกจก่อนจึงจะขายได้</span>
+          </label>
+        </div>
+      ) : hasExistingStore ? (
+        <div className="alert-banner info">
+          สิทธิ์ทดลองฟรี 7 วันใช้ได้ครั้งเดียวต่อเลขพร้อมเพย์ — ร้านใหม่รับทดลองได้เฉพาะเลขที่ยังไม่เคยใช้ ไม่งั้นต้องเลือกแพ็กเกจก่อนขาย
+        </div>
+      ) : null}
+
       <div className="alert-banner info">
-        ระบบจะเตรียมโต๊ะตัวอย่าง 4 โต๊ะพร้อม QR {copyFrom ? "และคัดลอกเมนูจากสาขาที่เลือก" : "และเมนูตัวอย่าง 3 รายการ"}ให้ลองกดได้ทันที —
+        ระบบจะเตรียมโต๊ะตัวอย่าง 4 โต๊ะพร้อม QR{copyFrom ? " และคัดลอกเมนูจากสาขาที่เลือก" : sampleMenu ? " และเมนูตัวอย่าง 3 รายการ" : ""} ให้ลองกดได้ทันที —
         ลบหรือแก้ทีหลังได้ทั้งหมด
       </div>
 
@@ -188,7 +230,7 @@ export function OnboardingForm({ hasExistingStore, brand, ownedStores, joinBrand
             ยกเลิก
           </button>
         ) : null}
-        <button type="submit" className="btn btn-primary" disabled={pending}>
+        <button type="submit" className="btn btn-primary" disabled={pending || !ackNoTrial}>
           <IconStore size={17} aria-hidden />
           {pending ? "กำลังสร้างร้าน…" : hasExistingStore ? "สร้างร้านเพิ่ม" : "สร้างร้านของฉัน"}
         </button>

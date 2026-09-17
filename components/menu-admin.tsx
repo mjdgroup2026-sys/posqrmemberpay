@@ -9,6 +9,7 @@ import type { ManagedMenuItem } from "@/lib/queries"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconPlus, IconSpinner, IconTrash } from "@/components/icons"
 import { ImagePicker } from "@/components/image-picker"
+import { isSampleMenuName } from "@/lib/sample-menu"
 import {
   Dialog,
   DialogContent,
@@ -145,6 +146,14 @@ export function MenuAdmin({ items, allowed = FULL_ACCESS }: { items: ManagedMenu
         </button>
         ) : null}
       </div>
+
+      {/* เมนูตัวอย่างที่ระบบใส่ให้ตอนสร้างร้าน — บอกให้ชัดว่าไม่ใช่ของร้าน ลบได้เมื่อมีเมนูจริงแล้ว (2026-09-17) */}
+      {items.some((item) => isSampleMenuName(item.name)) ? (
+        <div className="alert-banner info">
+          เมนูที่ขึ้นต้นด้วย “[ตัวอย่าง]” คือเมนูตัวอย่างที่ระบบใส่ให้ตอนสร้างร้านเพื่อให้ลองสั่ง/ดู KDS ได้ทันที —
+          ลบทิ้งได้เลยเมื่อเพิ่มเมนูของร้านแล้ว (ปุ่มลบในแต่ละรายการ)
+        </div>
+      ) : null}
 
       <section className="card-ui">
         <div className="panel-head">

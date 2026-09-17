@@ -65,9 +65,22 @@ describe.skipIf(!dbReady)("createStore — สร้างร้านใหม�
     const menu = await db.menuItem.findMany({ where: { storeId } })
     expect(menu).toHaveLength(3)
     expect(menu.every((m) => m.isFeatured && m.isActive)).toBe(true)
+    // ชื่อต้องบอกชัดว่าเป็นตัวอย่าง (2026-09-17 — เจ้าของร้านใหม่เคยงงว่าเมนูมาจากไหน)
+    expect(menu.every((m) => m.name.startsWith("[ตัวอย่าง]"))).toBe(true)
 
     // พาไปทำงานกับร้านใหม่ทันที
     expect(cookieSet).toHaveBeenCalledWith("activeStoreId", storeId, expect.objectContaining({ httpOnly: true }))
+  })
+
+  it("เลือกไม่ใส่เมนูตัวอย่าง → ร้านเริ่มจากเมนูว่าง แต่โต๊ะ/QR ตัวอย่างยังมี", async () => {
+    const db = testPrisma()
+    const result = await createStore(
+      makeFormData({ name: "ครัวคุณแม่", slug: "mom-kitchen", themeColor: "#E8571F", sampleMenu: "off" }),
+    )
+    expect(result.ok).toBe(true)
+    const store = await db.store.findUniqueOrThrow({ where: { slug: "mom-kitchen" } })
+    expect(await db.menuItem.count({ where: { storeId: store.id } })).toBe(0)
+    expect(await db.table.count({ where: { storeId: store.id } })).toBe(4)
   })
 
   it("slug ซ้ำกับร้านที่มีอยู่ → ok:false และไม่มีร้านเพิ่ม", async () => {
@@ -110,6 +123,61 @@ describe.skipIf(!dbReady)("createStore — สร้างร้านใหม�
     const memberships = await testPrisma().storeMember.findMany({ where: { userId: "newbie" } })
     expect(memberships).toHaveLength(2)
     expect(memberships.every((m) => m.role === "OWNER")).toBe(true)
+  })
+
+  it("★ ร้านแรกยังอยู่ในช่วงทดลอง 7 วัน → สร้างร้าน/สาขาเพิ่มไม่ได้ จนกว่าจะจ่ายแพ็กเกจจริง", async () => {
+    const db = testPrisma()
+    const first = await createStore(validForm())
+    expect(first.ok).toBe(true)
+    const firstId = (await db.store.findUniqueOrThrow({ where: { slug: "mom-kitchen" } })).id
+
+      await db.storeSubscription.create({
+        data: {
+          storeId: firstId,
+          kind: "TRIAL",
+          tier: "S",
+          tableLimit: 12,
+          days: 7,
+          ratePerDay: "10.00",
+          listPrice: "70.00",
+          amount: "0.00",
+          periodStart: new Date(),
+          periodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          status: "PAID",
+          paymentMethod: "PROMPTPAY",
+          requestRef: "SUB-TRIAL01",
+          createdById: "newbie",
+        },
+      })
+
+    const blocked = await createStore(makeFormData({ name: "สาขา 2", slug: "mom-kitchen-2", themeColor: "#01787B" }))
+    expect(blocked.ok).toBe(false)
+    if (!blocked.ok) expect(blocked.error).toContain("ช่วงทดลองใช้งาน")
+    expect(await db.store.count()).toBe(1)
+
+    // จ่ายแพ็กเกจจริงแล้ว (มีแถว PAID ที่ไม่ใช่ TRIAL) → สร้างเพิ่มได้
+    await db.storeSubscription.create({
+        data: {
+          storeId: firstId,
+          kind: "RENEWAL",
+          tier: "S",
+          tableLimit: 12,
+          days: 7,
+          ratePerDay: "10.00",
+          listPrice: "70.00",
+          amount: "70.00",
+          periodStart: new Date(),
+          periodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          status: "PAID",
+          paymentMethod: "PROMPTPAY",
+          requestRef: "SUB-PAID001",
+          createdById: "newbie",
+        },
+      })
+
+    const allowed = await createStore(makeFormData({ name: "สาขา 2", slug: "mom-kitchen-2", themeColor: "#01787B" }))
+    expect(allowed.ok).toBe(true)
+    expect(await db.store.count()).toBe(2)
   })
 
   it("ยังไม่ล็อกอิน → ok:false ไม่มีร้านถูกสร้าง", async () => {
