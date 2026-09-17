@@ -1123,7 +1123,7 @@ enum ResourceKey {
 - [x] CI ด้วย GitHub Actions: build + push image ไป `ghcr.io` (`:latest` + `:sha-xxxx` และ `:latest-migrate`)
 - [x] ตรวจสอบ: `docker compose up` รันแอป + DB ได้ครบ, CI ผ่านและ push image สำเร็จ
 
-### ⏭️ Phase 5 — Production (วันที่ 5)
+### ✅ Phase 5 — Production (วันที่ 5) — ปิดครบ 2026-09-17 (ข้อสุดท้ายคือทดสอบสมัครสมาชิกด้วยอีเมลจริง)
 นำขึ้น production พร้อมความปลอดภัยและการดูแล
 
 - [x] Deploy บน VPS Ubuntu: SSH hardening (ปิด password login, key-only), สร้าง user ไม่ใช่ root
@@ -1233,16 +1233,18 @@ enum ResourceKey {
       - เกณฑ์ผ่าน (ทดสอบบน production): ส่งผ่าน Resend ได้ message id,
         สมัคร → `emailVerified=false` + ไม่ auto sign-in, ล็อกอินก่อนยืนยัน → 403 `EMAIL_NOT_VERIFIED`,
         ขอลิงก์ใหม่ → 200, ไม่มี error ใน log ฝั่งแอป และชื่อภาษาไทยเก็บถูกต้อง (นับไบต์ UTF-8 ไม่เพี้ยน)
-- [ ] ตรวจสอบ: เข้าผ่าน HTTPS ได้, deploy ใหม่ไม่มี downtime, กู้คืนจาก backup ได้,
+- [x] ตรวจสอบ: เข้าผ่าน HTTPS ได้, deploy ใหม่ไม่มี downtime, กู้คืนจาก backup ได้,
       สมัครสมาชิกแล้วได้รับอีเมลยืนยันจริงและยืนยันสำเร็จ,
       ขอลิงก์ลืมรหัสผ่านแล้วได้รับอีเมลจริงและตั้งรหัสผ่านใหม่สำเร็จ
       - [x] เข้าผ่าน HTTPS ได้ (HTTP → HTTPS 301, cert Let's Encrypt ต่ออายุอัตโนมัติ)
       - [x] กู้คืนจาก backup ได้ — ซ้อมด้วย `restore-db.sh --drill` ต้องกู้ครบทุกตารางโดยไม่แตะฐานจริง
-      - [ ] สมัครสมาชิกแล้วได้รับอีเมลยืนยันจริงและยืนยันสำเร็จ (`emailVerified = true` ใน production)
-            > ✅ **ทดสอบได้แล้วตั้งแต่ Phase 14a** (2026-09-15) — `SIGNUP_OPEN=true` บน VPS และ `disableSignUp: false` ใน `lib/auth.ts`
-            > หมายเหตุเดิมที่บอกว่า "ทดสอบไม่ได้เพราะ `disableSignUp: true`" ล้าสมัยแล้ว (แก้ 2026-09-17)
-            > · กลไกส่งอีเมลตัวเดียวกัน (`deliver()` → Resend) พิสูจน์แล้วผ่านเส้นทางลืมรหัสผ่านข้างบน
-            > · **เหลือแค่ลงมือ**: สมัครด้วยอีเมลจริงที่ `/register` → กดลิงก์ในอีเมล → ล็อกอินได้ = ติ๊กข้อนี้
+      - [x] สมัครสมาชิกแล้วได้รับอีเมลยืนยันจริงและยืนยันสำเร็จ (`emailVerified = true` ใน production)
+            > ✅ **ทดสอบบน production แล้ว 2026-09-17** ด้วย Gmail alias ของเจ้าของระบบ: `POST /api/auth/sign-up/email` → 200
+            > + `token: null` (ไม่ auto sign-in) · อีเมลจาก Resend **เข้ากล่องหลัก ไม่ใช่ junk** · ล็อกอินก่อนกดลิงก์ → 403
+            > `EMAIL_NOT_VERIFIED` · กดลิงก์แล้ว `emailVerified` เป็น `true` และล็อกอินได้ 200 · ชื่อไทยเก็บครบ 48 ไบต์ UTF-8
+            > · ⚠️ กับดักตอนทดสอบ: `curl -d "…ไทย…"` บน Windows ส่ง body เป็น codepage ของ console ไม่ใช่ UTF-8 ชื่อจึงถูกเก็บเป็น
+            >   U+FFFD — ต้องเขียน JSON ลงไฟล์ด้วย node แล้ว `--data-binary @file` (ฟอร์มในเบราว์เซอร์ไม่มีปัญหานี้)
+            > · บัญชีทดสอบถูกลบทิ้งหลังทดสอบ
             > ⚠️ กับดัก: ถ้าโดเมนผู้ส่งยังไม่มีเรคคอร์ดของตัวเองใน DNS (query แล้วได้ NXDOMAIN) อีเมล
             > จะเข้า junk — ต้องเพิ่ม TXT `v=spf1 include:amazonses.com -all` ที่ host ของโดเมนผู้ส่ง
             > แล้วรอชื่อเสียงโดเมนสะสม
