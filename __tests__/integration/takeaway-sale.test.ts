@@ -27,11 +27,13 @@ const dbReady = await isTestDbReachable()
 /// ไม่แตะสต็อกสินค้าคลัง · ไม่คิดค่าบริการ · เงินสดไม่พอไม่ผ่าน · void แล้วครัวหยุดทำ
 describe.skipIf(!dbReady)("ขายอาหารกลับบ้าน (Phase 17c)", () => {
   let createTakeawaySale: (formData: FormData) => Promise<ActionResult<TakeawaySaleResult>>
+  let buildStorePromptPayQr: typeof import("@/app/actions/staff-order")["buildStorePromptPayQr"]
   let voidSale: (formData: FormData) => Promise<ActionResult>
   let queries: typeof import("@/lib/queries")
 
   beforeAll(async () => {
     createTakeawaySale = (await import("@/app/actions/staff-order")).createTakeawaySale
+    buildStorePromptPayQr = (await import("@/app/actions/staff-order")).buildStorePromptPayQr
     voidSale = (await import("@/app/actions/sales")).voidSale
     queries = await import("@/lib/queries")
   })
@@ -220,6 +222,35 @@ describe.skipIf(!dbReady)("ขายอาหารกลับบ้าน (Pha
 
     expect(result.ok).toBe(false)
     expect(await db.sale.count()).toBe(0)
+  })
+
+  describe("QR พร้อมเพย์ให้ลูกค้าสแกนที่หน้าร้าน", () => {
+    it("ร้านตั้งเลขพร้อมเพย์แล้ว → ได้ QR ตามยอด + เลขปิดบางหลัก", async () => {
+      await testPrisma().storePaymentConfig.create({ data: { storeId: TEST_STORE_ID, promptPayId: "0812345678" } })
+      const result = await buildStorePromptPayQr(makeFormData({ amount: "160" }))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.data?.dataUrl.startsWith("data:image/png")).toBe(true)
+      expect(result.data?.amount).toBe(160)
+      expect(result.data?.maskedId).toBe("081xxxx678")
+    })
+
+    it("ร้านยังไม่ตั้งเลขพร้อมเพย์ → บอกทางไปตั้งค่า ไม่ใช่ QR เปล่า", async () => {
+      const result = await buildStorePromptPayQr(makeFormData({ amount: "160" }))
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error).toContain("ตั้งค่าร้าน")
+    })
+
+    it("ยอดไม่ถูกต้อง (0 / ติดลบ) → ปฏิเสธ", async () => {
+      await testPrisma().storePaymentConfig.create({ data: { storeId: TEST_STORE_ID, promptPayId: "0812345678" } })
+      expect((await buildStorePromptPayQr(makeFormData({ amount: "0" }))).ok).toBe(false)
+      expect((await buildStorePromptPayQr(makeFormData({ amount: "-5" }))).ok).toBe(false)
+    })
+
+    it("ยังไม่ล็อกอิน → ปฏิเสธ", async () => {
+      setTestUser(null)
+      expect((await buildStorePromptPayQr(makeFormData({ amount: "160" }))).ok).toBe(false)
+    })
   })
 
   it("แพ็กเกจหมดอายุ → ขายกลับบ้านไม่ได้", async () => {

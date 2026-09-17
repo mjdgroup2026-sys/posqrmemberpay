@@ -26,7 +26,7 @@ export default async function StockInPage() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 420px) 1fr", gap: 20, alignItems: "start" }}>
+      <div className="form-split">
         <section className="card-ui card-pad">
           <h2 className="t-h2" style={{ marginBottom: 16 }}>
             บันทึกรายการ

@@ -234,6 +234,7 @@
   }
   .datatable-wrap {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     border-radius: var(--radius);
   }
 
@@ -602,9 +603,31 @@
   border: 1px dashed var(--line);
 }
 
+/* โครงสองคอลัมน์ที่เคยเป็น inline style ตายตัว (2026-09-17 — ล้นจอมือถือ) รวมไว้ที่นี่ให้ยุบเป็นคอลัมน์เดียวบนจอเล็ก */
+.form-split {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.bill-split {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(300px, 380px);
+  gap: 20px;
+  align-items: start;
+}
+.kds-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
 /* จอเล็ก (แท็บเล็ตแนวตั้ง/มือถือ) — ตะกร้าลงมาอยู่ใต้เมนูแทนที่จะบีบจนอ่านไม่ออก */
 @media (max-width: 900px) {
-  .pos-layout {
+  .pos-layout,
+  .form-split,
+  .bill-split,
+  .kds-columns {
     grid-template-columns: 1fr;
   }
 }
@@ -680,6 +703,11 @@
   /* หัวการ์ด: ชื่อกับคำอธิบายห่อลงคนละบรรทัดแทนที่จะบีบชื่อจนหักคำ */
   .panel-head {
     flex-wrap: wrap;
+  }
+  /* ตารางข้อมูล: ห้ามบีบตามจอจนตัวหนังสือหักทีละตัว — ให้กว้างขั้นต่ำแล้วเลื่อนแนวนอนใน .datatable-wrap แทน
+     (ภาพจากเจ้าของระบบ 2026-09-17 หน้าจัดการเมนู) · มีผลทุกหน้าที่ใช้ .datatable-wrap */
+  .datatable-wrap > table {
+    min-width: 640px;
   }
   .topbar-chips:empty {
     display: none;

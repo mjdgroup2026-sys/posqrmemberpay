@@ -85,14 +85,7 @@ export function BillingForm({ bill }: { bill: BillingView }) {
         <div className="alert-banner info">ลูกค้าขอเช็กบิลแล้ว — ยืนยันการรับชำระเงินเพื่อปิดโต๊ะ</div>
       ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(320px, 1fr) minmax(300px, 380px)",
-          gap: 20,
-          alignItems: "start",
-        }}
-      >
+      <div className="bill-split">
         <section className="card-ui card-pad receipt-print">
           <div style={{ textAlign: "center", marginBottom: 12 }}>
             <p style={{ fontWeight: 700, fontSize: "1.05rem" }}>{bill.storeName}</p>
