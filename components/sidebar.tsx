@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { MobileNavClose } from "@/components/mobile-nav"
 import {
   IconDashboard,
   IconProduct,
@@ -132,6 +133,7 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
       <Link href="/" className="row" style={{ gap: 10, padding: "4px 12px 16px" }}>
         <span
           aria-hidden
@@ -154,6 +156,8 @@ export function Sidebar({
           <span className="t-caption">ระบบหลังร้าน</span>
         </span>
       </Link>
+      <MobileNavClose />
+      </div>
 
       <nav style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {visibleGroups.map(({ group, items }, index) => (

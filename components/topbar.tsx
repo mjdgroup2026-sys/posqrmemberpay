@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
 import { IconBell, IconLogout, IconSettings, IconUser, IconWarning } from "@/components/icons"
 import { StoreSwitcher, type StoreOption } from "@/components/store-switcher"
+import { MobileNavToggle } from "@/components/mobile-nav"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,8 +54,12 @@ export function Topbar({ user, lowStockCount, pendingNotificationCount = 0, acti
 
   return (
     <header className="topbar">
-      <div className="row" style={{ gap: 10 }}>
+      {/* แถวหลัก: ☰ + ตัวสลับร้าน · ป้ายแจ้งเตือนแยกกลุ่มไว้ให้ CSS จัดลงแถวสองบนจอเล็กได้ (2026-09-17) */}
+      <div className="row topbar-main" style={{ gap: 10, minWidth: 0 }}>
+        <MobileNavToggle />
         {activeStoreId ? <StoreSwitcher activeStoreId={activeStoreId} stores={stores} /> : null}
+      </div>
+      <div className="row topbar-chips" style={{ gap: 10 }}>
         {pendingNotificationCount > 0 ? (
           <Link href="/mobile-order/notifications" className="chip chip-danger">
             <IconBell size={14} aria-hidden />
@@ -67,7 +72,8 @@ export function Topbar({ user, lowStockCount, pendingNotificationCount = 0, acti
             สินค้าใกล้หมด <span className="num">{lowStockCount}</span> รายการ
           </Link>
         ) : (
-          <span className="chip chip-success">
+          // ป้าย "ปกติ" ไม่มีอะไรให้กด — ซ่อนบนจอเล็กเพื่อให้ตัวสลับร้านกับปุ่มเมนูมีที่พอ
+          <span className="chip chip-success hide-mobile">
             <span className="dot" />
             สต็อกอยู่ในเกณฑ์ปกติ
           </span>
@@ -79,7 +85,7 @@ export function Topbar({ user, lowStockCount, pendingNotificationCount = 0, acti
           render={<button type="button" className="btn btn-ghost" disabled={busy} />}
         >
           <IconUser size={18} aria-hidden />
-          <span>{user.name}</span>
+          <span className="hide-mobile">{user.name}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel>
