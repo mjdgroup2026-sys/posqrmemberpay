@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation"
 import { getSession, resolveStoreContext } from "@/lib/session"
 import { PendingInvites } from "@/components/pending-invites"
+import Link from "next/link"
 import { OnboardingForm } from "@/components/onboarding-form"
 // แบรนด์ของผู้ใช้ (Phase 14c) — อ่านตรงเพราะยังไม่มี storeId ให้ forStore() (หน้านี้ใช้ได้ทั้งคนที่ยังไม่มีร้าน)
 import { prisma } from "@/lib/prisma"
-import { listStoresWithTrialClaim } from "@/lib/plan-queries"
+import { listStoresWithTrialClaim, listTrialOnlyStores } from "@/lib/plan-queries"
 
 export const metadata = { title: "สร้างร้าน" }
 
@@ -25,8 +26,13 @@ export default async function OnboardingPage({ searchParams }: PageProps<"/onboa
 
   // สิทธิ์ทดลอง 7 วันใช้ได้ครั้งเดียวต่อเลขพร้อมเพย์ — ถ้าร้านที่มีอยู่รับไปแล้ว ร้านใหม่จะรับซ้ำด้วยเลขเดิมไม่ได้
   // ต้องบอกตั้งแต่ก่อนสร้าง ไม่ใช่ปล่อยให้สร้างเสร็จแล้วเปิดใช้งานไม่ได้ (เจ้าของระบบเจอจริง 2026-09-17)
-  const trialUsedStoreIds = await listStoresWithTrialClaim(ownedStores.map((s) => s.id))
+  const [trialUsedStoreIds, trialOnlyIds] = await Promise.all([
+    listStoresWithTrialClaim(ownedStores.map((s) => s.id)),
+    listTrialOnlyStores(ownedStores.map((s) => s.id)),
+  ])
   const trialUsedAt = ownedStores.filter((s) => trialUsedStoreIds.includes(s.id)).map((s) => s.name)
+  // ★ ร้านเดิมยังอยู่ในช่วงทดลอง = ห้ามสร้างเพิ่ม (กติกาเจ้าของระบบ 2026-09-17) — โชว์เหตุผลแทนฟอร์ม · ด่านจริงอยู่ใน createStore
+  const trialOnlyStores = ownedStores.filter((s) => trialOnlyIds.includes(s.id))
 
   return (
     <>
@@ -43,6 +49,24 @@ export default async function OnboardingPage({ searchParams }: PageProps<"/onboa
       </div>
 
       {hasExistingStore ? null : <PendingInvites email={session.user.email} />}
+      {trialOnlyStores.length > 0 ? (
+        <section className="card-ui card-pad">
+          <div className="alert-banner warning" style={{ display: "block" }}>
+            <strong>สร้างร้าน/สาขาเพิ่มไม่ได้ในช่วงทดลองใช้งาน</strong>
+            <br />
+            ร้าน {trialOnlyStores.map((s) => s.name).join(", ")} ยังอยู่ในช่วงทดลองฟรี 7 วัน — สิทธิ์ทดลองใช้ได้ครั้งเดียวและร้านใหม่จะรับซ้ำไม่ได้
+            กรุณาเลือกแพ็กเกจและชำระเงินให้ร้านนั้นก่อน จึงจะเพิ่มสาขาได้
+          </div>
+          <div className="row" style={{ gap: 8, marginTop: 14 }}>
+            <Link href="/billing" className="btn btn-primary">
+              ไปหน้าค่าใช้งาน
+            </Link>
+            <Link href="/" className="btn btn-ghost">
+              กลับหน้าแรก
+            </Link>
+          </div>
+        </section>
+      ) : (
       <OnboardingForm
         hasExistingStore={hasExistingStore}
         brand={brand}
@@ -50,6 +74,7 @@ export default async function OnboardingPage({ searchParams }: PageProps<"/onboa
         joinBrandDefault={joinBrandDefault}
         trialUsedAt={trialUsedAt}
       />
+      )}
     </>
   )
 }

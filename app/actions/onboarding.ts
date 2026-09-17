@@ -11,6 +11,7 @@ import { provisionStore } from "@/lib/store-provision"
 import { loadStoreContext } from "@/lib/store-context"
 import { copyMenu } from "@/lib/menu-copy"
 import { SAMPLE_MENU_PREFIX } from "@/lib/sample-menu"
+import { listTrialOnlyStores } from "@/lib/plan-queries"
 import { createStoreSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
@@ -62,6 +63,22 @@ export async function createStore(formData: FormData): Promise<ActionResult<{ st
     if (!brand) return { ok: false, error: "คุณยังไม่มีแบรนด์ — สร้างแบรนด์ที่หน้า แบรนด์ ก่อน หรือสร้างร้านโดยไม่ผูกแบรนด์" }
     brandId = brand.id
   }
+  // ★ ห้ามสร้างร้านเพิ่มระหว่างร้านเดิมยังทดลองใช้อยู่ (กติกาเจ้าของระบบ 2026-09-17) — ด่านจริงอยู่ที่นี่
+  //   หน้า /onboarding ซ่อนฟอร์มให้ด้วย แต่ action ถูกเรียกตรงได้ (กติกาข้อ 5)
+  {
+    const access = await loadStoreContext(prisma, userId, null)
+    const memberships = access.ok ? access.context.memberships : access.memberships
+    const owned = memberships.filter((m) => m.role === "OWNER")
+    const trialOnly = await listTrialOnlyStores(owned.map((m) => m.storeId))
+    if (trialOnly.length > 0) {
+      const names = owned.filter((m) => trialOnly.includes(m.storeId)).map((m) => m.name).join(", ")
+      return {
+        ok: false,
+        error: `สร้างร้าน/สาขาเพิ่มไม่ได้ในช่วงทดลองใช้งาน — ร้าน ${names} ยังอยู่ในช่วงทดลอง 7 วัน กรุณาเลือกแพ็กเกจและชำระเงินให้ร้านนั้นก่อน`,
+      }
+    }
+  }
+
   if (copyMenuFromStoreId) {
     const access = await loadStoreContext(prisma, userId, null)
     const memberships = access.ok ? access.context.memberships : access.memberships

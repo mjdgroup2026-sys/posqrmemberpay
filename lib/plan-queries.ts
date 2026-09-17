@@ -54,3 +54,23 @@ export async function listStoresWithTrialClaim(storeIds: string[]): Promise<stri
   })
   return rows.map((r) => r.storeId)
 }
+
+/// ร้านในรายการนี้ร้านไหน "ยังอยู่ในช่วงทดลอง" — มีสิทธิ์ทดลอง 7 วันแล้วแต่ยังไม่เคยจ่ายแพ็กเกจจริง (2026-09-17)
+///
+/// กติกาจากเจ้าของระบบ: **ห้ามสร้างร้าน/สาขาเพิ่มระหว่างทดลองใช้งาน** — ต้องเลือกแพ็กเกจและชำระเงินให้ร้านแรกก่อน
+/// (กันคนวนเปิดร้านใหม่ใช้ฟรีไปเรื่อย ๆ และกันเจ้าของสร้างสาขาแล้วเปิดใช้งานไม่ได้เพราะรับทดลองซ้ำไม่ได้)
+/// "จ่ายจริง" = มีแถว PAID ที่ไม่ใช่ TRIAL (RENEWAL/UPGRADE หรือ CUSTOM ที่ผู้ดูแลเติมให้ — รวมร้านเดิมที่ backfill)
+export async function listTrialOnlyStores(storeIds: string[]): Promise<string[]> {
+  if (storeIds.length === 0) return []
+  const rows = await prisma.storeSubscription.findMany({
+    where: { storeId: { in: storeIds }, status: "PAID" },
+    select: { storeId: true, kind: true },
+  })
+  const trial = new Set<string>()
+  const paid = new Set<string>()
+  for (const row of rows) {
+    if (row.kind === "TRIAL") trial.add(row.storeId)
+    else paid.add(row.storeId)
+  }
+  return [...trial].filter((id) => !paid.has(id))
+}

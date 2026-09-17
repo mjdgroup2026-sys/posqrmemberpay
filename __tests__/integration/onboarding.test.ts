@@ -125,6 +125,61 @@ describe.skipIf(!dbReady)("createStore — สร้างร้านใหม�
     expect(memberships.every((m) => m.role === "OWNER")).toBe(true)
   })
 
+  it("★ ร้านแรกยังอยู่ในช่วงทดลอง 7 วัน → สร้างร้าน/สาขาเพิ่มไม่ได้ จนกว่าจะจ่ายแพ็กเกจจริง", async () => {
+    const db = testPrisma()
+    const first = await createStore(validForm())
+    expect(first.ok).toBe(true)
+    const firstId = (await db.store.findUniqueOrThrow({ where: { slug: "mom-kitchen" } })).id
+
+      await db.storeSubscription.create({
+        data: {
+          storeId: firstId,
+          kind: "TRIAL",
+          tier: "S",
+          tableLimit: 12,
+          days: 7,
+          ratePerDay: "10.00",
+          listPrice: "70.00",
+          amount: "0.00",
+          periodStart: new Date(),
+          periodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          status: "PAID",
+          paymentMethod: "PROMPTPAY",
+          requestRef: "SUB-TRIAL01",
+          createdById: "newbie",
+        },
+      })
+
+    const blocked = await createStore(makeFormData({ name: "สาขา 2", slug: "mom-kitchen-2", themeColor: "#01787B" }))
+    expect(blocked.ok).toBe(false)
+    if (!blocked.ok) expect(blocked.error).toContain("ช่วงทดลองใช้งาน")
+    expect(await db.store.count()).toBe(1)
+
+    // จ่ายแพ็กเกจจริงแล้ว (มีแถว PAID ที่ไม่ใช่ TRIAL) → สร้างเพิ่มได้
+    await db.storeSubscription.create({
+        data: {
+          storeId: firstId,
+          kind: "RENEWAL",
+          tier: "S",
+          tableLimit: 12,
+          days: 7,
+          ratePerDay: "10.00",
+          listPrice: "70.00",
+          amount: "70.00",
+          periodStart: new Date(),
+          periodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          status: "PAID",
+          paymentMethod: "PROMPTPAY",
+          requestRef: "SUB-PAID001",
+          createdById: "newbie",
+        },
+      })
+
+    const allowed = await createStore(makeFormData({ name: "สาขา 2", slug: "mom-kitchen-2", themeColor: "#01787B" }))
+    expect(allowed.ok).toBe(true)
+    expect(await db.store.count()).toBe(2)
+  })
+
   it("ยังไม่ล็อกอิน → ok:false ไม่มีร้านถูกสร้าง", async () => {
     setTestUser(null)
     const result = await createStore(validForm())
