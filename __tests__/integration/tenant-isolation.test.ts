@@ -505,6 +505,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "getScbTestStatus",
     // Phase 17a: อัปโหลดรูปเข้าร้านที่ทำงานอยู่เสมอ (ไม่รับ id ของร้านอื่น)
     "uploadStoreAsset",
+    // Phase 17c: ขายกลับบ้านไม่มีโต๊ะ — id เดียวที่รับคือ menuItemId ซึ่งถูกกรองด้วย forStore() อยู่แล้ว
+    // (เมนูของร้านอื่น → buildOrderLines หาไม่เจอ → ปฏิเสธ · เทสอยู่ที่ takeaway-sale.test.ts)
+    "createTakeawaySale",
   ]
 
   type ActionCase = [

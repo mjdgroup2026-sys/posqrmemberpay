@@ -140,7 +140,7 @@ export function KitchenDisplay({ tickets, canEdit = true }: { tickets: KitchenTi
                     style={{ display: "flex", flexDirection: "column", gap: 8 }}
                   >
                     <div className="row" style={{ justifyContent: "space-between" }}>
-                      <span style={{ fontWeight: 700 }}>โต๊ะ {ticket.tableCode}</span>
+                      <span style={{ fontWeight: 700 }}>{ticket.orderType === "TAKEAWAY" ? ticket.tableCode : `โต๊ะ ${ticket.tableCode}`}</span>
                       <LiveElapsed since={ticket.submittedAt} />
                     </div>
                     <span className="t-caption num">

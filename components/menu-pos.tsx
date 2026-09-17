@@ -3,11 +3,19 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { createStaffTableOrder } from "@/app/actions/staff-order"
+import { createStaffTableOrder, createTakeawaySale } from "@/app/actions/staff-order"
 import { formatBaht } from "@/lib/format"
 import type { MenuItemCard, PosTableOption } from "@/lib/queries"
-import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
-import { IconPlus, IconSearch, IconSpinner, IconTrash, IconTable } from "@/components/icons"
+import {
+  FULL_ACCESS,
+  PAYMENT_METHOD_LABEL,
+  RETAIL_PAYMENT_METHODS,
+  type AllowedActions,
+  type PaymentMethodValue,
+  type ReceiptData,
+} from "@/lib/types"
+import { Receipt } from "@/components/receipt"
+import { IconPlus, IconSearch, IconSpinner, IconTrash, IconTable, IconWallet } from "@/components/icons"
 import {
   Dialog,
   DialogContent,
@@ -56,6 +64,14 @@ export function MenuPos({
   const [tableId, setTableId] = useState("")
   const [pending, setPending] = useState(false)
   const [customizing, setCustomizing] = useState<MenuItemCard | null>(null)
+
+  /// TABLE = สั่งเข้าโต๊ะแล้วปิดบิลทีหลัง · TAKEAWAY = กลับบ้าน รับเงินตอนสั่ง (Phase 17c)
+  const [mode, setMode] = useState<"TABLE" | "TAKEAWAY">("TABLE")
+  const [customerLabel, setCustomerLabel] = useState("")
+  const [payOpen, setPayOpen] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodValue>("CASH")
+  const [receivedText, setReceivedText] = useState("")
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null)
 
   const visibleMenu = useMemo(() => {
     const keyword = search.trim().toLowerCase()
@@ -139,6 +155,74 @@ export function MenuPos({
     }
   }
 
+  const received = Number(receivedText === "" ? 0 : receivedText)
+  const changeDue = paymentMethod === "CASH" ? round2(received - total) : 0
+
+  async function submitTakeaway() {
+    setPending(true)
+    try {
+      const fd = new FormData()
+      fd.set(
+        "items",
+        JSON.stringify(
+          cart.map((line) => ({
+            menuItemId: line.menuItemId,
+            quantity: line.quantity,
+            optionIds: line.optionIds,
+            note: line.note,
+          })),
+        ),
+      )
+      fd.set("paymentMethod", paymentMethod)
+      fd.set("amountReceived", paymentMethod === "CASH" ? String(received) : String(total))
+      fd.set("customerLabel", customerLabel.trim())
+
+      const result = await createTakeawaySale(fd)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+
+      toast.success(result.message ?? "รับเงินเรียบร้อยแล้ว")
+      setReceipt(result.data?.receipt ?? null)
+      setCart([])
+      setCustomerLabel("")
+      setReceivedText("")
+      setPayOpen(false)
+      router.refresh()
+    } catch {
+      toast.error("รับเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+    } finally {
+      setPending(false)
+    }
+  }
+
+  // ใบเสร็จของบิลกลับบ้าน — กินพื้นที่ทั้งหน้าเหมือนหน้า /pos เพื่อให้กดพิมพ์ได้ทันที
+  if (receipt) {
+    return (
+      <>
+        <div className="page-head no-print">
+          <div>
+            <p className="t-eyebrow">ขายอาหาร</p>
+            <h1 className="t-h1">รับเงินเรียบร้อย</h1>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn btn-subtle" onClick={() => window.print()}>
+              พิมพ์ใบเสร็จ
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => setReceipt(null)}>
+              <IconPlus size={17} aria-hidden /> เริ่มบิลใหม่
+            </button>
+          </div>
+        </div>
+
+        <section className="card-ui card-pad" style={{ maxWidth: 420, margin: "0 auto", width: "100%" }}>
+          <Receipt data={receipt} />
+        </section>
+      </>
+    )
+  }
+
   return (
     <div className="pos-layout">
       <section className="card-ui card-pad">
@@ -186,7 +270,41 @@ export function MenuPos({
           <span className="t-caption num">{cart.length} รายการ</span>
         </div>
 
-        <div className="field" style={{ marginTop: 12 }}>
+        <div className="row" style={{ gap: 8, marginTop: 12 }}>
+          <button
+            type="button"
+            className={`btn btn-sm ${mode === "TABLE" ? "btn-primary" : "btn-subtle"}`}
+            onClick={() => setMode("TABLE")}
+          >
+            <IconTable size={16} aria-hidden /> ขายเข้าโต๊ะ
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${mode === "TAKEAWAY" ? "btn-primary" : "btn-subtle"}`}
+            onClick={() => setMode("TAKEAWAY")}
+          >
+            <IconWallet size={16} aria-hidden /> กลับบ้าน
+          </button>
+        </div>
+
+        {mode === "TAKEAWAY" ? (
+          <div className="field" style={{ marginTop: 12 }}>
+            <label className="t-small" htmlFor="posCustomer">
+              ชื่อลูกค้า / เบอร์ 4 ตัวท้าย (ไม่บังคับ)
+            </label>
+            <input
+              id="posCustomer"
+              className="input"
+              maxLength={40}
+              value={customerLabel}
+              onChange={(e) => setCustomerLabel(e.target.value)}
+              placeholder="เช่น คุณเอ หรือ 1234"
+            />
+            <span className="field-hint">ใช้เรียกลูกค้ามารับ — ขึ้นบนทิกเก็ตครัวแทนเลขโต๊ะ</span>
+          </div>
+        ) : null}
+
+        <div className="field" style={{ marginTop: 12, display: mode === "TABLE" ? undefined : "none" }}>
           <label className="t-small" htmlFor="posTable">
             โต๊ะ
           </label>
@@ -272,16 +390,36 @@ export function MenuPos({
           <span className="t-h3 num">฿{formatBaht(total)}</span>
         </div>
 
-        <button
-          type="button"
-          className="btn btn-primary btn-block btn-lg"
-          style={{ marginTop: 12 }}
-          disabled={!canSell || pending || cart.length === 0 || !tableId}
-          onClick={submit}
-        >
-          {pending ? <IconSpinner size={18} className="animate-spin" aria-hidden /> : <IconPlus size={18} aria-hidden />}
-          ส่งเข้าครัว
-        </button>
+        {mode === "TABLE" ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-block btn-lg"
+            style={{ marginTop: 12 }}
+            disabled={!canSell || pending || cart.length === 0 || !tableId}
+            onClick={submit}
+          >
+            {pending ? (
+              <IconSpinner size={18} className="animate-spin" aria-hidden />
+            ) : (
+              <IconPlus size={18} aria-hidden />
+            )}
+            ส่งเข้าครัว
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary btn-block btn-lg"
+            style={{ marginTop: 12 }}
+            disabled={!canSell || pending || cart.length === 0}
+            onClick={() => {
+              setReceivedText("")
+              setPaymentMethod("CASH")
+              setPayOpen(true)
+            }}
+          >
+            <IconWallet size={18} aria-hidden /> รับเงินและส่งเข้าครัว
+          </button>
+        )}
 
         {!canSell ? (
           <span className="field-hint" style={{ marginTop: 8 }}>
@@ -289,7 +427,7 @@ export function MenuPos({
           </span>
         ) : null}
 
-        {selectedTable?.hasOpenSession ? (
+        {mode === "TABLE" && selectedTable?.hasOpenSession ? (
           <a
             className="btn btn-subtle btn-block"
             style={{ marginTop: 8 }}
@@ -299,6 +437,70 @@ export function MenuPos({
           </a>
         ) : null}
       </section>
+
+      <Dialog open={payOpen} onOpenChange={(open) => (pending ? null : setPayOpen(open))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>รับเงิน — อาหารกลับบ้าน</DialogTitle>
+            <DialogDescription>
+              ยอดที่ต้องชำระ ฿{formatBaht(total)} · ออกบิลและส่งเข้าครัวพร้อมกันในขั้นตอนเดียว
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="field">
+            <span className="t-small">วิธีชำระเงิน</span>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              {RETAIL_PAYMENT_METHODS.map((method) => (
+                <button
+                  key={method}
+                  type="button"
+                  className={`btn btn-sm ${paymentMethod === method ? "btn-primary" : "btn-subtle"}`}
+                  onClick={() => setPaymentMethod(method)}
+                >
+                  {PAYMENT_METHOD_LABEL[method]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {paymentMethod === "CASH" ? (
+            <div className="field">
+              <label className="t-small" htmlFor="posReceived">
+                รับเงินมา (บาท)
+              </label>
+              <input
+                id="posReceived"
+                className="input num"
+                inputMode="decimal"
+                value={receivedText}
+                onChange={(e) => setReceivedText(e.target.value)}
+                placeholder={String(total)}
+              />
+              <span className="field-hint num">
+                เงินทอน ฿{formatBaht(changeDue > 0 ? changeDue : 0)}
+                {received > 0 && received < total ? " · เงินที่รับยังไม่พอ" : ""}
+              </span>
+            </div>
+          ) : (
+            <p className="t-body">เก็บเงินเต็มจำนวน ฿{formatBaht(total)} — ไม่มีเงินทอน</p>
+          )}
+
+          <DialogFooter>
+            <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setPayOpen(false)}>
+              ยกเลิก
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={pending || (paymentMethod === "CASH" && received < total)}
+              onClick={submitTakeaway}
+            >
+              {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : null}
+              ยืนยันรับเงิน ฿{formatBaht(total)}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {customizing ? (
         <CustomizeDialog

@@ -1,15 +1,24 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { forStore } from "@/lib/db"
+import { forStore, type StoreTx } from "@/lib/db"
 import { requireSellingStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { buildOrderLines, OrderLineError, type OrderLine } from "@/lib/order-lines"
 import { openOrReuseSession, SessionError } from "@/lib/table-session"
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
-import { staffTableOrderSchema, parseCartJson, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
-import type { ActionResult } from "@/lib/types"
+import { nextSaleNumber } from "@/lib/sale-number"
+import { businessDayRange } from "@/lib/day"
+import { orderTicketLabel } from "@/lib/order-label"
+import {
+  staffTableOrderSchema,
+  takeawaySaleSchema,
+  parseCartJson,
+  firstIssueMessage,
+  zodToFieldErrors,
+} from "@/lib/validation"
+import type { ActionResult, ReceiptData } from "@/lib/types"
 
 /// จอขายอาหารฝั่งพนักงาน (Phase 17b) — พนักงานกดสั่งแทนลูกค้าที่โต๊ะ
 ///
@@ -172,4 +181,188 @@ async function printTicketAfterCommit(
     await db.mobileOrder.update({ where: { id: order.id }, data: { printedAt: new Date() } })
   }
   return printed
+}
+
+// ───────────────────── ขายกลับบ้าน (Phase 17c) ─────────────────────
+
+/// เลขคิวของออร์เดอร์กลับบ้าน — เดินต่อรายวันต่อร้าน (ครัวเรียก "กลับบ้าน #3" ไม่ใช่เลขบิลยาว ๆ)
+///
+/// ปลอดภัยเพราะถูกเรียก **หลัง** `nextSaleNumber()` ซึ่งจับ `pg_advisory_xact_lock` ต่อร้านไว้แล้ว
+/// ในทรานแซคชันเดียวกัน — คำขอที่วิ่งพร้อมกันจึงต่อคิวกันอยู่ดี ไม่ต้องมี lock ตัวที่สอง
+async function nextTakeawayNumber(tx: StoreTx, storeId: string): Promise<number> {
+  const { start, end } = businessDayRange()
+  const last = await tx.mobileOrder.findFirst({
+    where: { storeId, orderType: "TAKEAWAY", submittedAt: { gte: start, lt: end } },
+    orderBy: { orderNumber: "desc" },
+    select: { orderNumber: true },
+  })
+  return (last?.orderNumber ?? 0) + 1
+}
+
+export type TakeawaySaleResult = {
+  orderId: string
+  orderNumber: number
+  receipt: ReceiptData
+  printed: boolean
+}
+
+/// พนักงานขายอาหารกลับบ้าน — รับเงินตอนสั่ง ออกบิลทันที และส่งเข้าครัวในทรานแซคชันเดียวกัน
+///
+/// ต่างจากบิลของโต๊ะตรงที่ **ไม่มี TableSession** จึงใช้ `channel = TAKEAWAY` (กติกาข้อ 8 สงวน
+/// MOBILE_ORDER ไว้ให้บิลที่มี tableSessionId เสมอ) · **ไม่คิดค่าบริการ** เพราะค่าบริการเป็นของการนั่งกินที่ร้าน
+/// · เมนูอาหารไม่มีสต็อกในระบบ จึงไม่ตัด `Product.quantity` และไม่มี `StockTransaction`
+export async function createTakeawaySale(formData: FormData): Promise<ActionResult<TakeawaySaleResult>> {
+  let ctx: StoreContext
+  try {
+    ctx = await requireStoreAccess(["MO_POS", "ADD"])
+    await requireSellingStore()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
+
+  const parsed = takeawaySaleSchema.safeParse({
+    items: parseCartJson(formData.get("items")),
+    paymentMethod: formData.get("paymentMethod") ?? "",
+    amountReceived: formData.get("amountReceived") ?? 0,
+    customerLabel: formData.get("customerLabel") ?? undefined,
+  })
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: firstIssueMessage(parsed.error),
+      fieldErrors: zodToFieldErrors(parsed.error),
+    }
+  }
+
+  const { items, paymentMethod, amountReceived, customerLabel } = parsed.data
+
+  // เลขบิลชนกันได้ถ้ามีคนกดรับเงินพร้อมกัน — เจอ P2002 แล้ว retry ทั้งทรานแซคชันใหม่ (เหมือน createSale)
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const created = await db.$transaction(async (tx) => {
+        const rows = await buildOrderLines(tx, items)
+        const total = round2(rows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0))
+
+        if (paymentMethod === "CASH" && amountReceived < total) {
+          throw new StaffOrderAbort(`เงินที่รับไม่พอ — ต้องชำระ ${total.toFixed(2)} บาท`)
+        }
+        // โอน/QR ไม่มีเงินทอน — บังคับให้ตรงยอดเสมอ ไม่เชื่อค่าที่ client ส่งมา (เหมือนหน้า POS)
+        const received = paymentMethod === "CASH" ? round2(amountReceived) : total
+        const changeDue = paymentMethod === "CASH" ? round2(received - total) : 0
+
+        const saleNumber = await nextSaleNumber(tx, storeId)
+
+        const sale = await tx.sale.create({
+          data: {
+            storeId,
+            saleNumber,
+            channel: "TAKEAWAY",
+            subtotal: total.toFixed(2),
+            discount: "0.00",
+            total: total.toFixed(2),
+            paymentMethod,
+            amountReceived: received.toFixed(2),
+            changeDue: changeDue.toFixed(2),
+            note: customerLabel ? `กลับบ้าน · ${customerLabel}` : "กลับบ้าน",
+            cashierId: ctx.user.id,
+            items: {
+              create: rows.map((row) => ({
+                menuItemId: row.menuItemId,
+                name: row.menuItemName,
+                quantity: row.quantity,
+                unitPrice: row.unitPrice.toFixed(2),
+                subtotal: round2(row.unitPrice * row.quantity).toFixed(2),
+              })),
+            },
+          },
+          select: { id: true, saleNumber: true, createdAt: true },
+        })
+
+        const orderNumber = await nextTakeawayNumber(tx, storeId)
+        const order = await tx.mobileOrder.create({
+          data: {
+            storeId,
+            orderType: "TAKEAWAY",
+            saleId: sale.id,
+            customerLabel: customerLabel ?? null,
+            orderNumber,
+            items: {
+              create: rows.map((row) => ({
+                menuItemId: row.menuItemId,
+                quantity: row.quantity,
+                unitPrice: row.unitPrice.toFixed(2),
+                note: row.note,
+                selectedOptionsSnapshot: row.options,
+              })),
+            },
+          },
+          select: { id: true, orderNumber: true, submittedAt: true },
+        })
+
+        const receipt: ReceiptData = {
+          id: sale.id,
+          saleNumber: sale.saleNumber,
+          createdAt: sale.createdAt.toISOString(),
+          cashierName: ctx.user.name,
+          items: rows.map((row) => ({
+            productId: row.menuItemId,
+            name: row.menuItemName,
+            quantity: row.quantity,
+            unitPrice: row.unitPrice,
+            subtotal: round2(row.unitPrice * row.quantity),
+          })),
+          subtotal: total,
+          discount: 0,
+          total,
+          paymentMethod,
+          amountReceived: received,
+          changeDue,
+          note: customerLabel ? `กลับบ้าน · ${customerLabel}` : "กลับบ้าน",
+        }
+
+        return { order, rows, receipt }
+      })
+
+      const label = orderTicketLabel({
+        orderType: "TAKEAWAY",
+        tableCode: null,
+        orderNumber: created.order.orderNumber,
+        customerLabel,
+      })
+      const printed = await printTicketAfterCommit(db, created.order, label, created.rows)
+
+      revalidateTakeawayPages(storeId)
+      return {
+        ok: true,
+        message: `รับเงินและส่งเข้าครัวแล้ว — บิล ${created.receipt.saleNumber} (${label})`,
+        data: {
+          orderId: created.order.id,
+          orderNumber: created.order.orderNumber,
+          receipt: created.receipt,
+          printed,
+        },
+      }
+    } catch (error) {
+      if (error instanceof StaffOrderAbort) return { ok: false, error: error.reason }
+      if (error instanceof OrderLineError) return { ok: false, error: error.reason }
+      // เลขบิลชนกัน — วนไปออกเลขใหม่ (ทุกอย่างถูก rollback ไปแล้ว)
+      if ((error as { code?: string }).code === "P2002") continue
+      return { ok: false, error: "รับเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+    }
+  }
+
+  return { ok: false, error: "ออกเลขที่บิลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+}
+
+/// บิลกลับบ้านโผล่ในทุกหน้ารายงานเหมือนบิลอื่น จึง revalidate ให้ครบ (กติกาข้อ 8)
+function revalidateTakeawayPages(storeId: string) {
+  publishStoreEvent(storeId, "orders")
+  revalidatePath("/mobile-order/pos")
+  revalidatePath("/mobile-order/kitchen")
+  revalidatePath("/pos/history")
+  revalidatePath("/pos/closing")
+  revalidatePath("/reports")
+  revalidatePath("/")
 }

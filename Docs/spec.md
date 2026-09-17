@@ -1934,16 +1934,20 @@ enum ResourceKey {
 - [x] `lib/table-session.ts` (`openOrReuseSession`) — ตรรกะเปิด/หา session เดียวที่ใช้ร่วมกันทั้งลูกค้าสแกน QR,
       ผังโต๊ะ และจอขาย (เดิมฝังอยู่ใน `openTableSession` ที่เดียว)
 
-#### ⏭️ Phase 17c — ขายกลับบ้าน (ไม่มีโต๊ะ) + KDS รองรับ
-- [ ] schema: `MobileOrderType` · `MobileOrder.tableSessionId` เป็น optional + `saleId?`/`customerLabel?` ·
+#### ✅ Phase 17c — ขายกลับบ้าน (ไม่มีโต๊ะ) + KDS รองรับ
+- [x] schema: `MobileOrderType` · `MobileOrder.tableSessionId` เป็น optional + `saleId?`/`customerLabel?` ·
       `SaleChannel += TAKEAWAY` · migration **2 ไฟล์** (ALTER TYPE ADD VALUE แยกจากไฟล์ที่ใช้ค่าใหม่)
-- [ ] `createTakeawaySale` — ทรานแซคชันเดียว: บรรทัดอาหาร → `nextSaleNumber` → `Sale(TAKEAWAY)` + `SaleItem`
+- [x] `createTakeawaySale` — ทรานแซคชันเดียว: บรรทัดอาหาร → `nextSaleNumber` → `Sale(TAKEAWAY)` + `SaleItem`
       (`menuItemId`, ไม่แตะสต็อก, ไม่มีค่าบริการ) → `MobileOrder(TAKEAWAY)` + รายการรอครัว · retry P2002
-- [ ] `voidSale` ต้องยกเลิกรายการในครัวของบิลกลับบ้านด้วย
-- [ ] KDS/ทิกเก็ตรองรับออร์เดอร์ที่ไม่มีโต๊ะ (`listKitchenTickets`, `getKitchenTicket`, `reprintKitchenTicket`)
-      → ป้าย "กลับบ้าน #n" แทนเลขโต๊ะ
-- [ ] เทส `takeaway-sale.test.ts` — บิล+ออร์เดอร์ครบในทรานแซคชันเดียว · **ยิงพร้อมกัน 8 บิลได้เลขไม่ซ้ำ** ·
-      ไม่ตัดสต็อก · เงินสดไม่พอไม่ผ่าน · โผล่ใน `/pos/history`+ปิดยอด+รายงาน · void แล้วครัวถูกยกเลิก
+- [x] `voidSale` ยกเลิกรายการในครัวของบิลกลับบ้านด้วย (+ SSE ให้ KDS เห็นทันที)
+- [x] KDS/ทิกเก็ตรองรับออร์เดอร์ที่ไม่มีโต๊ะ (`listKitchenTickets`, `getKitchenTicket`, `reprintKitchenTicket`)
+      → ป้าย "กลับบ้าน #n" แทนเลขโต๊ะ ประกอบที่ `lib/order-label.ts` ที่เดียว (KDS/ทิกเก็ต PDF/เครื่องพิมพ์ครัวเห็นตรงกัน)
+- [x] เทส `takeaway-sale.test.ts` 11 เคส — บิล+ออร์เดอร์ครบในทรานแซคชันเดียว · **ยิงพร้อมกัน 8 บิลได้เลขไม่ซ้ำ** ·
+      ไม่ตัดสต็อก · เงินสดไม่พอไม่ผ่าน · โผล่ใน `/pos/history`+ปิดยอด+รายงาน · void แล้วครัวถูกยกเลิก ·
+      เมนูของร้านอื่นขายไม่ได้
+- [x] UI: สวิตช์โหมด "ขายเข้าโต๊ะ / กลับบ้าน" ในจอขาย + ช่องชื่อลูกค้า + dialog ชำระเงิน (CASH/TRANSFER/QR)
+      + ใบเสร็จพิมพ์ได้ (ใช้ `components/receipt.tsx` เดิม — `sku`/`unit` กลายเป็น optional เพราะเมนูอาหารไม่มี)
+- [x] `Sale.channel = TAKEAWAY` โผล่เป็นป้าย "อาหารกลับบ้าน" ใน `/pos/history`
 
 
 ---

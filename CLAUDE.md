@@ -85,7 +85,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    `switchActiveStore` ก็ใช้ `loadStoreContext()` ตรวจ ไม่ใช่ `StoreMember` ตรง ๆ
    · **(Phase 14b) action ที่ "ขายใหม่" ต้องผ่าน `requireSellingStore()`** (หรือ `guardAction(..., { selling: true })` สำหรับ POS)
    ไม่ใช่ `requireStore()` — แพ็กเกจหมดอายุ = อ่านได้ ขายไม่ได้ (`STORE_EXPIRED`) · ที่ใช้อยู่: `createSale`, `openTableSession`
-   ทั้งสองทาง, `submitOrder`, `createStaffTableOrder` (Phase 17b) · ห้ามใส่กับปิดบิล/void/รายงาน
+   ทั้งสองทาง, `submitOrder`, `createStaffTableOrder`/`createTakeawaySale` (Phase 17) · ห้ามใส่กับปิดบิล/void/รายงาน
 6. **ข้อความที่ผู้ใช้เห็นเป็นภาษาไทยทั้งหมด** รวมถึงข้อความ validation และ error
 7. **(Phase 6+, MJD Mobile Order) เปลี่ยน `MobileOrderItem.status` ต้องเป็น conditional update**
    (`updateMany` + `where: { status: 'AWAITING_KITCHEN' }`) เหมือนกติกากันขายเกินสต็อกในข้อ 4 — ป้องกัน race
@@ -136,6 +136,9 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 8. **(Phase 6+) บิลจาก MJD Mobile Order ต้องออกเป็น `Sale` ปกติเสมอ** (`channel = MOBILE_ORDER` +
    `tableSessionId`) ห้ามสร้างตารางบิลแยก เพื่อให้ Dashboard/Reports/`/pos/history`/`CashierClosing` ใช้ query
    เดิมได้ครบโดยไม่ต้องเขียน logic ซ้ำ
+   · **(Phase 17c) บิลอาหารกลับบ้านใช้ `channel = TAKEAWAY` และ `tableSessionId = null`** — แยกจาก `MOBILE_ORDER`
+   ที่ต้องมี session เสมอ · ออกจาก `createTakeawaySale` ทางเดียว (บิล + `MobileOrder(TAKEAWAY)` ในทรานแซคชันเดียว)
+   ไม่คิดค่าบริการและไม่แตะสต็อก เพราะเมนูอาหารไม่มีสต็อกในระบบ
 
 ## คำสั่งที่ใช้บ่อย
 
@@ -522,7 +525,13 @@ backfill ให้บทบาทที่มี `MO_TABLES` อยู่แล�
 ตัวเลือกเสริม · ตะกร้า · เลือกโต๊ะ) · `createStaffTableOrder` ใน `app/actions/staff-order.ts` (`MO_POS:ADD` + `requireSellingStore()`
 — **เพิ่มในรายการ action ที่ต้องผ่าน requireSellingStore ตามกติกาข้อ 5**) · **ตรรกะที่ใช้ร่วมห้ามลอก**: `lib/order-lines.ts`
 (`buildOrderLines` — ตรวจ modifier + คิดราคา ใช้ทั้งลูกค้าและพนักงาน) และ `lib/table-session.ts` (`openOrReuseSession` — เปิด/หา
-session ใช้ทั้งสแกน QR, ผังโต๊ะ, จอขาย) · ปิดบิลยังเป็นเส้นทางเดิมทั้งหมด · เทส `staff-table-order.test.ts` 9 เคส (549 ทั้งชุด)
+session ใช้ทั้งสแกน QR, ผังโต๊ะ, จอขาย) · ปิดบิลยังเป็นเส้นทางเดิมทั้งหมด · เทส `staff-table-order.test.ts` 9 เคส
+
+**17c เสร็จแล้ว**: ขายอาหารกลับบ้าน — `Sale.channel = TAKEAWAY` (ไม่มี `tableSessionId` จึงแยกจาก `MOBILE_ORDER` ตามกติกาข้อ 8) ·
+`MobileOrder.tableSessionId` เป็น optional แล้ว + `orderType`/`saleId`(unique)/`customerLabel` · `createTakeawaySale` ออกบิล+ออร์เดอร์ครัว
+ในทรานแซคชันเดียว (เลขบิลใต้ advisory lock เดิม · เลขคิว "กลับบ้าน #n" ต่อวันต่อร้านคำนวณใต้ lock ตัวเดียวกัน · **ไม่คิดค่าบริการ
+และไม่แตะสต็อก**) · `voidSale` ยกเลิกรายการในครัวของบิลกลับบ้านด้วย · **ป้ายทิกเก็ตประกอบที่ `lib/order-label.ts` ที่เดียว** —
+KDS/ทิกเก็ต PDF/เครื่องพิมพ์ครัวต้องเห็นตรงกัน · migration 2 ไฟล์ (ADD VALUE แยก) · เทส `takeaway-sale.test.ts` 11 เคส (560 ทั้งชุด)
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน ·
 **ตัวปรับจำนวนรายการอาหารในหน้า F13** (badge ครบแล้ว — แก้จำนวนหลังส่งครัวต้องมีกติกาชดเชยของตัวเอง รอเจ้าของระบบยืนยันขอบเขต) · ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) —

@@ -68,7 +68,9 @@ export function KitchenTicket({ ticket, auto }: { ticket: KitchenTicketDoc; auto
       >
         <div style={{ textAlign: "center", marginBottom: 10 }}>
           <p className="t-caption">{ticket.storeName}</p>
-          <p style={{ fontSize: "1.6rem", fontWeight: 800, lineHeight: 1.2 }}>โต๊ะ {ticket.tableCode}</p>
+          <p style={{ fontSize: "1.6rem", fontWeight: 800, lineHeight: 1.2 }}>
+            {ticket.orderType === "TAKEAWAY" ? ticket.tableCode : `โต๊ะ ${ticket.tableCode}`}
+          </p>
           {ticket.mergedTableCodes.length > 0 ? (
             <p className="t-caption">รวมโต๊ะ {ticket.mergedTableCodes.join(", ")}</p>
           ) : null}
