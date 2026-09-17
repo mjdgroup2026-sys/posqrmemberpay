@@ -59,7 +59,10 @@ function renderHtml(template: MailTemplate, url: string): string {
       <tr>
         <td style="padding:0 28px 28px 28px;">
           <p style="margin:0 0 8px 0;font-size:13px;line-height:1.7;color:#6B7885;">${escapeHtml(template.footnote)}</p>
-          <p style="margin:0;font-size:12px;line-height:1.6;color:#8B96A2;word-break:break-all;">เปิดลิงก์ไม่ได้? คัดลอกที่อยู่นี้ไปวางในเบราว์เซอร์:<br />${safeUrl}</p>
+          <!-- ลิงก์สำรองสำหรับ mail client ที่ไม่แสดงปุ่ม — เป็นข้อความสั้น ๆ ไม่พิมพ์ URL ดิบ
+               (URL ยืนยันยาวเป็นร้อยตัวอักษร บนมือถือกลายเป็นก้อนตัวอักษรยาวเหยียด — เจ้าของระบบเจอจริง 2026-09-17)
+               ส่วน text/plain ยังมี URL เต็มอยู่สำหรับ client ที่อ่านได้แต่ข้อความ -->
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#8B96A2;">กดปุ่มไม่ได้? <a href="${safeUrl}" style="color:#01787B;text-decoration:underline;">แตะที่นี่เพื่อ${escapeHtml(template.buttonLabel)}</a></p>
         </td>
       </tr>
     </table>

@@ -5,6 +5,7 @@ import { getLowStockCount, getPendingNotificationCount } from "@/lib/queries"
 import { getCurrentPermissions, type ResourceKey } from "@/lib/permissions"
 import { Sidebar } from "@/components/sidebar"
 import { Topbar } from "@/components/topbar"
+import { MobileNavBackdrop } from "@/components/mobile-nav"
 import { PlanExpiryBanner } from "@/components/plan-expiry-banner"
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
@@ -35,6 +36,8 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
 
   return (
     <div className="app-shell">
+      {/* ฉากหลัง + ปิดลิ้นชักอัตโนมัติเมื่อเปลี่ยนหน้า — โผล่เฉพาะจอเล็ก (CSS) */}
+      <MobileNavBackdrop />
       <Sidebar
         lowStockCount={lowStockCount}
         pendingNotificationCount={pendingNotificationCount}

@@ -49,4 +49,7 @@ export {
   Camera as IconCamera,
   // Phase 17a — อัปโหลดรูปเมนู/โลโก้
   ImagePlus as IconImagePlus,
+  // เมนูลิ้นชักบนมือถือ (2026-09-17 — โครงหลังร้านรองรับจอเล็ก)
+  Menu as IconHamburger,
+  X as IconClose,
 } from "lucide-react"
