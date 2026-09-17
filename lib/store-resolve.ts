@@ -110,3 +110,18 @@ export async function findStoreByScbTestRef1(ref1: string): Promise<ResolvedStor
   if (!config) return null
   return { storeId: config.store.id, slug: config.store.slug, status: config.store.status, planExpiresAt: config.store.planExpiresAt }
 }
+
+/// รูปที่ร้านอัปโหลด (Phase 17a) — `<img src="/api/assets/<id>">` เดินทางออกนอกระบบไปอยู่ใน HTML
+/// ของหน้าเมนูฝั่งลูกค้าที่ไม่มี session เลย ตัวระบุจึงเหลือแค่ id ซึ่ง unique ทั้งระบบ
+/// อ่านอย่างเดียวและคืนเฉพาะไบต์รูป — ไม่มีข้อมูลร้านอื่นรั่วตามไปได้
+export type StoredAsset = { id: string; storeId: string; contentType: string; data: Uint8Array }
+
+export async function findAssetById(id: string): Promise<StoredAsset | null> {
+  if (!id) return null
+  const asset = await prisma.storeAsset.findUnique({
+    where: { id },
+    select: { id: true, storeId: true, contentType: true, data: true },
+  })
+  if (!asset) return null
+  return { id: asset.id, storeId: asset.storeId, contentType: asset.contentType, data: asset.data }
+}

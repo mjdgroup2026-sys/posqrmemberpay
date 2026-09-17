@@ -73,7 +73,8 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId`) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
    · เพิ่ม query/action ใหม่ต้องเพิ่มในตารางของ `__tests__/integration/tenant-isolation.test.ts` ไม่งั้นเทสแดง
    · **การค้นข้ามร้านทำได้ 4 ที่เท่านั้น** (Phase 13–14c): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
-   qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้), `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
+   qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้ · **Phase 17a เพิ่ม `findAssetById()`** — `<img src="/api/assets/<id>">`
+   อยู่ใน HTML ของหน้าลูกค้าที่ไม่มี session ตัวระบุจึงเหลือแค่ id · คืนเฉพาะไบต์รูป), `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
    ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว), `lib/plan-queries.ts` (แพ็กเกจ = ข้อมูลอ้างอิงของ
    แพลตฟอร์ม ไม่มี storeId) และ `lib/brand-queries.ts` + `app/actions/brand.ts` (Phase 14c — ขอบเขต tenant คือ
    `brand.ownerId = userId` ทุกฟังก์ชันรับ userId แล้วกรองเงื่อนไขนี้ ไม่รับ brandId จากผู้ใช้) — ที่อื่นห้าม
@@ -484,7 +485,7 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 
 **✅ Phase 16 RBAC เต็ม ขึ้น production แล้ว (2026-09-16, PR #8 · CI run 35067809235 · backup `posmobileorderdb-20260916-141727.dump` · migration 2 ไฟล์ applied)**: resource `MO_*` 5 ตัว
 ครอบทุกหน้า/action ของ Mobile Order · preset "พนักงานเสิร์ฟ" · 2 migrations (เพิ่ม enum / backfill สิทธิ์ + ผูก STAFF ที่ไม่มีบทบาท) ·
-ซ้อมบนสำเนา production แล้ว diff สะอาด · ไม่มี env ใหม่ · ไม่ซ่อนปุ่มรายสิทธิ์ใน UI (เหมือน F1–F9 ที่มีอยู่ — ด่านจริงคือ server)
+ซ้อมบนสำเนา production แล้ว diff สะอาด · ไม่มี env ใหม่ · **ซ่อนปุ่มรายสิทธิ์ใน UI ตามมาทีหลังใน PR #14** (ตอน deploy Phase 16 ยังไม่ซ่อน)
 
 **✅ Phase 15b ตรวจสลิปอัตโนมัติ ขึ้น production แล้ว (2026-09-16, PR #10 — โค้ดรออยู่แบบปิด ยังไม่ตั้ง `SLIP_PROVIDER` บน VPS)**: `lib/slip-provider/`
 (mock/easyslip/slipok) · `lib/slip-settle.ts` ด่าน 4 ชั้น · `submitPaymentSlip` + `components/customer/slip-upload.tsx` (jsqr ฝั่งเบราว์เซอร์) ·
@@ -497,7 +498,27 @@ migrate deploy ผ่าน + สลับ green → blue · ยืนยัน�
 เทส 15 ใหม่ · migration additive ซ้อมแล้ว diff สะอาด · **ตอน deploy**: ตั้ง `PAYMENT_CONFIG_KEY` บน VPS ก่อน · ร้าน default ยังใช้ env
 ตามเดิมจนกว่าจะย้าย credential เข้าฐานผ่านหน้าตั้งค่า + ทดสอบ 1 บาท + สลับ URL callback ในพอร์ทัล SCB
 
-**ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน —
+**✅ ซ่อนปุ่มตามสิทธิ์ใน UI ขึ้น production แล้ว (2026-09-16, PR #14 · CI run 35098646057 · ไม่มี migration ไม่มี env)**: ทุก client component
+ของ F1–F9 และ Mobile Order รับ `allowed`/`can*` จาก `lib/types.ts` (ค่าเริ่มต้น `FULL_ACCESS`) แล้วหน้าเป็นคนส่ง `granted[RESOURCE]`
+จาก `requirePageAccess()` — ปิด checklist §4 ข้อ "ปุ่มที่เกี่ยวข้องถูกซ่อน" · เทสใหม่ `__tests__/components/permission-buttons.test.tsx`
+· ด่านจริงยังเป็น server เหมือนเดิม การซ่อนปุ่มเป็นชั้นเสริมเท่านั้น (ดูกติกาข้อ 11)
+
+**✅ Realtime SSE ขึ้น production แล้ว (2026-09-16, PR #15 · CI run 35105353121 · ไม่มี migration ไม่มี env)**: `lib/realtime.ts` (event bus
+ในโปรเซสต่อร้าน) + `GET /api/events` (พนักงาน) + `GET /api/order/[qrToken]/events` (ลูกค้า ยึด qrToken เห็นเฉพาะ orders/payments/tables) ·
+`components/use-realtime.ts` (EventSource + debounce 300 ms + ข้ามตอนแท็บซ่อน) · `auto-refresh.tsx` เป็น SSE-first แล้ว **polling ยังอยู่เป็น
+ทางสำรอง** (ชะลอเป็น 60 วิเมื่อต่อ SSE ได้) · action ทุกตัวของ Mobile Order + `closeSessionWithPayment` publish event หลังเขียน DB สำเร็จ ·
+เทสใหม่ `realtime.test.ts` (3) + `realtime-routes.test.ts` (4) · ทั้งชุด 522 เทสผ่าน · ดูกติกาข้อ 12
+
+**🚧 Phase 17 กำลังทำ — พนักงานกดขายอาหารเองได้ (มีโต๊ะ/กลับบ้าน) + รูปที่ร้านอัปโหลดเอง** (แบ่ง 3 PR: 17a รูปภาพ →
+17b ขายผ่านโต๊ะ → 17c ขายกลับบ้าน · ตัดสินใจ 2026-09-17: จอขายใหม่ขายเมนูอาหารอย่างเดียวไม่ยุ่งกับสต็อก · ออร์เดอร์
+กลับบ้านขึ้น KDS ด้วย · แบบมีโต๊ะสั่งก่อน–ปิดบิลทีหลังด้วยเส้นทางเดิม) — **17a เสร็จแล้ว**: `StoreAsset` เก็บไบต์รูปในฐาน
+(blue/green ไม่มี volume ไฟล์บนดิสก์หายทุก deploy) · `lib/assets.ts` ตรวจชนิดจาก magic bytes **ไม่รับ SVG** เพดาน 300KB ·
+`uploadStoreAsset`/`deleteStoreAsset` · `GET /api/assets/[id]` public + แคช immutable · `components/image-picker.tsx`
+ย่อรูปด้วย canvas ก่อนส่ง ใช้ทั้งฟอร์มเมนูและโลโก้/ปกในตั้งค่าร้าน · รูปเก่าถูกลบในทรานแซคชันเดียวกับการบันทึก ·
+เทส 14 ใหม่ (538 ทั้งชุด) · migration `20260917090000_add_store_asset` additive ล้วน · ไม่มี env ใหม่
+
+**ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) · Phase 5 เหลือ smoke test เต็มรูปแบบบน production ซึ่งต้อง merge ก่อน ·
+**ตัวปรับจำนวนรายการอาหารในหน้า F13** (badge ครบแล้ว — แก้จำนวนหลังส่งครัวต้องมีกติกาชดเชยของตัวเอง รอเจ้าของระบบยืนยันขอบเขต) · ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**

@@ -166,6 +166,7 @@ model User {
   storeSettingsUpdates      StoreSettings[]   @relation("StoreSettingsUpdatedBy")
   sentInvites               StoreInvite[]     @relation("StoreInviteInvitedBy")
   acceptedInvites           StoreInvite[]     @relation("StoreInviteAcceptedBy")
+  uploadedAssets            StoreAsset[]      @relation("AssetUploadedBy")
   closings                  CashierClosing[]
 
   @@map("user")
@@ -768,6 +769,7 @@ model Store {
   paymentIntents    PaymentIntent[]
   invites           StoreInvite[]
   paymentConfig     StorePaymentConfig?
+  assets            StoreAsset[]
 
   @@index([brandId])
   @@map("store")
@@ -1033,4 +1035,26 @@ model TrialClaim {
   claimedAt       DateTime @default(now())
 
   @@map("trial_claim")
+}
+
+/// รูปภาพที่ร้านอัปโหลดเอง (Phase 17a) — เก็บไบต์ลงฐานข้อมูลโดยตั้งใจ
+///
+/// VPS รันแบบ blue/green คนละคอนเทนเนอร์และไม่มี volume → ไฟล์ที่เขียนลงดิสก์หายทุกรอบ deploy
+/// ส่วน object storage ต้องสมัครบริการ + credential ใหม่ · รูปเมนู/โลโก้ถูกย่อในเบราว์เซอร์ให้ ≤ 300KB
+/// ก่อนอัปโหลดเสมอ (lib/assets.ts) ฐานจึงโตช้าพอที่จะรับได้ · เสิร์ฟผ่าน /api/assets/[id]
+model StoreAsset {
+  id           String   @id @default(cuid())
+  storeId      String
+  /// ชนิดที่ "ตรวจจากไบต์จริง" แล้ว ไม่ใช่ค่าที่เบราว์เซอร์ส่งมา
+  contentType  String
+  byteSize     Int
+  data         Bytes
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  store      Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  uploadedBy User? @relation("AssetUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([storeId])
+  @@map("store_asset")
 }

@@ -9,6 +9,7 @@ import { MAX_FEATURED_MENU } from "@/lib/validation"
 import type { FeaturableMenuItem } from "@/lib/queries"
 import type { FieldErrors } from "@/lib/types"
 import { IconSpinner, IconStore } from "@/components/icons"
+import { ImagePicker } from "@/components/image-picker"
 
 export type StoreSettingsValues = {
   storeName: string
@@ -33,6 +34,9 @@ export function StoreSettingsForm({
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [themeColor, setThemeColor] = useState(settings.themeColor)
+  // รูปคุมด้วย state เพราะ ImagePicker อัปโหลดแล้วเปลี่ยนค่าเองก่อนกดบันทึก (Phase 17a)
+  const [logoUrl, setLogoUrl] = useState(settings.logoUrl ?? "")
+  const [coverImageUrl, setCoverImageUrl] = useState(settings.coverImageUrl ?? "")
   const [hasKDS, setHasKDS] = useState(settings.hasKDS)
   const [crmEnabled, setCrmEnabled] = useState(settings.crmEnabled)
 
@@ -171,35 +175,21 @@ export function StoreSettingsForm({
               {fieldErrors.themeColor ? <span className="field-hint error">{fieldErrors.themeColor}</span> : null}
             </div>
 
-            <div className="field">
-              <label className="t-small" htmlFor="logoUrl">
-                ลิงก์โลโก้ (ไม่บังคับ)
-              </label>
-              <input
-                id="logoUrl"
-                name="logoUrl"
-                className="input"
-                defaultValue={settings.logoUrl ?? ""}
-                placeholder="https://… หรือ /logo.png"
-              />
-              {fieldErrors.logoUrl ? <span className="field-hint error">{fieldErrors.logoUrl}</span> : null}
-            </div>
+            <ImagePicker
+              name="logoUrl"
+              label="โลโก้ร้าน (ไม่บังคับ)"
+              value={logoUrl}
+              onChange={setLogoUrl}
+              error={fieldErrors.logoUrl}
+            />
 
-            <div className="field">
-              <label className="t-small" htmlFor="coverImageUrl">
-                ลิงก์ภาพปกหน้าเมนู (ไม่บังคับ)
-              </label>
-              <input
-                id="coverImageUrl"
-                name="coverImageUrl"
-                className="input"
-                defaultValue={settings.coverImageUrl ?? ""}
-                placeholder="https://… หรือ /cover.jpg"
-              />
-              {fieldErrors.coverImageUrl ? (
-                <span className="field-hint error">{fieldErrors.coverImageUrl}</span>
-              ) : null}
-            </div>
+            <ImagePicker
+              name="coverImageUrl"
+              label="ภาพปกหน้าเมนู (ไม่บังคับ)"
+              value={coverImageUrl}
+              onChange={setCoverImageUrl}
+              error={fieldErrors.coverImageUrl}
+            />
 
             <div className="field">
               <label className="t-small" htmlFor="serviceChargePercent">

@@ -109,8 +109,8 @@ export async function resetDb(): Promise<void> {
       '"store_invite", "store_subscription", "trial_claim",',
       // แบรนด์ + ใบจ่ายรวม (Phase 14c) — brand อ้าง user, subscription_batch อ้าง brand
       '"subscription_batch", "brand",',
-      // บัญชีรับเงินของร้าน (Phase 15a)
-      '"store_payment_config",',
+      // บัญชีรับเงินของร้าน (Phase 15a) · รูปที่ร้านอัปโหลดเอง (Phase 17a)
+      '"store_payment_config", "store_asset",',
       // ร้านและสมาชิก (Phase 13) — ล้างท้ายสุดเพราะทุกตารางข้างบนอ้างมาที่นี่
       '"store_member", "store"',
       "RESTART IDENTITY CASCADE",

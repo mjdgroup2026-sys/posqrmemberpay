@@ -815,6 +815,23 @@ enum ResourceKey {
 - [x] ได้แต้มทันทีตามยอดบิล แสดงยอดแต้มสะสมปัจจุบันให้เห็นทันที (1 แต้ม/25 บาท ปัดลง — `lib/points.ts`)
 - [x] เบอร์เดิมสมัครซ้ำ = เข้าบัญชีเดิม ไม่สร้างซ้ำ (เบอร์ถูก normalize เป็นตัวเลขล้วนก่อนเทียบ unique)
 
+### F23 — รูปภาพที่ร้านอัปโหลดเอง (Phase 17a)
+> เดิมช่องรูปเมนู/โลโก้/ปก รับได้แค่ **ลิงก์** ร้านจึงต้องไปหาที่ฝากรูปเองก่อน — เจ้าของร้านจริงทำไม่ได้
+
+- [x] เลือกรูปจากเครื่อง/ถ่ายจากมือถือได้โดยตรงที่ฟอร์มเมนู (`/mobile-order/menu`) และตั้งค่าร้าน
+      (`/mobile-order/settings` — โลโก้/ภาพปก) · ยังวางลิงก์ภายนอกได้เหมือนเดิม
+- [x] รูปถูกย่อในเบราว์เซอร์ก่อนอัปโหลดเสมอ (ด้านยาวสุด 800px, JPEG q0.8) แล้วเก็บไบต์ลง `StoreAsset`
+      ในฐานข้อมูล เสิร์ฟผ่าน `GET /api/assets/[id]`
+      > **เก็บในฐานโดยตั้งใจ** — VPS รัน blue/green คนละคอนเทนเนอร์และไม่มี volume ไฟล์ที่เขียนลงดิสก์
+      > จะหายทุกรอบ deploy · object storage ต้องสมัครบริการ + credential ใหม่ซึ่งเกินความจำเป็นของขนาดนี้
+- [x] **ชนิดไฟล์ตรวจจากไบต์จริง ไม่ใช่ `Content-Type` ที่เบราว์เซอร์ส่งมา** — รับเฉพาะ JPEG/PNG/WebP
+      และ **ไม่รับ SVG** (ฝัง `<script>` ได้ = XSS จากโดเมนเดียวกับแอป) · เพดาน 300KB ต่อไฟล์
+- [x] รูปเก่าถูกลบในทรานแซคชันเดียวกับการบันทึกที่แทนที่มัน (บันทึกเมนู/ลบเมนู/บันทึกตั้งค่าร้าน)
+      · รูปที่อัปแล้วเปลี่ยนใจก่อนกดบันทึก ถูกลบทันทีจากฝั่ง client (ลบได้เฉพาะรูปที่เพิ่งอัปในรอบนั้น)
+- [x] `/api/assets/[id]` เป็น public (หน้าเมนูฝั่งลูกค้าไม่มี session) · แคช `immutable` 1 ปีได้ปลอดภัย
+      เพราะ id ผูกกับไฟล์ตัวนั้นตลอดชีวิต · การค้นด้วย id ข้ามร้านอยู่ใน `lib/store-resolve.ts` ตามกติกาข้อ 5
+- [x] ร้านหนึ่งลบรูปของอีกร้านไม่ได้ (เทสใน `tenant-isolation` + `assets.test.ts`)
+
 ---
 
 ## 6. Routes / UI (POS)
@@ -1886,6 +1903,44 @@ enum ResourceKey {
 >    production แล้ว diff สะอาด · ไม่มี env ใหม่
 > 7. เทส: `permissions.test.ts` +4 (STAFF ไร้บทบาททำอะไร MO ไม่ได้ · พนักงานเสิร์ฟทำได้/ไม่ได้ตาม preset · ครัวเสิร์ฟได้แต่ยกเลิกไม่ได้ ·
 >    ทุก preset ครอบ MO_* ครบ) · `onboarding.test.ts` นับบทบาทระบบ 4
+
+### 🚧 Phase 17 — พนักงานกดขายอาหารเองได้ (มีโต๊ะ / กลับบ้าน) + รูปภาพที่ร้านอัปโหลดเอง
+> **ที่มา**: วันนี้อาหารขายได้ทางเดียวคือลูกค้าสแกน QR สั่งเอง · หน้า `/pos` เดิมขายได้แต่ **สินค้าคลัง** (ตัดสต็อกจริง)
+> ไม่ใช่เมนูอาหาร — ร้านที่ลูกค้าสั่งกับพนักงานที่โต๊ะ หรือซื้อกลับบ้านหน้าเคาน์เตอร์ จึงใช้ระบบไม่ได้เลย
+> · **การตัดสินใจ (ล็อกแล้ว 2026-09-17)**: จอขายใหม่ขาย **เมนูอาหารอย่างเดียว** (ไม่ยุ่งกับสต็อก) · ออร์เดอร์กลับบ้าน
+> **ขึ้น KDS + พิมพ์ทิกเก็ตได้** · รูปภาพ **อัปโหลดเก็บในฐานข้อมูล** · แบบมีโต๊ะ **สั่งก่อน–ปิดบิลทีหลัง** (เส้นทางปิดบิลเดิม)
+> · แบ่ง 3 PR ตามลำดับเหมือน Phase 14: 17a รูปภาพ → 17b ขายผ่านโต๊ะ → 17c ขายกลับบ้าน
+
+#### ✅ Phase 17a — อัปโหลดรูปภาพ (F23)
+- [x] model `StoreAsset` (ไบต์รูปในฐาน) + migration `add_store_asset` (additive ล้วน ไม่มี backfill)
+- [x] `lib/assets.ts` — เพดาน 300KB · `sniffImageType()` อ่าน magic bytes จริง · `assetUrl()`/`parseAssetId()`
+- [x] `app/actions/assets.ts` — `uploadStoreAsset` (รับ `File` ตรงจาก Server Action · ด่าน `MO_MENU:ADD/EDIT`)
+      และ `deleteStoreAsset` (รูปที่ยังไม่ถูกบันทึก)
+- [x] `GET /api/assets/[id]` (public ใน `proxy.ts` · `Cache-Control: immutable`) + `findAssetById()` ใน `lib/store-resolve.ts`
+- [x] `components/image-picker.tsx` ใช้ในฟอร์มเมนูและตั้งค่าร้าน (โลโก้/ปก) · ย่อรูปด้วย canvas ก่อนส่ง
+- [x] เก็บกวาดรูปเก่าในทรานแซคชันเดียวกับ `saveMenuItem`/`deleteMenuItem`/`updateStoreSettings`
+- [x] เทส: `__tests__/unit/assets.test.ts` (7) + `__tests__/integration/assets.test.ts` (7) + เพิ่มใน `tenant-isolation`
+
+#### ⏭️ Phase 17b — ขายผ่านโต๊ะ (พนักงานสั่งแทนลูกค้า)
+- [ ] resource ใหม่ `MO_POS` (VIEW/ADD) + backfill ให้บทบาทที่มี `MO_TABLES:ADD`
+- [ ] `lib/order-lines.ts` — ย้ายตัวตรวจ modifier + คิด `unitPrice` ออกจาก `submitOrder` มาใช้ร่วมสองฝั่ง
+- [ ] `createStaffTableOrder` (`app/actions/staff-order.ts`) — `MO_POS:ADD` + `requireSellingStore()` ·
+      หา/เปิด session ของโต๊ะ (คง `assertTableCapacity()`) · กันโต๊ะที่ `AWAITING_BILL` · พิมพ์ทิกเก็ต + SSE หลัง commit
+- [ ] หน้า `/mobile-order/pos` + `components/menu-pos.tsx` (กริดเมนูมีรูป · dialog modifier · ตะกร้า · เลือกโต๊ะ)
+      · ปิดบิลใช้เส้นทางเดิม (`/mobile-order/tables/[tableId]/billing`)
+- [ ] เทส `staff-table-order.test.ts` — เปิดโต๊ะใหม่ · สั่งเพิ่มเข้า session เดิม · โต๊ะรอเช็กบิลสั่งไม่ได้ ·
+      ไม่มีสิทธิ์/แพ็กเกจหมดอายุถูกปฏิเสธ
+
+#### ⏭️ Phase 17c — ขายกลับบ้าน (ไม่มีโต๊ะ) + KDS รองรับ
+- [ ] schema: `MobileOrderType` · `MobileOrder.tableSessionId` เป็น optional + `saleId?`/`customerLabel?` ·
+      `SaleChannel += TAKEAWAY` · migration **2 ไฟล์** (ALTER TYPE ADD VALUE แยกจากไฟล์ที่ใช้ค่าใหม่)
+- [ ] `createTakeawaySale` — ทรานแซคชันเดียว: บรรทัดอาหาร → `nextSaleNumber` → `Sale(TAKEAWAY)` + `SaleItem`
+      (`menuItemId`, ไม่แตะสต็อก, ไม่มีค่าบริการ) → `MobileOrder(TAKEAWAY)` + รายการรอครัว · retry P2002
+- [ ] `voidSale` ต้องยกเลิกรายการในครัวของบิลกลับบ้านด้วย
+- [ ] KDS/ทิกเก็ตรองรับออร์เดอร์ที่ไม่มีโต๊ะ (`listKitchenTickets`, `getKitchenTicket`, `reprintKitchenTicket`)
+      → ป้าย "กลับบ้าน #n" แทนเลขโต๊ะ
+- [ ] เทส `takeaway-sale.test.ts` — บิล+ออร์เดอร์ครบในทรานแซคชันเดียว · **ยิงพร้อมกัน 8 บิลได้เลขไม่ซ้ำ** ·
+      ไม่ตัดสต็อก · เงินสดไม่พอไม่ผ่าน · โผล่ใน `/pos/history`+ปิดยอด+รายงาน · void แล้วครัวถูกยกเลิก
 
 
 ---

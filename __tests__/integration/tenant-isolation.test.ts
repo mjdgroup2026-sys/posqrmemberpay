@@ -63,6 +63,7 @@ type StoreFixture = {
   inviteEmail: string
   subscriptionId: string
   subscriptionRef: string
+  assetId: string
 }
 
 describe.skipIf(!dbReady)("การแยกข้อมูลตามร้าน (Phase 13 — tenant isolation)", () => {
@@ -99,6 +100,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       brand: await import("@/app/actions/brand"),
       "payment-config": await import("@/app/actions/payment-config"),
       "scb-config": await import("@/app/actions/scb-config"),
+      assets: await import("@/app/actions/assets"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -270,6 +272,17 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       },
     })
 
+    // รูปที่ร้านอัปโหลดเอง (Phase 17a)
+    const asset = await db.storeAsset.create({
+      data: {
+        storeId,
+        contentType: "image/png",
+        byteSize: 8,
+        data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      },
+      select: { id: true },
+    })
+
     return {
       storeId,
       ownerId,
@@ -298,6 +311,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       inviteEmail: invite.email,
       subscriptionId: subscription.id,
       subscriptionRef: subscription.requestRef,
+      assetId: asset.id,
     }
   }
 
@@ -487,6 +501,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "clearScbCredentials",
     "startScbConnectionTest",
     "getScbTestStatus",
+    // Phase 17a: อัปโหลดรูปเข้าร้านที่ทำงานอยู่เสมอ (ไม่รับ id ของร้านอื่น)
+    "uploadStoreAsset",
   ]
 
   type ActionCase = [
@@ -744,6 +760,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         return fd
       },
       async (b) => expect(await testPrisma().storeSubscription.count({ where: { storeId: b.storeId, batchId: { not: null } } })).toBe(0),
+    ],
+    [
+      "deleteStoreAsset",
+      (b) => makeFormData({ url: `/api/assets/${b.assetId}` }),
+      async (b) => expect(await testPrisma().storeAsset.findUnique({ where: { id: b.assetId } })).not.toBeNull(),
     ],
     [
       "cancelPendingRequest",
