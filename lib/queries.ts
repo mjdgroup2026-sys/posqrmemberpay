@@ -1066,6 +1066,7 @@ export async function getStoreSettings(storeId: string) {
     hasKDS: settings.hasKDS,
     serviceChargePercent: toNumber(settings.serviceChargePercent),
     crmEnabled: settings.crmEnabled,
+    posDefaultMode: settings.posDefaultMode,
   }
 }
 

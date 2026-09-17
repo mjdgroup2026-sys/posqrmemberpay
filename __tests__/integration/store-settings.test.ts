@@ -75,6 +75,19 @@ describe.skipIf(!dbReady)("ตั้งค่าร้านและสมา�
       expect(Number(saved?.serviceChargePercent)).toBe(7.5)
     })
 
+    it("ตั้งโหมดเริ่มต้นของจอขายอาหารเป็นกลับบ้านได้ · ค่าเริ่มต้นคือโต๊ะ · ค่าแปลกถูกปฏิเสธ", async () => {
+      const db = testPrisma()
+      expect((await db.storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } }))?.posDefaultMode).toBe("TABLE")
+
+      const ok = await updateStoreSettings(settingsForm({ posDefaultMode: "TAKEAWAY" }))
+      expect(ok.ok).toBe(true)
+      expect((await db.storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } }))?.posDefaultMode).toBe("TAKEAWAY")
+
+      const bad = await updateStoreSettings(settingsForm({ posDefaultMode: "DELIVERY" }))
+      expect(bad.ok).toBe(false)
+      expect((await db.storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } }))?.posDefaultMode).toBe("TAKEAWAY")
+    })
+
     it("สีธีมที่ไม่ใช่ hex 6 หลักต้องถูกปฏิเสธ — ค่านี้ถูกยัดลง inline style ของหน้าลูกค้า", async () => {
       for (const bad of ["red", "#FFF", "#12345G", "javascript:alert(1)"]) {
         const result = await updateStoreSettings(settingsForm({ themeColor: bad }))

@@ -329,6 +329,8 @@ export const storeSettingsSchema = z.object({
     .min(0, "ค่าบริการต้องไม่ติดลบ")
     .max(100, "ค่าบริการต้องไม่เกิน 100%"),
   hasKDS: z.coerce.boolean(),
+  /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
+  posDefaultMode: z.enum(["TABLE", "TAKEAWAY"], { error: "โหมดเริ่มต้นของจอขายไม่ถูกต้อง" }).default("TABLE"),
   crmEnabled: z.coerce.boolean(),
 })
 

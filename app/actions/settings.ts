@@ -19,6 +19,7 @@ function revalidateSettingsPages() {
   revalidatePath("/mobile-order/settings")
   revalidatePath("/mobile-order/tables")
   revalidatePath("/mobile-order/kitchen")
+  revalidatePath("/mobile-order/pos")
   // หน้าฝั่งลูกค้าอ่านชื่อร้าน/สี/เมนูแนะนำจาก StoreSettings เหมือนกัน
   revalidatePath("/order", "layout")
 }
@@ -42,6 +43,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
     coverImageUrl: formData.get("coverImageUrl") ?? "",
     serviceChargePercent: formData.get("serviceChargePercent") ?? "0",
     hasKDS: formData.get("hasKDS") === "on" || formData.get("hasKDS") === "true",
+    posDefaultMode: formData.get("posDefaultMode") ?? "TABLE",
     crmEnabled: formData.get("crmEnabled") === "on" || formData.get("crmEnabled") === "true",
   })
   if (!parsed.success) {
@@ -95,6 +97,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
           coverImageUrl: data.coverImageUrl,
           serviceChargePercent: data.serviceChargePercent.toFixed(2),
           hasKDS: data.hasKDS,
+          posDefaultMode: data.posDefaultMode,
           crmEnabled: data.crmEnabled,
           updatedById: user.id,
         },
@@ -106,6 +109,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
           coverImageUrl: data.coverImageUrl,
           serviceChargePercent: data.serviceChargePercent.toFixed(2),
           hasKDS: data.hasKDS,
+          posDefaultMode: data.posDefaultMode,
           crmEnabled: data.crmEnabled,
           updatedById: user.id,
         },

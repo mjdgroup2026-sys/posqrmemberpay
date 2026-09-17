@@ -42,6 +42,7 @@ export default async function StoreSettingsPage() {
           serviceChargePercent: settings?.serviceChargePercent ?? 0,
           hasKDS: settings?.hasKDS ?? false,
           crmEnabled: settings?.crmEnabled ?? false,
+          posDefaultMode: settings?.posDefaultMode ?? "TABLE",
         }}
         menu={menu}
         openSessionCount={openSessionCount}
