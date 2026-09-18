@@ -1958,6 +1958,101 @@ enum ResourceKey {
 - [x] `Sale.channel = TAKEAWAY` โผล่เป็นป้าย "อาหารกลับบ้าน" ใน `/pos/history`
 
 
+### 📝 Phase 18 — เว็บสาธารณะ "ค้นหาร้าน" (Store Directory + แผนที่ + รีวิว) — วางแผนแล้ว 2026-09-18 ยังไม่เริ่มทำ
+> **ที่มา**: ร้านสมัครเข้ามาเป็น tenant เองได้ตั้งแต่ Phase 14a แต่ยังไม่มี "หน้าบ้าน" ที่คนทั่วไปเห็นว่ามีร้านไหน
+> ใช้ระบบอยู่บ้าง เจ้าของระบบต้องการเว็บที่**ใครก็เข้าได้โดยไม่ต้องล็อกอิน** ค้นหาร้านได้ มีแผนที่ปักหมุด
+> เจ้าของร้านจัดการหน้าร้านของตัวเองได้ และลูกค้าทั่วไปให้ดาว/รีวิวได้
+> · **การตัดสินใจ (ล็อกแล้ว 2026-09-18)**:
+> **รวมในโปรเจกต์นี้** เป็น route group ที่ 3 `app/(public)/` (ข้อมูลร้านอยู่ฐานนี้ · เจ้าของล็อกอินบัญชีเดิม ·
+> deploy ท่อเดิม · แยกโปรเจกต์ = ต้องเปิด API ข้ามระบบแล้วลอกกติกา tenant ไปเขียนซ้ำ) ·
+> แผนที่ใช้ **Longdo Map API v3** (ข้อมูล/ค้นหาที่อยู่ภาษาไทยดีที่สุด ราคาถูกกว่า Google ไม่ต้องผูกบัตร) ·
+> URL เป็น path `/explore` บน**โดเมนเดิม**ก่อน (ย้ายโดเมนทีหลังแค่เพิ่ม vhost ใน nginx) ·
+> ร้านขึ้นเว็บเมื่อ **OWNER กดเผยแพร่เอง** ไม่ขึ้นอัตโนมัติ · แบ่ง 2 PR: 18a หน้าร้าน+ค้นหา+แผนที่ → 18b รีวิว
+>
+> **ข้อระวังของ Longdo Map**: (1) key ผูกกับ URL ที่แจ้งตอนสมัคร → สมัครแยก dev (`localhost:3001`) / production
+> และวันที่ย้ายโดเมนต้องเพิ่ม URL ในบัญชี Longdo · (2) เกณฑ์ใช้ฟรี (Free Usage Threshold) ผู้ให้บริการเปลี่ยนได้ตาม Terms
+> เกินแล้วแผนที่ไม่โหลดจนถึงเดือนถัดไป → **หน้าเว็บต้องใช้ได้แม้แผนที่ไม่ขึ้น** (รายการ/ค้นหาเป็นข้อความอยู่คนละส่วน) ·
+> (3) เป็น JS ฝั่งเบราว์เซอร์ → Client Component โหลดผ่าน `next/script` · **ห้ามใช้ `NEXT_PUBLIC_LONGDO_MAP_KEY`**
+> (กับดัก build-arg — ค่าถูก inline ตอน build) ให้ตั้ง env ฝั่ง server `LONGDO_MAP_KEY` แล้ว Server Component ส่งเป็น prop
+> (key ผูกโดเมนอยู่แล้ว โผล่ใน HTML ได้) · อ้างอิง: map.longdo.com/api/terms · /products/pricing · /docs3
+
+#### Phase 18a — หน้าร้านสาธารณะ + ค้นหา + แผนที่ + เจ้าของร้านจัดการ/เผยแพร่ (F24)
+- [ ] model `StoreListing` (1:1 `Store` · `@@map("store_listing")`) — `isPublished`/`publishedAt` · `description` (≤ 600) ·
+      `category` enum `ListingCategory` (RESTAURANT/CAFE/BAKERY/STREET_FOOD/BAR/OTHER) · `phone`/`lineId`/`facebookUrl` ·
+      `addressLine`/`district`/`province` · `lat`/`lng` `Decimal(9,6)` · `openingHours` Json · `photoAssetIds String[]` (≤ 6 · รูปเก็บที่
+      `StoreAsset` เดิม) · `ratingAvg Decimal(3,2)`/`ratingCount` (denormalized สำหรับ 18b) · `@@index([isPublished, province])`
+      → ชื่อร้าน/โลโก้/ปก/สีธีม **ไม่ซ้ำ** อ่านจาก `Store.name` + `StoreSettings` เดิม · URL สาธารณะใช้ `Store.slug`
+- [ ] migration `add_store_listing` additive ล้วน + backfill แถวว่าง (`isPublished=false`) ให้ร้านเดิมทุกร้าน ·
+      `lib/store-provision.ts` สร้างแถวว่างตอนสร้างร้านใหม่ในทรานแซคชันเดียว · ซ้อมบนสำเนา production ก่อน merge
+- [ ] **กติกาเผยแพร่**: ตั้ง `isPublished=true` ได้เมื่อมี `description`/`province`/`lat`/`lng` ครบ (บังคับใน action) ·
+      ฝั่งอ่านสาธารณะกรองเพิ่ม `Store.status = ACTIVE` และ `planExpiresAt > now()` — ร้านหมดอายุ/ถูกระงับ**หายจากเว็บเอง**
+- [ ] `lib/directory-queries.ts` (`server-only` · อ่านอย่างเดียว) — **จุดค้นข้ามร้านจุดที่ 5** ตามกติกาข้อ 5 ใน CLAUDE.md
+      (ต้องเติมในรายการ) · ทุกฟังก์ชันผ่าน helper `publishedWhere()` ที่เดียว · `searchListings({ q, province, category, near?, page })`
+      (`ILIKE` ชื่อร้าน/คำอธิบาย/อำเภอ · มี `near` = เรียงตามระยะด้วย raw SQL haversine — raw SQL ในไฟล์นี้**ไม่มี storeId โดยตั้งใจ**
+      ต้องคอมเมนต์ให้ชัด) · `listPins()` · `getListingBySlug(slug)` (รวม `StoreSettings` + เมนูแนะนำ `isFeatured` ≤ 6) · `listProvinces()`
+- [ ] `app/(public)/layout.tsx` — root layout ที่ 3 `<html lang="th" data-theme="public">` · ฟอนต์ Prompt + Sarabun (ชุดเดียวกับลูกค้า) ·
+      header สาธารณะ (โลโก้ · ช่องค้นหา · ปุ่ม "เจ้าของร้าน? เข้าสู่ระบบ" → `/login?callbackUrl=/storefront`) ·
+      `app/globals.css` เพิ่มชุดสี `[data-theme="public"]` ด้วย token semantic เดิม (ห้าม hex ในคอมโพเนนต์)
+- [ ] `app/(public)/explore/page.tsx` — ช่องค้นหา + กรองจังหวัด/ประเภท + ปุ่ม "ใกล้ฉัน" (geolocation → `?lat=&lng=`) ·
+      ซ้ายการ์ดร้าน ขวาแผนที่ (มือถือสลับแท็บ รายการ/แผนที่) · `searchParams` ต้อง `await`
+- [ ] `app/(public)/explore/[slug]/page.tsx` — ปก/โลโก้/ชื่อ/ประเภท/คำอธิบาย/รูป ≤ 6/เวลาเปิด (บอก "เปิดอยู่/ปิดแล้ว" ตามเวลาไทย)/
+      ที่อยู่ + แผนที่หมุดเดียว + ปุ่ม "นำทาง" (ลิงก์ lat,lng)/โทร/LINE/Facebook · `generateMetadata()` (OG image จาก `/api/assets/<coverId>`) ·
+      `notFound()` ถ้าไม่เผยแพร่
+- [ ] `components/public/longdo-map.tsx` (`"use client"`) — โหลด `https://api.longdo.com/map3/?key=<key>` ผ่าน `next/script` ·
+      props `apiKey`/`pins[]`/`center?`/`zoom?`/`onPick?(lat,lng)` (โหมดเลือกจุดสำหรับฟอร์มเจ้าของ) · คลิกหมุด → popup ชื่อร้าน + ลิงก์ ·
+      สคริปต์โหลดไม่ได้ (เกินโควตา/ไม่มี key) → กล่อง "แผนที่ไม่พร้อมใช้งาน" ไม่พังทั้งหน้า
+- [ ] `components/public/listing-card.tsx` + `search-bar.tsx` (client · `useSearchParams` ครอบ `<Suspense>` ไม่งั้น build พัง)
+- [ ] `app/sitemap.ts` + `app/robots.ts` — sitemap รายร้านที่เผยแพร่ (SEO คือเหตุผลหลักของเว็บนี้ · ไฟล์อยู่ราก `app/` ได้แม้ไม่มี root layout กลาง)
+- [ ] `proxy.ts` — เติม `/explore`, `/sitemap.xml`, `/robots.txt` ใน `ALWAYS_PUBLIC_PREFIXES` · `next.config.ts` **ไม่แก้กฎ `headers()`**
+      (หน้าสาธารณะได้ `no-cache` เหมือนหน้าอื่น ยอมรับได้ · ถ้าจะ cache ทำที่ชั้น query ด้วย `unstable_cache` tag `directory` +
+      `revalidateTag` ตอนเผยแพร่ — optional หลังวัดโหลดจริง)
+- [ ] `app/(staff)/(app)/storefront/page.tsx` — OWNER-only (`requireOwner()` แบบ `/billing`) · ฟอร์มข้อมูล + แผนที่โหมดเลือกจุด
+      (คลิกปักหมุด / "ใช้ตำแหน่งปัจจุบัน") + `components/image-picker.tsx` เดิม (≤ 6 รูป) · สวิตช์ "เผยแพร่" + checklist บอกว่าขาดอะไร ·
+      ลิงก์ "ดูหน้าร้านอย่างที่ลูกค้าเห็น" → `/explore/[slug]` · เมนู "หน้าร้านสาธารณะ" ใน sidebar (`ownerOnly`)
+- [ ] `app/actions/storefront.ts` — `updateStoreListing(formData)` / `setListingPublished(on)` · บรรทัดแรก `requireOwner()` ·
+      เขียนผ่าน `forStore(storeId)` · **`photoAssetIds` ทุกตัวต้องเช็คว่าเป็น `StoreAsset` ของร้านนี้** (กติกา FK จากฟอร์ม) ·
+      zod: lat ∈ [-90,90], lng ∈ [-180,180], จังหวัดจาก list คงที่ `lib/thai-provinces.ts` · `revalidatePath("/explore")` + `/explore/[slug]`
+- [ ] env `LONGDO_MAP_KEY` — `.env.example` + ตาราง env ใน CLAUDE.md + **`environment:` ของ `docker-compose.prod.yml`**
+      (ตั้งใน `.env` บน VPS อย่างเดียวไม่ถึงคอนเทนเนอร์) · เว้นว่าง = หน้าเว็บขึ้นแต่ไม่มีแผนที่
+- [ ] เทส: เติม `updateStoreListing`/`setListingPublished` ในตาราง `tenant-isolation.test.ts` · `storefront.test.ts` (เผยแพร่ไม่ได้ถ้าข้อมูลไม่ครบ ·
+      STAFF ได้ `PermissionDenied` · `photoAssetIds` ของร้านอื่นถูกปฏิเสธ · `searchListings` ไม่คืนร้าน SUSPENDED/หมดอายุ/ไม่เผยแพร่ ·
+      เรียงตามระยะถูก) · เทส proxy ว่า `/explore/*` ไม่ถูก redirect
+- [ ] เอกสาร: §2 เอนทิตี `StoreListing` · §5 F24 + acceptance · §6a route `/explore/*`, `/storefront` · CLAUDE.md กติกาข้อ 5 / ตาราง env /
+      ธีมเพิ่มคอลัมน์ `public` / สถานะการพัฒนา
+
+#### Phase 18b — รีวิวจากลูกค้า (F25)
+- [ ] **ตัวตนลูกค้า = Better Auth + ตาราง `User` เดิม** (Better Auth ตัวเดียวมีตารางผู้ใช้ชุดเดียว) — ลูกค้าคือ `User` ที่ไม่มี
+      `StoreMember`/`Brand` · สมัคร/ล็อกอินหน้าเดิมพร้อม `callbackUrl=/explore/[slug]#review` (login-form กัน open redirect อยู่แล้ว) ·
+      ต้องยืนยันอีเมลก่อน (เปิดอยู่แล้ว = กันสแปมชั้นแรก) · `/no-store` เพิ่มลิงก์ "ไปหน้าค้นหาร้าน" 1 บรรทัด ·
+      Google login (`socialProviders.google`) เป็นทางเลือกลดแรงเสียดทาน **ตัดสินใจทีหลัง ไม่อยู่ในเฟสนี้**
+- [ ] model `StoreReview` (`@@map("store_review")`) — `storeId`/`userId`/`rating` 1–5/`body` (≤ 1,000)/`ownerReply`/`repliedAt`/
+      `hiddenAt`/`hiddenById` (ผู้ดูแลซ่อน **ไม่ลบ** — ledger แนวเดิม) · `@@unique([storeId, userId])` 1 คน 1 รีวิวต่อร้าน (แก้ของเดิมได้) ·
+      `@@index([storeId, hiddenAt, createdAt])`
+- [ ] `StoreListing.ratingAvg/ratingCount` อัปเดต**ในทรานแซคชันเดียวกับ** insert/update/hide ของรีวิว โดย `aggregate` ใหม่ในทรานแซคชัน
+      (แบบ `Member.pointBalance`) → เทส concurrent ยิงรีวิว 10 คนพร้อมกันแล้ว `ratingCount = 10`
+- [ ] `app/actions/review.ts` — `submitReview(storeSlug, rating, body)` ใช้ `requireUser()` (ข้อมูล "ของตัวผู้ใช้" ไม่ใช่ของร้าน —
+      ข้อยกเว้นของกติกา `requireStore()` เหมือนโปรไฟล์) · หาร้านผ่าน `lib/store-resolve.ts` เพิ่ม `findPublishedStoreBySlug(slug)` ·
+      เจ้าของ/พนักงานร้านนั้นรีวิวร้านตัวเองไม่ได้ · `replyReview(reviewId, text)` (`requireOwner()` + `forStore`) ·
+      `hideReview(reviewId)` (`requirePlatformAdmin()`)
+- [ ] `lib/directory-queries.ts` เพิ่ม `listReviews(storeId, page)` กรอง `hiddenAt: null` · `lib/admin-queries.ts` เพิ่ม `listStoreReviewsForAdmin`
+- [ ] UI: `components/public/review-form.tsx` (ดาว 1–5 + ข้อความ · ยังไม่ล็อกอิน → ปุ่มพาไป `/login?callbackUrl=…`) + `review-list.tsx` ·
+      `/storefront` แท็บ "รีวิว" ให้เจ้าของอ่าน/ตอบกลับ · `/admin/stores/[id]` ส่วน "รีวิว" ให้ผู้ดูแลซ่อน
+- [ ] กันสแปมขั้นต่ำ: อีเมลยืนยันแล้ว + 1 รีวิว/ร้าน + rate limit ในหน่วยความจำ 5 รีวิว/ชม./ผู้ใช้ (ยอมรับว่ารีเซ็ตตอนสลับสี blue/green)
+- [ ] เทส `store-review.test.ts` — unique ต่อคน/ร้าน · aggregate ถูกแบบ concurrent · เจ้าของรีวิวร้านตัวเองไม่ได้ · ซ่อนแล้วไม่โชว์และ aggregate ลด ·
+      STAFF ตอบกลับไม่ได้ · เติมตาราง tenant-isolation
+- [ ] เอกสาร: §2 เอนทิตี `StoreReview` · §5 F25 + acceptance · CLAUDE.md สถานะการพัฒนา
+
+#### ลำดับตรวจก่อน merge (ทั้ง 18a และ 18b)
+1. `pnpm db:generate` → รีสตาร์ต dev → migration ผ่าน `/migration` → `prisma migrate diff --exit-code` ต้อง `No difference detected.`
+2. `pnpm test` ทั้งชุดเขียว (เดิม 560+) รวมเทสใหม่ · `/check` ผ่าน (build ต้องผ่านเพราะมี `useSearchParams` ในหน้า prerender)
+3. ทดสอบมือบน dev (ต้องมี `LONGDO_MAP_KEY` ของ localhost): OWNER กรอก `/storefront` → เผยแพร่ไม่ได้จนครบ → เผยแพร่ → incognito
+   `/explore` เห็นการ์ด + หมุด → `/explore/[slug]` ครบ + view-source เห็น OG tags · STAFF เปิด `/storefront` → access denied ·
+   ระงับร้านจาก `/admin/stores` → หายจาก `/explore` ทันที · ถอด `LONGDO_MAP_KEY` → หน้ายังใช้ได้ มีกล่อง "แผนที่ไม่พร้อมใช้งาน" ·
+   (18b) incognito กดรีวิว → `/login` → สมัคร → ยืนยันอีเมล → กลับหน้าร้านเดิมด้วย callbackUrl → รีวิวได้ครั้งเดียว แก้ได้ ·
+   เจ้าของตอบกลับเห็นบนหน้าสาธารณะ · admin ซ่อนแล้วดาวเฉลี่ยเปลี่ยน
+4. deploy: ตั้ง `LONGDO_MAP_KEY` ใน `.env` บน VPS + compose → backup → ซ้อม migration บนสำเนา → merge →
+   ตรวจ `ls .next/server/app/(public)/explore` ในคอนเทนเนอร์ + เปิด `/explore` จริง (ไม่ใช่แค่ `/api/health`)
+
 ---
 
 ## 9. เกณฑ์ความสำเร็จโดยรวม (Definition of Done)
