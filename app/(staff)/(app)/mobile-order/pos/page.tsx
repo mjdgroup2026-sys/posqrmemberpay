@@ -1,3 +1,4 @@
+import { formatBusinessDate } from "@/lib/format"
 import { getStoreSettings, listMenu, listTablesForPos } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { MenuPos } from "@/components/menu-pos"
@@ -20,6 +21,7 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
       allowed={granted.MO_POS ?? []}
       initialTableId={initialTableId}
       defaultMode={settings?.posDefaultMode ?? "TABLE"}
+      dateLabel={formatBusinessDate(new Date())}
     />
   )
 }

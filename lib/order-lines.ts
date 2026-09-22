@@ -18,6 +18,9 @@ export type OrderLine = {
   unitPrice: number
   note: string | null
   options: { groupName: string; optionName: string; priceDelta: number }[]
+  /// ประเภทครัวของเมนู ณ ตอนสั่ง (Phase 19) — ให้ทิกเก็ตครัวจัดกลุ่มได้ทันทีหลัง commit ไม่ต้องอ่านซ้ำ
+  stationId: string | null
+  stationName: string | null
 }
 
 /// ข้อผิดพลาดที่ "ผู้ใช้ต้องเห็นข้อความไทยตรง ๆ" — ผู้เรียกจับแล้วคืนเป็น ActionResult ของตัวเอง
@@ -30,7 +33,7 @@ export class OrderLineError extends Error {
 export async function buildOrderLines(tx: StoreTx, items: CartLineInput[]): Promise<OrderLine[]> {
   const menuItems = await tx.menuItem.findMany({
     where: { id: { in: items.map((i) => i.menuItemId) }, isActive: true },
-    include: { modifierGroups: { include: { options: true } } },
+    include: { modifierGroups: { include: { options: true } }, station: { select: { name: true } } },
   })
   const menuById = new Map(menuItems.map((m) => [m.id, m]))
 
@@ -65,6 +68,8 @@ export async function buildOrderLines(tx: StoreTx, items: CartLineInput[]): Prom
     return {
       menuItemId: menuItem.id,
       menuItemName: menuItem.name,
+      stationId: menuItem.stationId,
+      stationName: menuItem.station?.name ?? null,
       quantity: line.quantity,
       unitPrice,
       note: line.note ?? null,

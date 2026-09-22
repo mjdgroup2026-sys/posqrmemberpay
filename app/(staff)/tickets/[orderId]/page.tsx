@@ -34,5 +34,5 @@ export default async function KitchenTicketPage({
     )
   }
 
-  return <KitchenTicket ticket={ticket} auto={query.auto === "1"} />
+  return <KitchenTicket ticket={ticket} auto={query.auto === "1"} embed={query.embed === "1"} />
 }

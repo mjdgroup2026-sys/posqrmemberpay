@@ -178,6 +178,8 @@ async function printTicketAfterCommit(
       name: row.menuItemName,
       options: row.options.map((o) => o.optionName),
       note: row.note,
+      stationId: row.stationId,
+      stationName: row.stationName,
     })),
   })
   if (printed) {

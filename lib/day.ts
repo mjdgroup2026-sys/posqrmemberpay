@@ -29,3 +29,15 @@ export function businessDateOnly(date: Date = new Date()): Date {
 export function isSameBusinessDay(a: Date, b: Date): boolean {
   return businessDayKey(a) === businessDayKey(b)
 }
+
+/// แปลงคีย์ `YYYY-MM-DD` (จาก `<input type="date">` / `?date=`) กลับเป็นเวลาที่อยู่ "กลางวัน" ของวันทางธุรกิจนั้น
+/// คืน null ถ้ารูปแบบผิด · วันที่ไม่มีจริง (เช่น 2026-02-30) · หรือเป็นวันอนาคต (ปิดรอบล่วงหน้าไม่ได้)
+/// ใช้เที่ยงวันตามเวลาไทยแทนเที่ยงคืน เพื่อให้ businessDayRange()/businessDateOnly() ตีความตรงวันแน่นอน
+export function parseBusinessDayKey(key: string, now: Date = new Date()): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null
+  const date = new Date(`${key}T12:00:00.000+07:00`)
+  if (Number.isNaN(date.getTime())) return null
+  if (businessDayKey(date) !== key) return null
+  if (key > businessDayKey(now)) return null
+  return date
+}

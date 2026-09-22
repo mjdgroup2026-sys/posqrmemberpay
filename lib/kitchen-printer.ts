@@ -1,5 +1,6 @@
 import "server-only"
 import { Socket } from "node:net"
+import { groupByStation, hasStationSplit } from "@/lib/ticket-lines"
 
 /// พิมพ์ทิกเก็ตครัวผ่านเครื่องพิมพ์ใบเสร็จความร้อนที่ต่อ LAN (ESC/POS over TCP พอร์ต 9100)
 ///
@@ -27,7 +28,12 @@ export type KitchenTicketPayload = {
     name: string
     options: string[]
     note: string | null
+    /// ประเภทครัว (Phase 19) — ไม่ส่ง/ null = ไม่ระบุ · ทุกบรรทัดไม่ระบุ = พิมพ์แบบเดิมไม่มีหัวกลุ่ม
+    stationId?: string | null
+    stationName?: string | null
   }[]
+  /// ลำดับ station ของร้าน (ไม่บังคับ) — ไม่ส่ง = เรียงตามชื่อ
+  stationOrder?: { id: string; sortOrder: number }[]
 }
 
 export function isPrinterConfigured(): boolean {
@@ -50,10 +56,25 @@ function buildTicket(payload: KitchenTicketPayload): Buffer {
   lines.push(`${ESC}a\x00`) // ชิดซ้าย
   lines.push("--------------------------------\n")
 
-  for (const item of payload.items) {
-    lines.push(`${item.quantity} x ${item.name}\n`)
-    if (item.options.length > 0) lines.push(`   (${item.options.join(", ")})\n`)
-    if (item.note) lines.push(`   * ${item.note}\n`)
+  // จัดกลุ่มตามประเภทครัว (Phase 19) — ลำดับ/ชื่อกลุ่มมาจาก lib/ticket-lines.ts ที่เดียว ให้ตรงกับ KDS และทิกเก็ต PDF
+  const groups = groupByStation(
+    payload.items.map((item) => ({ ...item, stationId: item.stationId ?? null, stationName: item.stationName ?? null })),
+    payload.stationOrder ?? [],
+  )
+  const split = hasStationSplit(groups)
+
+  for (const group of groups) {
+    if (split) {
+      lines.push(`${ESC}E\x01`) // ตัวหนา
+      lines.push(`[ ${group.stationName} ]\n`)
+      lines.push(`${ESC}E\x00`)
+    }
+    for (const item of group.items) {
+      lines.push(`${item.quantity} x ${item.name}\n`)
+      if (item.options.length > 0) lines.push(`   (${item.options.join(", ")})\n`)
+      if (item.note) lines.push(`   * ${item.note}\n`)
+    }
+    if (split) lines.push("\n")
   }
 
   lines.push("--------------------------------\n\n\n")

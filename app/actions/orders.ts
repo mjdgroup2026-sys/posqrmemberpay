@@ -369,7 +369,7 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
       session: { select: { table: { select: { code: true } } } },
       items: {
         where: { status: { not: "CANCELLED" } },
-        include: { menuItem: { select: { name: true } } },
+        include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } } },
       },
     },
   })
@@ -396,6 +396,8 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
       name: item.menuItem.name,
       options: parseOptionNames(item.selectedOptionsSnapshot),
       note: item.note,
+      stationId: item.menuItem.stationId,
+      stationName: item.menuItem.station?.name ?? null,
     })),
   })
 

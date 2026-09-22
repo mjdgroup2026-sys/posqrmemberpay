@@ -533,8 +533,19 @@ session ใช้ทั้งสแกน QR, ผังโต๊ะ, จอข�
 และไม่แตะสต็อก**) · `voidSale` ยกเลิกรายการในครัวของบิลกลับบ้านด้วย · **ป้ายทิกเก็ตประกอบที่ `lib/order-label.ts` ที่เดียว** —
 KDS/ทิกเก็ต PDF/เครื่องพิมพ์ครัวต้องเห็นตรงกัน · migration 2 ไฟล์ (ADD VALUE แยก) · เทส `takeaway-sale.test.ts` 11 เคส (560 ทั้งชุด)
 
+**✅ Phase 19 ปรับปรุงครัว + ปิดรอบ — โค้ดเสร็จ 2026-09-22 (รอ deploy · migration `20260922090000_add_kitchen_station_and_kds_prefs` additive ล้วน · ไม่มี env ใหม่)**:
+**F24** วันที่ขายบนหัว `/pos` + `/mobile-order/pos` · `/pos/closing?date=YYYY-MM-DD` เลือกวันปิดรอบย้อนหลังได้ (ห้ามอนาคต — `parseBusinessDayKey` ใน `lib/day.ts`
+· ยอดคำนวณจากวันที่เลือก · void ของวันนั้นถูกล็อกเองเพราะ `voidSale` เช็คตามวันของบิลอยู่แล้ว) · **F25** KDS มีปุ่มต่อบรรทัด (เริ่ม/เสร็จ/เสิร์ฟ/ยกเลิก
+ผ่าน action รายรายการเดิม กติกาข้อ 7 · ยกเลิกใช้สิทธิ์ `MO_TABLES:DELETE` ตัวเดียวกับหน้าโต๊ะ) + รายการที่ยกเลิกขีดฆ่าบนการ์ด · **`KitchenStation`
+ประเภทครัวต่อร้าน** (CRUD ใต้ตารางเมนู · `MenuItem.stationId?` SetNull · FK จากฟอร์มเช็คว่าเป็นของร้าน) · KDS แท็บ `?station=` · **จัดกลุ่มบรรทัดตาม
+station ที่ `lib/ticket-lines.ts` ที่เดียว** (KDS/ทิกเก็ต PDF/ESC-POS ต้องตรงกัน — หลักเดียวกับ `order-label.ts`) · `OrderLine` พก station ตั้งแต่ตอนสั่ง ·
+`menu-copy.ts` พา station ข้ามสาขา · **F26** `StoreSettings.kitchenAlertSound/kitchenAutoPrint` — KDS เทียบ orderId ใหม่หลัง refresh → toast เสมอ + เสียง Web Audio
+(ต้องกด "เปิดเสียงเตือน" ครั้งแรกต่อเครื่อง — ข้อจำกัดเบราว์เซอร์ · `components/kitchen-alert.ts`) · พิมพ์อัตโนมัติผ่าน iframe ซ่อน `/tickets/[id]?auto=1&embed=1`
+ทีละใบ (`components/auto-print.tsx` · **กล่องพิมพ์ยังเด้งให้กด 1 ครั้ง** เว้นแต่ Chrome `--kiosk-printing` · ร้านที่ตั้ง `KITCHEN_PRINTER_HOST` ไม่เข้าคิวนี้เพราะ
+`printedAt` ไม่ null) · ลูกค้าไม่เห็น station (ตัดสินใจ 2026-09-22) · เทสใหม่ 27 + tenant-isolation +4 · **Phase 18 (`/explore`) ยกเลิกวันเดียวกัน**
+
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
-ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —
+ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**

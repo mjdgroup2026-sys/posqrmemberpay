@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { listKitchenTickets, getStoreSettings } from "@/lib/queries"
+import { listKitchenTickets, listKitchenStations, getStoreSettings } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { KitchenDisplay } from "@/components/kitchen-display"
 import { IconKitchen } from "@/components/icons"
@@ -9,7 +9,11 @@ export const metadata = { title: "Kitchen Display" }
 export default async function KitchenPage() {
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
   const { storeId, granted } = await requirePageAccess("MO_KITCHEN")
-  const [tickets, settings] = await Promise.all([listKitchenTickets(storeId), getStoreSettings(storeId)])
+  const [tickets, settings, stations] = await Promise.all([
+    listKitchenTickets(storeId),
+    getStoreSettings(storeId),
+    listKitchenStations(storeId),
+  ])
 
   // ★ ร้านที่ยังไม่เปิดโหมดจอครัวไม่ควรเห็นกระดาน 3 คอลัมน์ (F18) — ของเดิม render ให้เฉย ๆ
   //   แล้วสองคอลัมน์ขวาว่างตลอดเพราะรายการข้ามจาก "รอครัวรับ" ไป "เสิร์ฟแล้ว" เลย
@@ -54,5 +58,15 @@ export default async function KitchenPage() {
     )
   }
 
-  return <KitchenDisplay tickets={tickets} canEdit={granted.MO_KITCHEN?.includes("EDIT") ?? false} />
+  // ยกเลิกรายการใช้สิทธิ์เดียวกับหน้าโต๊ะ (MO_TABLES:DELETE — กติกาข้อ 11) ไม่ใช่ MO_KITCHEN
+  return (
+    <KitchenDisplay
+      tickets={tickets}
+      stations={stations}
+      canEdit={granted.MO_KITCHEN?.includes("EDIT") ?? false}
+      canCancel={granted.MO_TABLES?.includes("DELETE") ?? false}
+      alertSound={settings?.kitchenAlertSound ?? true}
+      autoPrint={settings?.kitchenAutoPrint ?? false}
+    />
+  )
 }

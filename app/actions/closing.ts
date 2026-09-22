@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { guardAction } from "@/lib/permissions"
-import { businessDateOnly, businessDayRange } from "@/lib/day"
+import { businessDateOnly, businessDayKey, businessDayRange, parseBusinessDayKey } from "@/lib/day"
 import { closingSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
-import { toNumber } from "@/lib/format"
+import { formatBusinessDate, toNumber } from "@/lib/format"
 import type { ActionResult } from "@/lib/types"
 
 
@@ -14,6 +14,8 @@ function round2(value: number): number {
 }
 
 /// ปิดยอดประจำวัน — 1 ครั้ง/แคชเชียร์/วัน (unique cashierId+closingDate เป็นด่านจริง)
+/// Phase 19: เลือกวันปิดรอบได้ (ย้อนหลังเท่านั้น) — ทุกยอดคำนวณจากช่วงเวลาของวันที่เลือก ไม่ใช่วันนี้เสมอ
+/// void บิลของวันนั้นถูกล็อกตามมาเอง เพราะ voidSale เช็ค CashierClosing ตามวันของบิล (sales.ts)
 /// ยอดทั้งหมดคำนวณสดจาก Sale ในทรานแซคชันเดียวกัน ไม่รับตัวเลขสรุปจากฝั่ง client
 export async function closeCashierDay(formData: FormData): Promise<ActionResult> {
   // ด่านชั้นที่ 2 ของ §4 — เช็คสิทธิ์ POS_CLOSING:ADD ก่อนแตะข้อมูลเสมอ
@@ -25,6 +27,8 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
   const user = guard.user
 
   const parsed = closingSchema.safeParse({
+    // ไม่ส่งวันที่มา = วันนี้ (ผู้เรียกเดิม/เทสเดิมยังใช้ได้) — ส่งมาแล้วต้องเป็นวันที่มีจริงและไม่ใช่อนาคต
+    closingDate: formData.get("closingDate") ?? businessDayKey(),
     countedCash: formData.get("countedCash"),
     note: formData.get("note") ?? undefined,
   })
@@ -37,7 +41,15 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
   }
 
   const { countedCash, note } = parsed.data
-  const { start, end } = businessDayRange()
+  const closingDay = parseBusinessDayKey(parsed.data.closingDate)
+  if (!closingDay) {
+    return {
+      ok: false,
+      error: "วันที่ปิดรอบไม่ถูกต้อง — เลือกได้เฉพาะวันนี้หรือย้อนหลัง",
+      fieldErrors: { closingDate: "เลือกได้เฉพาะวันนี้หรือย้อนหลัง" },
+    }
+  }
+  const { start, end } = businessDayRange(closingDay)
 
   try {
     const difference = await db.$transaction(async (tx) => {
@@ -72,7 +84,7 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
         data: {
           storeId,
           cashierId: user.id,
-          closingDate: businessDateOnly(),
+          closingDate: businessDateOnly(closingDay),
           totalSales: round2(totalSales).toFixed(2),
           totalCash: round2(totalCash).toFixed(2),
           totalTransfer: round2(totalTransfer).toFixed(2),
@@ -99,10 +111,10 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
           ? `เงินเกิน ${difference.toFixed(2)} บาท`
           : `เงินขาด ${Math.abs(difference).toFixed(2)} บาท`
 
-    return { ok: true, message: `ปิดยอดประจำวันเรียบร้อยแล้ว — ${verdict}` }
+    return { ok: true, message: `ปิดยอดรอบวันที่ ${formatBusinessDate(closingDay)} เรียบร้อยแล้ว — ${verdict}` }
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
-      return { ok: false, error: "ปิดยอดของวันนี้ไปแล้ว — ปิดซ้ำวันเดิมไม่ได้" }
+      return { ok: false, error: "ปิดยอดของวันที่นี้ไปแล้ว — ปิดซ้ำวันเดิมไม่ได้" }
     }
     return { ok: false, error: "ปิดยอดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }

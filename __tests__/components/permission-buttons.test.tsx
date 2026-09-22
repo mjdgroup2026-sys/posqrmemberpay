@@ -15,7 +15,15 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/app/actions/menu", () => ({ saveMenuItem: vi.fn(), deleteMenuItem: vi.fn(), toggleMenuItemActive: vi.fn() }))
 vi.mock("@/app/actions/tables", () => ({ createTable: vi.fn(), createTablesBulk: vi.fn(), renameTable: vi.fn(), deleteTable: vi.fn() }))
 vi.mock("@/app/actions/notifications", () => ({ acknowledgeNotification: vi.fn(), acknowledgeAllNotifications: vi.fn() }))
-vi.mock("@/app/actions/orders", () => ({ startCookingOrder: vi.fn(), markOrderReady: vi.fn(), markOrderServed: vi.fn() }))
+vi.mock("@/app/actions/orders", () => ({
+  startCookingOrder: vi.fn(),
+  markOrderReady: vi.fn(),
+  markOrderServed: vi.fn(),
+  startCookingItem: vi.fn(),
+  markItemReady: vi.fn(),
+  markItemServed: vi.fn(),
+  cancelOrderItem: vi.fn(),
+}))
 
 /// §4 ข้อ "ไม่มีสิทธิ์ Add/Edit/Delete → ปุ่มที่เกี่ยวข้องถูกซ่อน" (Phase 16) — ด่านจริงคือ server แต่ UI ต้องไม่โชว์ปุ่มที่กดแล้วโดนปฏิเสธ
 /// ค่าเริ่มต้น (ไม่ส่ง allowed) = เต็ม เพื่อให้ component เดิมและเทสเดิมไม่เปลี่ยนพฤติกรรม
@@ -86,7 +94,7 @@ describe("ซ่อนปุ่มตามสิทธิ์ (Phase 16)", () =>
       printedAt: null,
       items: [{ id: "i1", menuItemName: "ข้าวผัด", quantity: 1, unitPrice: 60, subtotal: 60, note: null, status: "AWAITING_KITCHEN", options: [], cancelReason: null }],
     }
-    render(<KitchenDisplay tickets={[ticket as never]} canEdit={false} />)
+    render(<KitchenDisplay tickets={[ticket as never]} stations={[]} canEdit={false} />)
     expect(screen.queryByRole("button", { name: /เริ่ม/ })).toBeNull()
     expect(screen.getByText(/ข้าวผัด/)).toBeInTheDocument()
   })

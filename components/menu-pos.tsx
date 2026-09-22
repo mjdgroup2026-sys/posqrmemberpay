@@ -15,7 +15,7 @@ import {
   type ReceiptData,
 } from "@/lib/types"
 import { Receipt } from "@/components/receipt"
-import { IconPlus, IconSearch, IconSpinner, IconTrash, IconTable, IconWallet } from "@/components/icons"
+import { IconCalendar, IconPlus, IconSearch, IconSpinner, IconTrash, IconTable, IconWallet } from "@/components/icons"
 import {
   Dialog,
   DialogContent,
@@ -52,6 +52,7 @@ export function MenuPos({
   allowed = FULL_ACCESS,
   initialTableId,
   defaultMode = "TABLE",
+  dateLabel,
 }: {
   menu: { featured: MenuItemCard[]; all: MenuItemCard[] }
   tables: PosTableOption[]
@@ -61,6 +62,8 @@ export function MenuPos({
   defaultMode?: "TABLE" | "TAKEAWAY"
   /// สิทธิ์บนจอขายอาหาร — ADD = กดขาย/ส่งเข้าครัว (§4) · ไม่มี = ดูเมนูได้แต่ส่งออร์เดอร์ไม่ได้
   allowed?: AllowedActions
+  /// วันทางธุรกิจวันนี้ (เวลาไทย) จัดรูปแบบมาจาก server แล้ว (Phase 19) — โชว์บนหัวจอให้พนักงานเห็นว่าบิลจะลงวันไหน
+  dateLabel?: string
 }) {
   const router = useRouter()
   const canSell = allowed.includes("ADD")
@@ -82,11 +85,21 @@ export function MenuPos({
   const [qr, setQr] = useState<StorePromptPayQr | null>(null)
   const [qrError, setQrError] = useState<string | null>(null)
 
+  // ชิปกรองตามประเภทครัว (Phase 19) — "" = ทุกครัว · ช่วยพนักงานหาเมนูเร็วขึ้นบนจอเล็ก
+  const [stationFilter, setStationFilter] = useState("")
+  const stationChips = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const item of menu.all) if (item.stationId && item.stationName) seen.set(item.stationId, item.stationName)
+    return [...seen.entries()].map(([id, name]) => ({ id, name }))
+  }, [menu.all])
+
   const visibleMenu = useMemo(() => {
     const keyword = search.trim().toLowerCase()
-    if (!keyword) return menu.all
-    return menu.all.filter((item) => item.name.toLowerCase().includes(keyword))
-  }, [menu.all, search])
+    return menu.all.filter((item) => {
+      if (stationFilter && item.stationId !== stationFilter) return false
+      return !keyword || item.name.toLowerCase().includes(keyword)
+    })
+  }, [menu.all, search, stationFilter])
 
   // โต๊ะที่ถูกรวมเข้าโต๊ะอื่นไม่ต้องโชว์ — ทุกอย่างวิ่งไปที่โต๊ะหลักอยู่แล้ว
   const selectableTables = useMemo(() => tables.filter((t) => t.mergedIntoCode === null), [tables])
@@ -246,9 +259,17 @@ export function MenuPos({
   return (
     <div className="pos-layout">
       <section className="card-ui card-pad">
-        <div className="panel-head">
-          <h1 className="t-h2">ขายอาหาร</h1>
-          <span className="t-caption">เลือกเมนูใส่ตะกร้า แล้วเลือกโต๊ะเพื่อส่งเข้าครัว</span>
+        <div className="panel-head" style={{ flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <h1 className="t-h2">ขายอาหาร</h1>
+            <span className="t-caption">เลือกเมนูใส่ตะกร้า แล้วเลือกโต๊ะเพื่อส่งเข้าครัว</span>
+          </div>
+          {dateLabel ? (
+            <span className="chip chip-neutral" title="วันที่ขาย (เวลาไทย) — บิลที่ออกตอนนี้จะลงรอบวันนี้">
+              <IconCalendar size={14} aria-hidden />
+              <span className="num">{dateLabel}</span>
+            </span>
+          ) : null}
         </div>
 
         <div className="field" style={{ marginTop: 12 }}>
@@ -263,7 +284,29 @@ export function MenuPos({
           </div>
         </div>
 
-        {menu.featured.length > 0 && search.trim() === "" ? (
+        {stationChips.length > 0 ? (
+          <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 10 }} aria-label="กรองตามประเภทครัว">
+            <button
+              type="button"
+              className={`btn btn-sm ${stationFilter === "" ? "btn-primary" : "btn-subtle"}`}
+              onClick={() => setStationFilter("")}
+            >
+              ทั้งหมด
+            </button>
+            {stationChips.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`btn btn-sm ${stationFilter === s.id ? "btn-primary" : "btn-subtle"}`}
+                onClick={() => setStationFilter(s.id)}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {menu.featured.length > 0 && search.trim() === "" && stationFilter === "" ? (
           <>
             <h2 className="t-h3" style={{ marginTop: 16 }}>
               เมนูแนะนำ
