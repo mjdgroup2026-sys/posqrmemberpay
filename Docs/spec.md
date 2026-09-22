@@ -2013,7 +2013,7 @@ enum ResourceKey {
 - [x] `Sale.channel = TAKEAWAY` โผล่เป็นป้าย "อาหารกลับบ้าน" ใน `/pos/history`
 
 
-### ✅ Phase 19 — ปรับปรุงครัว + ปิดรอบ (F24–F26) — โค้ดเสร็จ 2026-09-22 (รอ deploy)
+### ✅ Phase 19 — ปรับปรุงครัว + ปิดรอบ (F24–F26) — ขึ้น production แล้ว 2026-09-22 (PR #24 · CI run 35708166462)
 > **ที่มา (เจ้าของสั่ง 2026-09-22)**: (1) หน้าขายไม่มีวันที่ และปิดรอบเลือกวันไม่ได้ (2) ครัวต้องทำ/เสิร์ฟ/ยกเลิกทีละรายการได้ ไม่ต้องทั้งรอบ
 > (3) มีประเภทครัว (ของทอด ของผัด ต้ม/นึ่ง บาร์น้ำ ของหวาน ผลไม้) ผูกกับเมนู (4) เตือนรับออร์เดอร์ + ตั้งค่าพิมพ์อัตโนมัติได้/ไม่ได้
 > · **การตัดสินใจ**: ปิดรอบย้อนหลังได้ทุกวันในอดีต ห้ามอนาคต · station เป็นเรื่องหลังครัว ลูกค้าไม่เห็น · เมนู 1 รายการอยู่ครัวเดียว ·
@@ -2028,8 +2028,10 @@ enum ResourceKey {
 - [x] F26 เตือน + พิมพ์อัตโนมัติ (`components/kitchen-alert.ts` · `components/auto-print.tsx` · ทิกเก็ต `?embed=1` + `postMessage`)
 - [x] เทส: `closing.test.ts` +4 · `day.test.ts` +3 · `kitchen-station.test.ts` 8 · `ticket-lines.test.ts` 5 · `kitchen-display.test.tsx` 7 · tenant-isolation +4
 - [x] เอกสาร: §2 `KitchenStation` + ฟิลด์ใหม่ · §5 F24–F26 · §6 `/pos/closing` · CLAUDE.md สถานะ + ที่เดียวของ `lib/ticket-lines.ts`
-- [ ] **deploy**: ไม่มี env ใหม่ · migration additive (ซ้อมบนสำเนา production ตามขั้นตอนเดิมก่อน merge) · หลัง deploy ตรวจ `\d kitchen_station` ในฐานจริง
-      + เปิด `/mobile-order/kitchen` จริงเห็นปุ่มต่อบรรทัด · ทดสอบเสียงเตือน/พิมพ์อัตโนมัติด้วยเครื่องครัวจริง (Chrome + `--kiosk-printing` ถ้าต้องการออกเงียบ)
+- [x] **deploy 2026-09-22**: backup `posmobileorderdb-20260922-160047.dump` (อยู่ใน `D:\MJD_Backup`) → ซ้อม migrate บนสำเนาเดียวกัน diff สะอาด → merge PR #24 →
+      CI `migrate deploy` applied 1 migration · สลับ blue → green ผ่าน health ครั้งแรก · ไม่มี env ใหม่
+- [ ] ตรวจหลัง deploy (เจ้าของระบบ): `_prisma_migrations` = 25 · `kitchen_station` มีตาราง · `ls .next/server/app/(staff)/(app)/mobile-order/kitchen` ในคอนเทนเนอร์ green
+      · เปิด `/mobile-order/kitchen` จริงเห็นปุ่มต่อบรรทัด · ทดสอบเสียงเตือน/พิมพ์อัตโนมัติด้วยเครื่องครัวจริง (Chrome + `--kiosk-printing` ถ้าต้องการออกเงียบ)
 
 ### ⛔ Phase 18 — เว็บสาธารณะ "ค้นหาร้าน" (`/explore` + Longdo Map + รีวิว) — **ยกเลิก ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22)**
 > เคยวางแผนไว้ 2026-09-18 เป็น route group `(public)` + `StoreListing`/`StoreReview` + Longdo Map · **ปิดแล้วทั้ง 18a/18b**

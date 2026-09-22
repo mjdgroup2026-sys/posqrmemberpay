@@ -533,7 +533,7 @@ session ใช้ทั้งสแกน QR, ผังโต๊ะ, จอข�
 และไม่แตะสต็อก**) · `voidSale` ยกเลิกรายการในครัวของบิลกลับบ้านด้วย · **ป้ายทิกเก็ตประกอบที่ `lib/order-label.ts` ที่เดียว** —
 KDS/ทิกเก็ต PDF/เครื่องพิมพ์ครัวต้องเห็นตรงกัน · migration 2 ไฟล์ (ADD VALUE แยก) · เทส `takeaway-sale.test.ts` 11 เคส (560 ทั้งชุด)
 
-**✅ Phase 19 ปรับปรุงครัว + ปิดรอบ — โค้ดเสร็จ 2026-09-22 (รอ deploy · migration `20260922090000_add_kitchen_station_and_kds_prefs` additive ล้วน · ไม่มี env ใหม่)**:
+**✅ Phase 19 ปรับปรุงครัว + ปิดรอบ — ขึ้น production แล้ว 2026-09-22 (PR #24 · CI run 35708166462 · backup `posmobileorderdb-20260922-160047.dump` · migration `20260922090000_add_kitchen_station_and_kds_prefs` additive ล้วน applied · สลับ blue → green · ไม่มี env ใหม่)**:
 **F24** วันที่ขายบนหัว `/pos` + `/mobile-order/pos` · `/pos/closing?date=YYYY-MM-DD` เลือกวันปิดรอบย้อนหลังได้ (ห้ามอนาคต — `parseBusinessDayKey` ใน `lib/day.ts`
 · ยอดคำนวณจากวันที่เลือก · void ของวันนั้นถูกล็อกเองเพราะ `voidSale` เช็คตามวันของบิลอยู่แล้ว) · **F25** KDS มีปุ่มต่อบรรทัด (เริ่ม/เสร็จ/เสิร์ฟ/ยกเลิก
 ผ่าน action รายรายการเดิม กติกาข้อ 7 · ยกเลิกใช้สิทธิ์ `MO_TABLES:DELETE` ตัวเดียวกับหน้าโต๊ะ) + รายการที่ยกเลิกขีดฆ่าบนการ์ด · **`KitchenStation`
