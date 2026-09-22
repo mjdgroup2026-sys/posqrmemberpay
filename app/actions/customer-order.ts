@@ -149,6 +149,8 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
           name: row.menuItemName,
           options: row.options.map((o) => o.optionName),
           note: row.note,
+          stationId: row.stationId,
+          stationName: row.stationName,
         })),
       })
       if (printed) {

@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { closeCashierDay } from "@/app/actions/closing"
-import { formatBaht } from "@/lib/format"
+import { formatBaht, formatBusinessDate } from "@/lib/format"
 import type { ClosingSummary } from "@/lib/queries"
 import type { FieldErrors } from "@/lib/types"
 import { IconSpinner } from "@/components/icons"
@@ -13,7 +13,17 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
-export function ClosingForm({ summary }: { summary: ClosingSummary }) {
+/// `closingDate` = คีย์ YYYY-MM-DD ของวันทางธุรกิจที่กำลังปิด (Phase 19 — เลือกจากหน้า `/pos/closing?date=`)
+/// `isToday` ใช้แค่เปลี่ยนถ้อยคำบนปุ่ม/คำเตือน ด่านจริง (ห้ามอนาคต · ปิดซ้ำไม่ได้) อยู่ที่ action
+export function ClosingForm({
+  summary,
+  closingDate,
+  isToday,
+}: {
+  summary: ClosingSummary
+  closingDate: string
+  isToday: boolean
+}) {
   const router = useRouter()
   const [countedText, setCountedText] = useState("")
   const [note, setNote] = useState("")
@@ -32,6 +42,7 @@ export function ClosingForm({ summary }: { summary: ClosingSummary }) {
     const formData = new FormData()
     formData.set("countedCash", String(counted))
     formData.set("note", note)
+    formData.set("closingDate", closingDate)
 
     try {
       const result = await closeCashierDay(formData)
@@ -108,10 +119,10 @@ export function ClosingForm({ summary }: { summary: ClosingSummary }) {
 
       <button type="submit" className="btn btn-primary btn-block" disabled={pending || !valid}>
         {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : null}
-        ยืนยันปิดยอดประจำวัน
+        {isToday ? "ยืนยันปิดยอดประจำวัน" : `ยืนยันปิดยอดย้อนหลัง ${formatBusinessDate(closingDate)}`}
       </button>
       <p className="t-caption">
-        ปิดยอดได้วันละ 1 ครั้งต่อคน และเมื่อปิดแล้วจะยกเลิกบิลของวันนี้ไม่ได้อีก
+        ปิดยอดได้วันละ 1 ครั้งต่อคน และเมื่อปิดแล้วจะยกเลิกบิลของ{isToday ? "วันนี้" : "วันที่เลือก"}ไม่ได้อีก
       </p>
     </form>
   )

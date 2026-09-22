@@ -1,3 +1,4 @@
+import { formatBusinessDate } from "@/lib/format"
 import { listProductOptions, listCategoryOptions } from "@/lib/queries"
 import { PosTerminal } from "@/components/pos-terminal"
 import { requirePageAccess } from "@/lib/permissions"
@@ -10,5 +11,8 @@ export default async function PosPage() {
 
   const [products, categories] = await Promise.all([listProductOptions(storeId), listCategoryOptions(storeId)])
 
-  return <PosTerminal products={products} categories={categories} allowed={granted.POS ?? []} />
+  // Phase 19 — วันที่ขาย (วันทางธุรกิจ เวลาไทย) จัดรูปแบบฝั่ง server จะได้ไม่ต่างกันระหว่างเครื่องแคชเชียร์
+  const dateLabel = formatBusinessDate(new Date())
+
+  return <PosTerminal products={products} categories={categories} allowed={granted.POS ?? []} dateLabel={dateLabel} />
 }

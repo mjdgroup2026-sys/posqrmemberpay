@@ -9,6 +9,7 @@ import type { Prisma } from "@/generated/prisma/client"
 /// กติกา: คัดลอกเฉพาะรายการที่ยังขายอยู่ (isActive) · รายการที่ปลายทางมีชื่อเดียวกันอยู่แล้ว "ข้าม" ไม่ทับ (เรียกซ้ำได้)
 /// · เมนูแนะนำ (isFeatured) ไม่ติดไป — เพดาน 6 รายการเป็นของแต่ละสาขา ให้เจ้าของเลือกเองที่ตั้งค่าร้าน
 /// · imageUrl คัดลอกเป็นข้อความ (ชี้ไฟล์เดิม) ไม่ก๊อปปี้ไฟล์
+/// · (Phase 19) ประเภทครัวติดไปด้วย — ปลายทางที่มี station ชื่อเดียวกันอยู่แล้วใช้ตัวเดิม ไม่สร้างซ้ำ (unique storeId+name)
 
 export type MenuCopyResult = { copied: number; skipped: number }
 
@@ -23,11 +24,30 @@ export async function copyMenu(
     tx.menuItem.findMany({
       where: { storeId: sourceStoreId, isActive: true },
       orderBy: { createdAt: "asc" },
-      include: { modifierGroups: { orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" } } } } },
+      include: {
+        station: { select: { name: true, sortOrder: true } },
+        modifierGroups: { orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" } } } },
+      },
     }),
     tx.menuItem.findMany({ where: { storeId: targetStoreId }, select: { name: true } }),
   ])
   const taken = new Set(existing.map((m) => m.name.trim().toLowerCase()))
+
+  // ประเภทครัวที่ปลายทาง — หาตามชื่อก่อน ไม่มีค่อยสร้าง (Phase 19)
+  const stationIdByName = new Map<string, string>()
+  async function stationIdFor(station: { name: string; sortOrder: number } | null): Promise<string | null> {
+    if (!station) return null
+    const cached = stationIdByName.get(station.name)
+    if (cached) return cached
+    const row = await tx.kitchenStation.upsert({
+      where: { storeId_name: { storeId: targetStoreId, name: station.name } },
+      update: {},
+      create: { storeId: targetStoreId, name: station.name, sortOrder: station.sortOrder },
+      select: { id: true },
+    })
+    stationIdByName.set(station.name, row.id)
+    return row.id
+  }
 
   let copied = 0
   let skipped = 0
@@ -47,6 +67,7 @@ export async function copyMenu(
         isActive: true,
         isFeatured: false,
         featuredSortOrder: null,
+        stationId: await stationIdFor(item.station),
         modifierGroups: {
           create: item.modifierGroups.map((group) => ({
             // nested create ของ model ที่มี storeId — ต้องใส่เอง (extension ช่วยไม่ได้ และที่นี่ไม่ได้ผ่าน extension อยู่แล้ว)

@@ -64,6 +64,8 @@ type StoreFixture = {
   subscriptionId: string
   subscriptionRef: string
   assetId: string
+  /// Phase 19 — ประเภทครัว
+  stationId: string
 }
 
 describe.skipIf(!dbReady)("การแยกข้อมูลตามร้าน (Phase 13 — tenant isolation)", () => {
@@ -192,10 +194,12 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     })
     const session = await db.tableSession.create({ data: { storeId, tableId: table.id, qrCodeId: qr.id } })
 
+    const station = await db.kitchenStation.create({ data: { storeId, name: `ครัวร้าน ${tag}`, sortOrder: 0 } })
     const menuItem = await db.menuItem.create({
       data: {
         storeId,
         name: `เมนูร้าน ${tag}`,
+        stationId: station.id,
         price: "80.00",
         isFeatured: true,
         featuredSortOrder: 0,
@@ -313,6 +317,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       subscriptionId: subscription.id,
       subscriptionRef: subscription.requestRef,
       assetId: asset.id,
+      stationId: station.id,
     }
   }
 
@@ -343,6 +348,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       f.inviteEmail,
       f.subscriptionId,
       f.subscriptionRef,
+      f.stationId,
       `ร้าน ${f.tag}`,
     ]
   }
@@ -409,6 +415,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getPaymentConfig", (q, a) => q.getPaymentConfig(a.storeId)],
     ["getScbConfig", (q, a) => q.getScbConfig(a.storeId)],
     ["listTablesForPos", (q, a) => q.listTablesForPos(a.storeId)],
+    ["listKitchenStations", (q, a) => q.listKitchenStations(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -575,6 +582,17 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "deleteMenuItem",
       (b) => makeFormData({ id: b.menuItemId }),
       async (b) => expect(await testPrisma().menuItem.count({ where: { id: b.menuItemId } })).toBe(1),
+    ],
+    // Phase 19 — ประเภทครัว: แก้/ลบด้วย id ของร้าน B ต้องไม่ถึง · FK stationId ของร้าน B ในฟอร์มเมนูของ A ต้องถูกปฏิเสธ
+    [
+      "saveKitchenStation",
+      (b) => makeFormData({ id: b.stationId, name: "ถูกร้าน A แก้", sortOrder: "0" }),
+      async (b) => expect((await testPrisma().kitchenStation.findUniqueOrThrow({ where: { id: b.stationId } })).name).toBe(`ครัวร้าน ${b.tag}`),
+    ],
+    [
+      "deleteKitchenStation",
+      (b) => makeFormData({ id: b.stationId }),
+      async (b) => expect(await testPrisma().kitchenStation.count({ where: { id: b.stationId } })).toBe(1),
     ],
     [
       "toggleMenuItemActive",
@@ -830,6 +848,20 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       // บิลใน seed ถูกสร้าง "วันนี้" ทั้งสองร้าน — ต้องเห็นแค่ของ A (1 บิล 100 บาท)
       expect(closing?.billCount).toBe(1)
       expect(closing?.totalSales.toString()).toBe("100")
+    })
+
+    it("saveMenuItem ใต้ร้าน A ส่ง stationId ของร้าน B มา ต้องถูกปฏิเสธ (FK จากฟอร์ม — กติกาข้อ 5)", async () => {
+      const result = await actions.saveMenuItem(
+        makeFormData({ name: "เมนูใหม่ของ A", price: "10", imageUrl: "", isActive: "true", modifierGroups: "[]", stationId: B.stationId }),
+      )
+      expect(result.ok).toBe(false)
+      expect(await testPrisma().menuItem.count({ where: { stationId: B.stationId } })).toBe(1)
+      // ส่ง station ของตัวเองผ่านตามปกติ
+      const ok = await actions.saveMenuItem(
+        makeFormData({ name: "เมนูใหม่ของ A", price: "10", imageUrl: "", isActive: "true", modifierGroups: "[]", stationId: A.stationId }),
+      )
+      expect(ok.ok).toBe(true)
+      expect(await testPrisma().menuItem.count({ where: { storeId: A.storeId, stationId: A.stationId } })).toBe(2)
     })
 
     it("switchActiveStore ไปร้านที่ไม่ได้เป็นสมาชิกต้องถูกปฏิเสธ", async () => {

@@ -52,4 +52,10 @@ export {
   // เมนูลิ้นชักบนมือถือ (2026-09-17 — โครงหลังร้านรองรับจอเล็ก)
   Menu as IconHamburger,
   X as IconClose,
+  // Phase 19 — เลือกวันปิดรอบ · จอครัวรายรายการ/ประเภทครัว · เสียงเตือน/พิมพ์อัตโนมัติ
+  CalendarDays as IconCalendar,
+  Volume2 as IconSoundOn,
+  VolumeX as IconSoundOff,
+  Printer as IconPrinter,
+  Flame as IconStation,
 } from "lucide-react"

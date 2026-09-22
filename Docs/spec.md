@@ -191,6 +191,7 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `isActive` | Boolean | default true | ปิดเมนูชั่วคราวได้โดยไม่ลบ |
 | `isFeatured` | Boolean | default false | ปักหมุดเป็นเมนูแนะนำ — **สูงสุด 6 รายการที่ `isFeatured=true` พร้อมกัน** (validation ปฏิเสธรายการที่ 7) |
 | `featuredSortOrder` | Int? | optional | ลำดับการแสดงในกลุ่มเมนูแนะนำ |
+| `stationId` | String? | optional, FK → KitchenStation (SetNull) | ประเภทครัวที่รับผิดชอบเมนูนี้ (Phase 19) — null = ไม่ระบุ · ลบ station แล้วเมนูกลับเป็น null |
 | `createdAt` | DateTime | auto | เวลาสร้าง |
 | `updatedAt` | DateTime | auto | เวลาแก้ไขล่าสุด |
 
@@ -210,6 +211,16 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `modifierGroupId` | String | FK → ModifierGroup | — |
 | `name` | String | required | เช่น "เผ็ดน้อย", "ไข่ดาว" |
 | `priceDelta` | Decimal | default 0, ≥ 0 | ราคาบวกเพิ่ม |
+
+#### KitchenStation *(Phase 19 — ประเภทครัว / สถานีปรุง)*
+| ฟิลด์ | ชนิด | เงื่อนไข | คำอธิบาย |
+|---|---|---|---|
+| `id` | String | PK | รหัสภายในระบบ |
+| `storeId` | String | FK → Store (Cascade) | ของร้าน · unique ร่วมกับ `name` |
+| `name` | String | required, ≤ 40 | เช่น "ของทอด", "ของผัด", "ต้ม/นึ่ง", "บาร์น้ำ", "ของหวาน", "ผลไม้" |
+| `sortOrder` | Int | default 0 | ลำดับแท็บบน KDS และหัวกลุ่มบนทิกเก็ต (`lib/ticket-lines.ts` ที่เดียว) |
+> เป็นเรื่องหลังครัวล้วน ลูกค้าไม่เห็น · เมนู 1 รายการอยู่ได้ครัวเดียว (`MenuItem.stationId`) · **ไม่ snapshot ลง MobileOrderItem**
+> เพราะเป็นเรื่องจัดคิวไม่ใช่เงิน — KDS/ทิกเก็ตอ่านผ่านเมนู ณ เวลาอ่าน (เปลี่ยน station ของเมนูแล้วออร์เดอร์ค้างย้ายแท็บตาม)
 
 #### MobileOrder
 | ฟิลด์ | ชนิด | เงื่อนไข | คำอธิบาย |
@@ -284,6 +295,8 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `hasKDS` | Boolean | default false | สลับเส้นทางสถานะครัว (มี KDS vs manual, ดู §3) — **ห้ามเปลี่ยนขณะมี `TableSession.status = OPEN` อยู่อย่างน้อย 1 โต๊ะ** |
 | `serviceChargePercent` | Decimal | default 0 | ค่าบริการ % ที่บวกตอนปิดบิล |
 | `crmEnabled` | Boolean | default false | เปิด/ปิดฟีเจอร์สมัครสมาชิก |
+| `kitchenAlertSound` | Boolean | default true | (Phase 19) เสียงเตือนบน KDS เมื่อมีออร์เดอร์ใหม่ (ข้อความเตือนขึ้นเสมอ) |
+| `kitchenAutoPrint` | Boolean | default false | (Phase 19) เปิดกล่องพิมพ์ทิกเก็ต PDF อัตโนมัติบน KDS เมื่อออร์เดอร์เข้า — ไม่เกี่ยวกับ ESC/POS ผ่าน env |
 | `updatedAt` | DateTime | auto | — |
 | `updatedById` | String? | optional, FK → User | — |
 
@@ -838,6 +851,46 @@ enum ResourceKey {
       เพราะ id ผูกกับไฟล์ตัวนั้นตลอดชีวิต · การค้นด้วย id ข้ามร้านอยู่ใน `lib/store-resolve.ts` ตามกติกาข้อ 5
 - [x] ร้านหนึ่งลบรูปของอีกร้านไม่ได้ (เทสใน `tenant-isolation` + `assets.test.ts`)
 
+### F24 — วันที่บนหน้าขาย + เลือกวันปิดรอบ (Phase 19)
+> เจ้าของระบบพบว่าหน้าขายไม่บอกว่าวันนี้วันอะไร และเมื่อลืมปิดรอบ วันถัดมาปิดรอบของเมื่อวานไม่ได้เลย (ระบบยึด "วันนี้" ตายตัว)
+
+- [x] `/pos` และ `/mobile-order/pos` แสดงวันที่ขาย (วันทางธุรกิจ เวลาไทย จัดรูปแบบฝั่ง server — `formatBusinessDate`) บนหัวจอ
+- [x] `/pos/closing?date=YYYY-MM-DD` เลือกวันปิดรอบได้ — ค่าเริ่มต้นวันนี้ · **ห้ามอนาคต** (`parseBusinessDayKey` ปฏิเสธทั้งรูปแบบผิด/วันที่ไม่มีจริง/อนาคต)
+      · ยอดทุกช่องคำนวณจาก `businessDayRange(วันที่เลือก)` · บันทึก `closingDate` ตามที่เลือก · unique `(storeId, cashierId, closingDate)` ยังเป็นด่านจริง
+- [x] ปิดรอบย้อนหลังแล้ว void บิลของวันนั้นถูกปฏิเสธเหมือนเดิม (`voidSale` เช็ค `CashierClosing` ตามวันของบิลอยู่แล้ว — ไม่ต้องแก้)
+- [x] ประวัติการปิดยอดคลิกวันที่เพื่อเปิดรอบนั้นดูได้ · ป้าย "(ย้อนหลัง)" บนหัวหน้าเมื่อไม่ใช่วันนี้
+- [x] เทส `closing.test.ts` +4 (นับเฉพาะบิลของวันที่เลือก · ปิดคนละวันได้แต่วันเดิมซ้ำไม่ได้ · อนาคต/รูปแบบผิดถูกปฏิเสธ · void หลังปิดรอบถูกปฏิเสธ) · `day.test.ts` +3
+
+### F25 — KDS รายรายการ + ประเภทครัว (Phase 19)
+> เดิม KDS กด "เริ่มปรุง/เสร็จ/เสิร์ฟ" ได้ทั้งใบเท่านั้น ทั้งที่ action รายรายการมีอยู่แล้ว (F13) · ครัวที่มีหลายส่วน (ทอด/ผัด/บาร์น้ำ) ต้องดูจอเดียวปนกัน
+
+- [x] แต่ละบรรทัดบน KDS มีปุ่มของตัวเอง: รอครัวรับ → [เริ่ม] [ยกเลิก] · กำลังปรุง → [เสร็จ] · พร้อมเสิร์ฟ → [เสิร์ฟ] ผ่าน `startCookingItem`/`markItemReady`/`markItemServed`/`cancelOrderItem`
+      (conditional update เดิม กติกาข้อ 7) · ปุ่ม "ทั้งใบ" ยังอยู่ท้ายการ์ดเมื่อมี > 1 บรรทัดในคอลัมน์นั้น
+- [x] ยกเลิกจาก KDS ต้องกรอกเหตุผล และ**ใช้สิทธิ์ `MO_TABLES:DELETE`** (ตัวเดียวกับหน้าโต๊ะ กติกาข้อ 11) — หน้า KDS ส่ง `canCancel` จาก `granted.MO_TABLES` · ยกเลิกได้เฉพาะ `AWAITING_KITCHEN` (spec §3 เดิม)
+- [x] รายการที่ถูกยกเลิกของออร์เดอร์ที่ยังมีของค้าง แสดงขีดฆ่าพร้อมเหตุผลในคอลัมน์ "ออร์เดอร์ใหม่" (ครัวรู้ว่าไม่ต้องทำ) · SERVED ไม่แสดง · ออร์เดอร์ที่จบทั้งใบหายจากจอ
+- [x] `KitchenStation` ต่อร้าน (CRUD ในการ์ด "ประเภทครัว" ใต้ตารางเมนู `/mobile-order/menu` สิทธิ์ `MO_MENU` · ชื่อ unique ต่อร้าน · ลบแล้วเมนูกลับเป็น "ไม่ระบุครัว")
+      · ฟอร์มเมนูเลือกประเภทครัว (**FK จากฟอร์มถูกเช็คว่าเป็นของร้าน** — กติกาข้อ 5 · เทสใน tenant-isolation)
+- [x] KDS มีแท็บ "ทุกครัว / <station> … / ไม่ระบุครัว" ผ่าน `?station=` — จอทอด/จอบาร์น้ำเปิดค้างคนละแท็บได้ · ป้าย station ต่อบรรทัดเมื่อดูทุกครัว
+- [x] ทิกเก็ต PDF และ ESC/POS จัดกลุ่มบรรทัดตาม station ด้วย **`lib/ticket-lines.ts` ที่เดียว** (`groupByStation` · ไม่ระบุครัวอยู่ท้าย · ทุกบรรทัดไม่ระบุ = พิมพ์แบบเดิมไม่มีหัวกลุ่ม)
+      · `OrderLine` (lib/order-lines.ts) พก station มาตั้งแต่ตอนสั่ง ทิกเก็ตหลัง commit จึงจัดกลุ่มได้ทันที
+- [x] จอขายพนักงาน `/mobile-order/pos` มีชิปกรองตาม station · ลูกค้าไม่เห็น station (ตัดสินใจ 2026-09-22)
+- [x] คัดลอกเมนูข้ามสาขา (`lib/menu-copy.ts`) พา station ไปด้วย — ปลายทางที่มีชื่อเดียวกันใช้แถวเดิม · ร้านใหม่ได้ station ตัวอย่าง "ของผัด"/"บาร์น้ำ" ผูกกับเมนูตัวอย่าง
+- [x] migration `20260922090000_add_kitchen_station_and_kds_prefs` additive ล้วน · `KitchenStation` อยู่ใน `STORE_SCOPED_MODELS`
+- [x] เทส `kitchen-station.test.ts` 8 เคส · `ticket-lines.test.ts` 5 · `kitchen-display.test.tsx` 7 · tenant-isolation +3 (query 1 · action 2 · FK 1)
+
+### F26 — เตือนออร์เดอร์ใหม่บน KDS + พิมพ์ทิกเก็ตอัตโนมัติ (Phase 19)
+> ครัวไม่รู้ว่ามีออร์เดอร์เข้าถ้าไม่จ้องจอ · เส้นทาง PDF ต้องกดปุ่ม "ทิกเก็ต" เองทุกใบ
+
+- [x] `StoreSettings.kitchenAlertSound` (default true) / `kitchenAutoPrint` (default false) — สวิตช์ในการ์ดจอครัวของ `/mobile-order/settings` (แสดงเมื่อ `hasKDS`)
+- [x] KDS เทียบชุด orderId ที่มีของ "รอครัวรับ" ระหว่างรอบ refresh (SSE/polling เดิม) → ออร์เดอร์ที่ไม่เคยเห็นตั้งแต่เปิดหน้า = toast "ออร์เดอร์ใหม่ — โต๊ะ X" เสมอ
+      + เสียง 2 จังหวะจาก Web Audio เมื่อร้านเปิดเสียงและเครื่องนั้นกด "เปิดเสียงเตือน" แล้ว (`localStorage["kds-sound"]`)
+      > **ข้อจำกัดเบราว์เซอร์**: เล่นเสียงไม่ได้จนกว่าผู้ใช้จะโต้ตอบกับหน้า → ต้องกดเปิดครั้งแรกบนแต่ละเครื่อง · เปิดแท็บใหม่โดยไม่แตะหน้าเลย เสียงรอบแรกอาจเงียบ toast ยังขึ้น
+- [x] `kitchenAutoPrint` เปิด → KDS (มุมมอง "ทุกครัว" เท่านั้น กันพิมพ์ซ้ำจากหลายแท็บ) เอาออร์เดอร์ใหม่ที่ `printedAt = null` เข้าคิว `components/auto-print.tsx`
+      → โหลด `/tickets/[id]?auto=1&embed=1` ใน iframe ซ่อนทีละใบ → หน้าทิกเก็ตเรียก `print()` + `markTicketPrinted` เหมือนเดิม → `postMessage` หลัง `afterprint` ปล่อยใบถัดไป (timeout 30 วิ)
+      > **ยังต้องกด "พิมพ์" ในกล่องของเบราว์เซอร์ 1 ครั้งต่อใบ** — ออกเงียบ ๆ ได้เมื่อรัน Chrome ด้วย `--kiosk-printing` (ตั้งเครื่องพิมพ์เริ่มต้นไว้) ·
+      > ใช้ iframe ไม่ใช่ `window.open()` เพราะ popup ที่ไม่ได้มาจากการคลิกถูกบล็อก · ร้านที่ตั้ง `KITCHEN_PRINTER_HOST` พิมพ์จาก server ตอน commit อยู่แล้ว (`printedAt` ไม่ null) จึงไม่เข้าคิวนี้
+- [x] ของค้างเก่าตอนเปิดหน้าไม่เตือน/ไม่พิมพ์รัว · แต่ละ orderId เตือน/พิมพ์ครั้งเดียวต่อการเปิดหน้า · ทำงานเฉพาะบนหน้า KDS ที่เปิดค้างไว้ (ไม่มี push ตอนไม่ได้เปิดหน้า)
+
 ---
 
 ## 6. Routes / UI (POS)
@@ -863,10 +916,12 @@ enum ResourceKey {
 - ฟอร์มเพิ่ม/แก้ไขชื่อหมวดหมู่ (dialog), ปุ่มลบพร้อมยืนยัน (ปิดปุ่มลบถ้ามีสินค้าผูกอยู่)
 
 ### `/pos/closing` — ปิดการขายประจำวัน
-- แสดงสรุปยอดขายวันนี้ของแคชเชียร์ปัจจุบัน (session user) แบบ real-time: ยอดรวม, แยกตามวิธีชำระเงิน, จำนวนบิล,
+- **(Phase 19) เลือกวันปิดรอบได้** ผ่าน `?date=YYYY-MM-DD` (ตัวเลือกวันที่บนหัวหน้า · ค่าเริ่มต้นวันนี้ · ห้ามอนาคต · ค่าผิด = ถอยเป็นวันนี้)
+  — ทุกตัวเลขด้านล่างคำนวณจากวันที่เลือก · ประวัติการปิดยอดคลิกวันที่เพื่อดูรอบนั้นได้
+- แสดงสรุปยอดขายของวันที่เลือกของแคชเชียร์ปัจจุบัน (session user) แบบ real-time: ยอดรวม, แยกตามวิธีชำระเงิน, จำนวนบิล,
   จำนวนบิล voided
 - ช่องกรอกเงินสดที่นับได้จริง → คำนวณส่วนต่างทันที → ปุ่ม "ยืนยันปิดยอด"
-- ถ้าปิดยอดของวันนี้ไปแล้ว หน้าจะแสดงผลการปิดยอดเดิม (read-only) แทนฟอร์ม พร้อมลิงก์ไปประวัติการปิดยอด
+- ถ้าปิดยอดของวันที่เลือกไปแล้ว หน้าจะแสดงผลการปิดยอดเดิม (read-only) แทนฟอร์ม พร้อมลิงก์ไปประวัติการปิดยอด
 - ประวัติการปิดยอดย้อนหลัง (ต่อแคชเชียร์)
 
 ### `/roles` — จัดการบทบาทและสิทธิ์ (ต้องมีสิทธิ์ `USERS:EDIT`)
@@ -1957,6 +2012,29 @@ enum ResourceKey {
       + ใบเสร็จพิมพ์ได้ (ใช้ `components/receipt.tsx` เดิม — `sku`/`unit` กลายเป็น optional เพราะเมนูอาหารไม่มี)
 - [x] `Sale.channel = TAKEAWAY` โผล่เป็นป้าย "อาหารกลับบ้าน" ใน `/pos/history`
 
+
+### ✅ Phase 19 — ปรับปรุงครัว + ปิดรอบ (F24–F26) — โค้ดเสร็จ 2026-09-22 (รอ deploy)
+> **ที่มา (เจ้าของสั่ง 2026-09-22)**: (1) หน้าขายไม่มีวันที่ และปิดรอบเลือกวันไม่ได้ (2) ครัวต้องทำ/เสิร์ฟ/ยกเลิกทีละรายการได้ ไม่ต้องทั้งรอบ
+> (3) มีประเภทครัว (ของทอด ของผัด ต้ม/นึ่ง บาร์น้ำ ของหวาน ผลไม้) ผูกกับเมนู (4) เตือนรับออร์เดอร์ + ตั้งค่าพิมพ์อัตโนมัติได้/ไม่ได้
+> · **การตัดสินใจ**: ปิดรอบย้อนหลังได้ทุกวันในอดีต ห้ามอนาคต · station เป็นเรื่องหลังครัว ลูกค้าไม่เห็น · เมนู 1 รายการอยู่ครัวเดียว ·
+> เตือน/พิมพ์อัตโนมัติทำงานเฉพาะบนหน้า KDS ที่เปิดค้างไว้ · ยกเลิกจาก KDS ใช้สิทธิ์ `MO_TABLES:DELETE` เดิม ไม่เพิ่ม resource ใหม่
+
+- [x] schema: `KitchenStation` · `MenuItem.stationId?` (SetNull) · `StoreSettings.kitchenAlertSound/kitchenAutoPrint` — migration
+      `20260922090000_add_kitchen_station_and_kds_prefs` additive ล้วน ไม่มี backfill · `lib/db.ts` เพิ่ม `KitchenStation` ใน `STORE_SCOPED_MODELS`
+- [x] F24 วันที่บนหน้าขาย + เลือกวันปิดรอบ (`lib/day.ts` `parseBusinessDayKey` · `lib/format.ts` `formatBusinessDate` · `closingSchema.closingDate` ·
+      `getTodaySalesSummary/getTodayClosing(…, date)` · `components/closing-date-picker.tsx`)
+- [x] F25 KDS รายรายการ + station (`components/kitchen-display.tsx` เขียนใหม่ · `components/station-manager.tsx` · `saveKitchenStation/deleteKitchenStation` ·
+      `lib/ticket-lines.ts` · `OrderLine.stationId/stationName` · printer payload/PDF จัดกลุ่ม · `menu-copy.ts` · เมนูตัวอย่างใน onboarding)
+- [x] F26 เตือน + พิมพ์อัตโนมัติ (`components/kitchen-alert.ts` · `components/auto-print.tsx` · ทิกเก็ต `?embed=1` + `postMessage`)
+- [x] เทส: `closing.test.ts` +4 · `day.test.ts` +3 · `kitchen-station.test.ts` 8 · `ticket-lines.test.ts` 5 · `kitchen-display.test.tsx` 7 · tenant-isolation +4
+- [x] เอกสาร: §2 `KitchenStation` + ฟิลด์ใหม่ · §5 F24–F26 · §6 `/pos/closing` · CLAUDE.md สถานะ + ที่เดียวของ `lib/ticket-lines.ts`
+- [ ] **deploy**: ไม่มี env ใหม่ · migration additive (ซ้อมบนสำเนา production ตามขั้นตอนเดิมก่อน merge) · หลัง deploy ตรวจ `\d kitchen_station` ในฐานจริง
+      + เปิด `/mobile-order/kitchen` จริงเห็นปุ่มต่อบรรทัด · ทดสอบเสียงเตือน/พิมพ์อัตโนมัติด้วยเครื่องครัวจริง (Chrome + `--kiosk-printing` ถ้าต้องการออกเงียบ)
+
+### ⛔ Phase 18 — เว็บสาธารณะ "ค้นหาร้าน" (`/explore` + Longdo Map + รีวิว) — **ยกเลิก ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22)**
+> เคยวางแผนไว้ 2026-09-18 เป็น route group `(public)` + `StoreListing`/`StoreReview` + Longdo Map · **ปิดแล้วทั้ง 18a/18b**
+> ไม่มีโค้ด/migration/env ใดถูกสร้างขึ้นจากแผนนี้ · ถ้าวันหน้าจะทำ ให้ทำเป็นโปรเจกต์แยกและร่างใหม่ ไม่อ้างแผนเดิม
+> · เลข F24–F25 ที่เคยจองไว้ถูกนำไปใช้กับ Phase 19 แทน
 
 ---
 

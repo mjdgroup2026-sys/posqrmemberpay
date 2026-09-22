@@ -17,7 +17,7 @@ import {
   type ReceiptData,
 } from "@/lib/types"
 import { Receipt } from "@/components/receipt"
-import { IconPlus, IconSearch, IconSpinner, IconTrash, IconWallet } from "@/components/icons"
+import { IconCalendar, IconPlus, IconSearch, IconSpinner, IconTrash, IconWallet } from "@/components/icons"
 import {
   Dialog,
   DialogContent,
@@ -43,11 +43,14 @@ export function PosTerminal({
   products,
   categories,
   allowed = FULL_ACCESS,
+  dateLabel,
 }: {
   products: ProductOption[]
   categories: { id: string; name: string }[]
   /// สิทธิ์บน POS — ADD = ทำการขาย/ชำระเงิน (§4) · ไม่มี = ดูสินค้า/สต็อกได้แต่ปุ่มชำระเงินปิด
   allowed?: AllowedActions
+  /// วันทางธุรกิจวันนี้ (เวลาไทย) จัดรูปแบบมาจาก server แล้ว (Phase 19) — โชว์บนหัวจอให้แคชเชียร์เห็นว่าบิลจะลงวันไหน
+  dateLabel?: string
 }) {
   const router = useRouter()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -234,6 +237,12 @@ export function PosTerminal({
             พิมพ์ชื่อหรือ SKU แล้วกด Enter เพื่อเพิ่มลงตะกร้า (ใช้กับเครื่องอ่านบาร์โค้ดได้ทันที)
           </p>
         </div>
+        {dateLabel ? (
+          <span className="chip chip-neutral" title="วันที่ขาย (เวลาไทย) — บิลที่ออกตอนนี้จะลงรอบวันนี้">
+            <IconCalendar size={14} aria-hidden />
+            <span className="num">{dateLabel}</span>
+          </span>
+        ) : null}
       </div>
 
       <div className="pos-layout">

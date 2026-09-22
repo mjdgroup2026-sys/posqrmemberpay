@@ -1,13 +1,16 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getSession } from "@/lib/session"
 import { getTodaySalesSummary, getTodayClosing, listClosings } from "@/lib/queries"
-import { formatBaht, formatDate, formatDateTime, formatNumber } from "@/lib/format"
+import { formatBaht, formatBusinessDate, formatDate, formatDateTime, formatNumber } from "@/lib/format"
+import { businessDayKey, parseBusinessDayKey } from "@/lib/day"
+import { ClosingDatePicker } from "@/components/closing-date-picker"
 import { ClosingForm } from "@/components/closing-form"
 import { requirePageAccess } from "@/lib/permissions"
 
 export const metadata = { title: "ปิดยอดประจำวัน" }
 
-export default async function ClosingPage() {
+export default async function ClosingPage({ searchParams }: PageProps<"/pos/closing">) {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
   const { storeId, granted } = await requirePageAccess("POS_CLOSING")
   const canClose = granted.POS_CLOSING?.includes("ADD") ?? false
@@ -16,9 +19,18 @@ export default async function ClosingPage() {
   if (!session?.user) redirect("/login")
 
   const cashierId = session.user.id
+
+  // Phase 19 — เลือกวันปิดรอบผ่าน ?date=YYYY-MM-DD (ย้อนหลังเท่านั้น) · ค่าที่ผิด/อนาคต = ถอยกลับเป็นวันนี้เงียบ ๆ
+  const query = await searchParams
+  const todayKey = businessDayKey()
+  const requestedKey = typeof query.date === "string" ? query.date : todayKey
+  const closingDay = parseBusinessDayKey(requestedKey) ?? parseBusinessDayKey(todayKey)
+  if (!closingDay) redirect("/pos/closing")
+  const closingKey = businessDayKey(closingDay)
+  const isToday = closingKey === todayKey
   const [summary, today, history] = await Promise.all([
-    getTodaySalesSummary(storeId, cashierId),
-    getTodayClosing(storeId, cashierId),
+    getTodaySalesSummary(storeId, cashierId, closingDay),
+    getTodayClosing(storeId, cashierId, closingDay),
     listClosings(storeId, { cashierId, limit: 30 }),
   ])
 
@@ -29,16 +41,18 @@ export default async function ClosingPage() {
           <p className="t-eyebrow">ขายหน้าร้าน</p>
           <h1 className="t-h1">ปิดยอดประจำวัน</h1>
           <p className="t-body" style={{ marginTop: 4 }}>
-            สรุปยอดของ {session.user.name} สำหรับวันนี้ — คำนวณอัตโนมัติจากบิลจริง ไม่ต้องกรอกเอง
+            สรุปยอดของ {session.user.name} รอบวันที่ <strong>{formatBusinessDate(closingDay)}</strong>
+            {isToday ? " (วันนี้)" : " (ย้อนหลัง)"} — คำนวณอัตโนมัติจากบิลจริง ไม่ต้องกรอกเอง
           </p>
         </div>
+        <ClosingDatePicker value={closingKey} today={todayKey} />
       </div>
 
       <section
         style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}
       >
         <article className="stat-tile">
-          <span className="t-caption">ยอดขายรวมวันนี้</span>
+          <span className="t-caption">{isToday ? "ยอดขายรวมวันนี้" : "ยอดขายรวมของวันที่เลือก"}</span>
           <strong className="t-h1 num">฿{formatBaht(summary.totalSales)}</strong>
           <span className="t-caption num">{formatNumber(summary.billCount)} บิล</span>
         </article>
@@ -61,7 +75,7 @@ export default async function ClosingPage() {
           <span className="t-caption">บิลจาก MJD Mobile Order</span>
         </article>
         <article className="stat-tile">
-          <span className="t-caption">บิลที่ถูกยกเลิกวันนี้</span>
+          <span className="t-caption">{isToday ? "บิลที่ถูกยกเลิกวันนี้" : "บิลที่ถูกยกเลิกในวันนั้น"}</span>
           <strong className="t-h1 num" style={{ color: summary.voidedCount > 0 ? "var(--danger)" : undefined }}>
             {formatNumber(summary.voidedCount)}
           </strong>
@@ -71,13 +85,13 @@ export default async function ClosingPage() {
       <div className="form-split">
         <section className="card-ui card-pad">
           <h2 className="t-h2" style={{ marginBottom: 16 }}>
-            {today ? "ผลการปิดยอดวันนี้" : "นับเงินและปิดยอด"}
+            {today ? (isToday ? "ผลการปิดยอดวันนี้" : "ผลการปิดยอดของวันที่เลือก") : "นับเงินและปิดยอด"}
           </h2>
 
           {today ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div className="alert-banner info">
-                ปิดยอดของวันนี้เรียบร้อยแล้วเมื่อ {formatDateTime(today.closedAt)} — แก้ไขไม่ได้
+                ปิดยอดรอบวันที่ {formatBusinessDate(closingDay)} เรียบร้อยแล้วเมื่อ {formatDateTime(today.closedAt)} — แก้ไขไม่ได้
               </div>
               <span className="row" style={{ justifyContent: "space-between" }}>
                 <span className="t-small">ยอดขายรวม</span>
@@ -115,7 +129,7 @@ export default async function ClosingPage() {
               {today.note ? <p className="t-caption">หมายเหตุ: {today.note}</p> : null}
             </div>
           ) : canClose ? (
-            <ClosingForm summary={summary} />
+            <ClosingForm summary={summary} closingDate={closingKey} isToday={isToday} />
           ) : (
             <div className="alert-banner info">คุณมีสิทธิ์ดูยอดขายอย่างเดียว — บันทึกรายการไม่ได้ (ติดต่อเจ้าของร้านเพื่อขอสิทธิ์)</div>
           )}
@@ -146,7 +160,9 @@ export default async function ClosingPage() {
                   {history.map((row) => (
                     <tr key={row.id} style={{ borderTop: "1px solid var(--line)" }}>
                       <td className="num" style={{ padding: "12px 24px" }}>
-                        {formatDate(row.closingDate)}
+                        <Link href={`/pos/closing?date=${row.closingDate.toISOString().slice(0, 10)}`} style={{ textDecoration: "underline" }}>
+                          {formatDate(row.closingDate)}
+                        </Link>
                       </td>
                       <td className="num" style={{ padding: "12px", textAlign: "right" }}>
                         ฿{formatBaht(row.totalSales)}

@@ -484,10 +484,11 @@ export type ClosingSummary = {
   voidedCount: number
 }
 
-/// สรุปยอดวันนี้ของแคชเชียร์คนหนึ่ง — คำนวณสดจาก Sale จริงเสมอ ไม่มีการกรอกเอง
-export async function getTodaySalesSummary(storeId: string, cashierId: string): Promise<ClosingSummary> {
+/// สรุปยอดของแคชเชียร์คนหนึ่งในวันทางธุรกิจที่ระบุ (ค่าเริ่มต้น = วันนี้) — คำนวณสดจาก Sale จริงเสมอ ไม่มีการกรอกเอง
+/// Phase 19: รับ `date` เพื่อปิดรอบย้อนหลังได้ — ผู้เรียกต้องผ่าน parseBusinessDayKey() มาก่อน (กันวันอนาคต)
+export async function getTodaySalesSummary(storeId: string, cashierId: string, date: Date = new Date()): Promise<ClosingSummary> {
   const db = forStore(storeId)
-  const { start, end } = businessDayRange()
+  const { start, end } = businessDayRange(date)
 
   const [byMethod, voidedCount] = await Promise.all([
     db.sale.groupBy({
@@ -522,10 +523,10 @@ export async function getTodaySalesSummary(storeId: string, cashierId: string): 
   return summary
 }
 
-export async function getTodayClosing(storeId: string, cashierId: string) {
+export async function getTodayClosing(storeId: string, cashierId: string, date: Date = new Date()) {
   const db = forStore(storeId)
   const row = await db.cashierClosing.findUnique({
-    where: { storeId_cashierId_closingDate: { storeId, cashierId, closingDate: businessDateOnly() } },
+    where: { storeId_cashierId_closingDate: { storeId, cashierId, closingDate: businessDateOnly(date) } },
   })
   if (!row) return null
   return {
@@ -877,6 +878,9 @@ export type OrderItemRow = {
   status: "AWAITING_KITCHEN" | "COOKING" | "READY" | "SERVED" | "CANCELLED"
   options: { groupName: string; optionName: string; priceDelta: number }[]
   cancelReason: string | null
+  /// ประเภทครัวของเมนู ณ ตอนอ่าน (Phase 19) — null = ไม่ระบุ · ใช้แยกแท็บ KDS และจัดกลุ่มบนทิกเก็ต
+  stationId: string | null
+  stationName: string | null
 }
 
 export type TableDetail = {
@@ -940,7 +944,7 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
           include: {
             items: {
               orderBy: { createdAt: "asc" },
-              include: { menuItem: { select: { name: true } } },
+              include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } } },
             },
           },
         },
@@ -972,6 +976,8 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
+      stationId: item.menuItem.stationId,
+      stationName: item.menuItem.station?.name ?? null,
     })),
   }))
 
@@ -1007,7 +1013,8 @@ export type KitchenTicket = {
   items: OrderItemRow[]
 }
 
-/// ทิกเก็ตครัว — รวมเฉพาะรายการที่ยังไม่จบ (ยกเลิก/เสิร์ฟแล้วไม่ต้องแสดงบน KDS)
+/// ทิกเก็ตครัว — เฉพาะออร์เดอร์ที่ยังมีรายการค้าง (AWAITING_KITCHEN/COOKING/READY อย่างน้อย 1)
+/// Phase 19: พกรายการที่ CANCELLED ของออร์เดอร์นั้นมาด้วย (ขีดฆ่าบนการ์ด ครัวจะได้รู้ว่าอันไหนไม่ต้องทำ) · SERVED ไม่พก
 export async function listKitchenTickets(storeId: string): Promise<KitchenTicket[]> {
   const db = forStore(storeId)
   const orders = await db.mobileOrder.findMany({
@@ -1020,9 +1027,9 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
     include: {
       session: { select: { table: { select: { code: true } } } },
       items: {
-        where: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY"] } },
+        where: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY", "CANCELLED"] } },
         orderBy: { createdAt: "asc" },
-        include: { menuItem: { select: { name: true } } },
+        include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } } },
       },
     },
   })
@@ -1049,6 +1056,8 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
+      stationId: item.menuItem.stationId,
+      stationName: item.menuItem.station?.name ?? null,
     })),
   }))
 }
@@ -1067,6 +1076,8 @@ export async function getStoreSettings(storeId: string) {
     serviceChargePercent: toNumber(settings.serviceChargePercent),
     crmEnabled: settings.crmEnabled,
     posDefaultMode: settings.posDefaultMode,
+    kitchenAlertSound: settings.kitchenAlertSound,
+    kitchenAutoPrint: settings.kitchenAutoPrint,
   }
 }
 
@@ -1137,6 +1148,9 @@ export type MenuItemCard = {
   price: number
   imageUrl: string | null
   isFeatured: boolean
+  /// ประเภทครัว (Phase 19) — ใช้กรองบนจอขายพนักงาน · ลูกค้าไม่เห็น
+  stationId: string | null
+  stationName: string | null
   modifierGroups: MenuModifierGroup[]
 }
 
@@ -1147,6 +1161,8 @@ function toMenuCard(item: {
   price: unknown
   imageUrl: string | null
   isFeatured: boolean
+  stationId: string | null
+  station: { name: string } | null
   modifierGroups: {
     id: string
     name: string
@@ -1162,6 +1178,8 @@ function toMenuCard(item: {
     price: toNumber(item.price),
     imageUrl: item.imageUrl,
     isFeatured: item.isFeatured,
+    stationId: item.stationId,
+    stationName: item.station?.name ?? null,
     modifierGroups: item.modifierGroups.map((group) => ({
       id: group.id,
       name: group.name,
@@ -1177,6 +1195,7 @@ function toMenuCard(item: {
 }
 
 const MENU_INCLUDE = {
+  station: { select: { name: true } },
   modifierGroups: {
     orderBy: { sortOrder: "asc" as const },
     include: { options: { orderBy: { sortOrder: "asc" as const } } },
@@ -1232,7 +1251,7 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
       orders: {
         orderBy: { orderNumber: "asc" },
         include: {
-          items: { orderBy: { createdAt: "asc" }, include: { menuItem: { select: { name: true } } } },
+          items: { orderBy: { createdAt: "asc" }, include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } } } },
         },
       },
     },
@@ -1253,6 +1272,8 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
+      stationId: item.menuItem.stationId,
+      stationName: item.menuItem.station?.name ?? null,
     })),
   }))
 
@@ -1526,7 +1547,18 @@ export type KitchenTicketDoc = {
   submittedAt: Date
   printedAt: Date | null
   storeName: string
-  items: { id: string; quantity: number; name: string; options: string[]; note: string | null }[]
+  /// รายการพร้อมประเภทครัว (Phase 19) — หน้าทิกเก็ตจัดกลุ่มด้วย lib/ticket-lines.ts
+  items: {
+    id: string
+    quantity: number
+    name: string
+    options: string[]
+    note: string | null
+    stationId: string | null
+    stationName: string | null
+  }[]
+  /// ลำดับ station ของร้าน ให้ groupByStation() เรียงตรงกับ KDS
+  stationOrder: { id: string; sortOrder: number }[]
 }
 
 /// ทิกเก็ตของออร์เดอร์เดียวสำหรับหน้าพิมพ์/บันทึกเป็น PDF
@@ -1551,19 +1583,20 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
           quantity: true,
           note: true,
           selectedOptionsSnapshot: true,
-          menuItem: { select: { name: true } },
+          menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } },
         },
       },
     },
   })
   if (!order) return null
 
-  const [settings, merged] = await Promise.all([
+  const [settings, merged, stationOrder] = await Promise.all([
     db.storeSettings.findUnique({ where: { storeId }, select: { storeName: true } }),
     // ออร์เดอร์กลับบ้านไม่มีโต๊ะ จึงไม่มีโต๊ะที่ถูกรวมให้ไล่หา (Phase 17c)
     order.session
       ? db.table.findMany({ where: { primaryTableId: order.session.tableId }, select: { code: true } })
       : Promise.resolve([]),
+    db.kitchenStation.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, sortOrder: true } }),
   ])
 
   return {
@@ -1586,7 +1619,10 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
       name: item.menuItem.name,
       options: parseOptions(item.selectedOptionsSnapshot).map((o) => o.optionName),
       note: item.note,
+      stationId: item.menuItem.stationId,
+      stationName: item.menuItem.station?.name ?? null,
     })),
+    stationOrder,
   }
 }
 
@@ -1725,6 +1761,8 @@ export type ManagedMenuItem = {
   imageUrl: string | null
   isActive: boolean
   isFeatured: boolean
+  stationId: string | null
+  stationName: string | null
   orderedCount: number
   modifierGroups: {
     name: string
@@ -1747,6 +1785,8 @@ export async function listMenuForManage(storeId: string): Promise<ManagedMenuIte
       imageUrl: true,
       isActive: true,
       isFeatured: true,
+      stationId: true,
+      station: { select: { name: true } },
       _count: { select: { orderItems: true, saleItems: true } },
       modifierGroups: {
         orderBy: { sortOrder: "asc" },
@@ -1768,6 +1808,8 @@ export async function listMenuForManage(storeId: string): Promise<ManagedMenuIte
     imageUrl: item.imageUrl,
     isActive: item.isActive,
     isFeatured: item.isFeatured,
+    stationId: item.stationId,
+    stationName: item.station?.name ?? null,
     orderedCount: item._count.orderItems + item._count.saleItems,
     modifierGroups: item.modifierGroups.map((group) => ({
       name: group.name,
@@ -2109,4 +2151,23 @@ export async function listTablesForPos(storeId: string): Promise<PosTableOption[
       currentTotal: session ? (totals.get(session.id)?.total ?? 0) : 0,
     }
   })
+}
+
+// ───────────────────── ประเภทครัว (Phase 19) ─────────────────────
+
+export type KitchenStationRow = {
+  id: string
+  name: string
+  sortOrder: number
+  /// จำนวนเมนูที่ผูกอยู่ — หน้าจัดการใช้เตือนก่อนลบ (ลบแล้วเมนูกลับเป็น "ไม่ระบุครัว" ไม่หาย)
+  menuCount: number
+}
+
+/// ประเภทครัวทั้งหมดของร้าน เรียงตามที่ร้านจัดไว้ — ใช้ทั้งฟอร์มเมนู แท็บ KDS และหัวกลุ่มบนทิกเก็ต
+export async function listKitchenStations(storeId: string): Promise<KitchenStationRow[]> {
+  const rows = await forStore(storeId).kitchenStation.findMany({
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, sortOrder: true, _count: { select: { menuItems: true } } },
+  })
+  return rows.map((row) => ({ id: row.id, name: row.name, sortOrder: row.sortOrder, menuCount: row._count.menuItems }))
 }

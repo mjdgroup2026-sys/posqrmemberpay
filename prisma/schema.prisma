@@ -265,13 +265,13 @@ model Sale {
   voidReason       String?
   createdAt        DateTime      @default(now())
 
-  store        Store                   @relation(fields: [storeId], references: [id])
-  cashier      User                    @relation("SaleCashier", fields: [cashierId], references: [id])
-  session      TableSession?           @relation(fields: [tableSessionId], references: [id])
-  pointTx      MemberPointTransaction?
-  voidedBy     User?                   @relation("SaleVoidedBy", fields: [voidedById], references: [id])
-  items        SaleItem[]
-  transactions StockTransaction[]
+  store         Store                   @relation(fields: [storeId], references: [id])
+  cashier       User                    @relation("SaleCashier", fields: [cashierId], references: [id])
+  session       TableSession?           @relation(fields: [tableSessionId], references: [id])
+  pointTx       MemberPointTransaction?
+  voidedBy      User?                   @relation("SaleVoidedBy", fields: [voidedById], references: [id])
+  items         SaleItem[]
+  transactions  StockTransaction[]
   /// ออร์เดอร์ครัวของบิลกลับบ้าน (Phase 17c) — บิลหน้าร้าน/บิลโต๊ะเป็น null
   takeawayOrder MobileOrder?
 
@@ -469,10 +469,13 @@ model MenuItem {
   /// ปักหมุดได้สูงสุด 6 รายการพร้อมกัน — บังคับที่ server action (F21)
   isFeatured        Boolean  @default(false)
   featuredSortOrder Int?
+  /// ประเภทครัว/สถานีปรุงที่รับผิดชอบเมนูนี้ (Phase 19) — null = ไม่ระบุ · ลบ station แล้วเมนูกลับเป็น null ไม่หาย
+  stationId         String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   store          Store             @relation(fields: [storeId], references: [id])
+  station        KitchenStation?   @relation(fields: [stationId], references: [id], onDelete: SetNull)
   modifierGroups ModifierGroup[]
   orderItems     MobileOrderItem[]
   saleItems      SaleItem[]
@@ -480,7 +483,27 @@ model MenuItem {
   @@index([storeId])
   @@index([isActive])
   @@index([isFeatured])
+  @@index([stationId])
   @@map("menu_item")
+}
+
+/// ประเภทครัว / สถานีปรุง (Phase 19) — ของทอด ของผัด ต้ม/นึ่ง บาร์น้ำ ของหวาน ผลไม้ …
+/// ใช้แยกจอ KDS ต่อครัว (`?station=`) และจัดกลุ่มบรรทัดบนทิกเก็ต (lib/ticket-lines.ts) · เป็นเรื่องหลังครัวล้วน
+/// ลูกค้าไม่เห็น · เมนู 1 รายการอยู่ได้ครัวเดียว (MenuItem.stationId)
+model KitchenStation {
+  id        String   @id @default(cuid())
+  storeId   String
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store     Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  menuItems MenuItem[]
+
+  @@unique([storeId, name])
+  @@index([storeId])
+  @@map("kitchen_station")
 }
 
 model ModifierGroup {
@@ -532,9 +555,9 @@ model MobileOrder {
   customerLabel  String?
   /// เลขรอบสั่งภายใน session เดียวกัน (1, 2, 3, …) ใช้แยกทิกเก็ตครัว
   orderNumber    Int
-  submittedAt    DateTime  @default(now())
+  submittedAt    DateTime        @default(now())
   printedAt      DateTime?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime        @default(now())
 
   store   Store             @relation(fields: [storeId], references: [id])
   session TableSession?     @relation(fields: [tableSessionId], references: [id], onDelete: Cascade)
@@ -634,19 +657,23 @@ model LineNotificationLog {
 
 /// 1 แถวต่อร้าน (Phase 13) — สร้างพร้อม Store ในทรานแซคชันเดียวกันเสมอ ไม่มีร้านที่ไม่มี settings
 model StoreSettings {
-  id                   String   @id @default(cuid())
-  storeId              String   @unique
+  id                   String         @id @default(cuid())
+  storeId              String         @unique
   storeName            String
   logoUrl              String?
   coverImageUrl        String?
   themeColor           String
   /// ห้ามสลับขณะมี TableSession.status = OPEN อยู่อย่างน้อย 1 โต๊ะ (บังคับที่ updateStoreSettings)
-  hasKDS               Boolean  @default(false)
-  serviceChargePercent Decimal  @default(0) @db.Decimal(5, 2)
-  crmEnabled           Boolean  @default(false)
+  hasKDS               Boolean        @default(false)
+  serviceChargePercent Decimal        @default(0) @db.Decimal(5, 2)
+  crmEnabled           Boolean        @default(false)
   /// โหมดเริ่มต้นของจอขายอาหาร /mobile-order/pos (2026-09-17) — ร้านกลับบ้านเป็นหลักไม่ต้องสลับทุกบิล
   posDefaultMode       PosDefaultMode @default(TABLE)
-  updatedAt            DateTime @updatedAt
+  /// จอครัว (Phase 19) — เสียงเตือนเมื่อมีออร์เดอร์ใหม่บน KDS · เปิดกล่องพิมพ์ทิกเก็ต PDF อัตโนมัติเมื่อออร์เดอร์เข้า
+  /// (เส้นทาง ESC/POS ผ่าน KITCHEN_PRINTER_HOST พิมพ์อัตโนมัติอยู่แล้ว ไม่ขึ้นกับค่านี้)
+  kitchenAlertSound    Boolean        @default(true)
+  kitchenAutoPrint     Boolean        @default(false)
+  updatedAt            DateTime       @updatedAt
   updatedById          String?
 
   store     Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
@@ -789,6 +816,7 @@ model Store {
   tables            Table[]
   tableSessions     TableSession[]
   menuItems         MenuItem[]
+  kitchenStations   KitchenStation[]
   modifierGroups    ModifierGroup[]
   mobileOrders      MobileOrder[]
   qrCodes           QRCode[]

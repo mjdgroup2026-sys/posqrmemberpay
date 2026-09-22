@@ -120,6 +120,10 @@ export const voidSaleSchema = z.object({
 })
 
 export const closingSchema = z.object({
+  /// วันทางธุรกิจที่ปิดรอบ (Phase 19) — เลือกย้อนหลังได้ ห้ามอนาคต (ตรวจใน action ด้วย parseBusinessDayKey)
+  closingDate: z
+    .string({ error: "กรุณาเลือกวันที่ปิดรอบ" })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "รูปแบบวันที่ปิดรอบไม่ถูกต้อง"),
   countedCash: money("เงินสดที่นับได้"),
   note: z
     .string({ error: "หมายเหตุไม่ถูกต้อง" })
@@ -329,6 +333,9 @@ export const storeSettingsSchema = z.object({
     .min(0, "ค่าบริการต้องไม่ติดลบ")
     .max(100, "ค่าบริการต้องไม่เกิน 100%"),
   hasKDS: z.coerce.boolean(),
+  /// จอครัว (Phase 19) — เสียงเตือนออร์เดอร์ใหม่ · เปิดกล่องพิมพ์ทิกเก็ต PDF อัตโนมัติ
+  kitchenAlertSound: z.coerce.boolean(),
+  kitchenAutoPrint: z.coerce.boolean(),
   /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
   posDefaultMode: z.enum(["TABLE", "TAKEAWAY"], { error: "โหมดเริ่มต้นของจอขายไม่ถูกต้อง" }).default("TABLE"),
   crmEnabled: z.coerce.boolean(),
@@ -430,6 +437,20 @@ export const menuItemSchema = z.object({
     .refine((v) => v === "" || /^(https?:\/\/|\/)/.test(v), "ลิงก์รูปต้องขึ้นต้นด้วย http://, https:// หรือ /")
     .transform((v) => (v === "" ? null : v)),
   isActive: z.coerce.boolean(),
+  /// ประเภทครัว (Phase 19) — "" = ไม่ระบุ · action ต้องเช็คเองว่า id เป็นของร้านนี้ (FK จากฟอร์ม กติกาข้อ 5)
+  stationId: z
+    .string()
+    .trim()
+    .max(64, "ประเภทครัวไม่ถูกต้อง")
+    .nullish()
+    .transform((v) => (v === "" || v === null ? undefined : v)),
+})
+
+/// ประเภทครัว / สถานีปรุง (Phase 19)
+export const kitchenStationSchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  name: z.string({ error: "กรุณากรอกชื่อประเภทครัว" }).trim().min(1, "กรุณากรอกชื่อประเภทครัว").max(40, "ชื่อประเภทครัวยาวเกินไป (สูงสุด 40 ตัวอักษร)"),
+  sortOrder: z.coerce.number({ error: "ลำดับต้องเป็นตัวเลข" }).int("ลำดับต้องเป็นจำนวนเต็ม").min(0, "ลำดับต้องไม่ติดลบ").max(999, "ลำดับสูงเกินไป").default(0),
 })
 
 // ───────────────── payment confirmation ของ SCB (Phase 10) ─────────────────

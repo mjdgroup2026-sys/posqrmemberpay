@@ -6,7 +6,7 @@ import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { parseAssetId } from "@/lib/assets"
-import { menuItemSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
+import { menuItemSchema, kitchenStationSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
 
 /// จัดการเมนูอาหาร (master data ของ MJD Mobile Order)
@@ -127,12 +127,22 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
     price: formData.get("price"),
     imageUrl: formData.get("imageUrl") ?? "",
     isActive: formData.get("isActive") === "true" || formData.get("isActive") === "on",
+    stationId: formData.get("stationId") ?? undefined,
   })
   if (!parsed.success) {
     return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
   }
 
   const data = parsed.data
+
+  // FK ที่รับจากฟอร์มต้องเช็คเองว่าเป็นของร้านนี้ (กติกาข้อ 5) — forStore() กรอง storeId ให้ จึงได้ null ถ้าเป็นของร้านอื่น
+  if (data.stationId) {
+    const station = await db.kitchenStation.findUnique({ where: { id: data.stationId }, select: { id: true } })
+    if (!station) {
+      return { ok: false, error: "ไม่พบประเภทครัวที่เลือก", fieldErrors: { stationId: "ไม่พบประเภทครัวที่เลือก" } }
+    }
+  }
+  const stationId = data.stationId ?? null
 
   try {
     const groups = parseGroups(formData.get("modifierGroups"))
@@ -161,6 +171,7 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
                 price: data.price.toFixed(2),
                 imageUrl: data.imageUrl,
                 isActive: data.isActive,
+                stationId,
               },
               select: { id: true },
             })
@@ -174,6 +185,7 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
                 price: data.price.toFixed(2),
                 imageUrl: data.imageUrl,
                 isActive: data.isActive,
+                stationId,
               },
               select: { id: true },
             })
@@ -265,4 +277,74 @@ export async function toggleMenuItemActive(formData: FormData): Promise<ActionRe
 
   revalidateMenuPages(storeId)
   return { ok: true, message: next ? "เปิดขายเมนูนี้แล้ว" : "ปิดขายเมนูนี้แล้ว" }
+}
+
+// ───────────────────── ประเภทครัว / สถานีปรุง (Phase 19) ─────────────────────
+
+/// เพิ่ม/แก้ประเภทครัว — ชื่อ unique ต่อร้าน (P2002 → ข้อความไทย) · แก้ชื่อ = แถวเดิม id เดิม เมนูที่ผูกอยู่ไม่หลุด
+export async function saveKitchenStation(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
+  try {
+    ctx = await requireStoreAccess(["MO_MENU", formData.get("id") ? "EDIT" : "ADD"])
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
+
+  const parsed = kitchenStationSchema.safeParse({
+    id: formData.get("id") ?? undefined,
+    name: formData.get("name"),
+    sortOrder: formData.get("sortOrder") ?? 0,
+  })
+  if (!parsed.success) {
+    return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
+  }
+  const data = parsed.data
+
+  try {
+    if (data.id) {
+      await db.kitchenStation.update({
+        where: { id: data.id },
+        data: { name: data.name, sortOrder: data.sortOrder },
+      })
+    } else {
+      await db.kitchenStation.create({ data: { storeId, name: data.name, sortOrder: data.sortOrder } })
+    }
+  } catch (error) {
+    const code = (error as { code?: string }).code
+    if (code === "P2002") {
+      return { ok: false, error: `มีประเภทครัวชื่อ "${data.name}" อยู่แล้ว`, fieldErrors: { name: "ชื่อซ้ำ" } }
+    }
+    if (code === "P2025") return { ok: false, error: "ไม่พบประเภทครัวที่ต้องการแก้ไข" }
+    return { ok: false, error: "บันทึกประเภทครัวไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
+
+  revalidateMenuPages(storeId)
+  revalidatePath("/mobile-order/kitchen")
+  return { ok: true, message: data.id ? `บันทึกประเภทครัว ${data.name} แล้ว` : `เพิ่มประเภทครัว ${data.name} เรียบร้อยแล้ว` }
+}
+
+/// ลบประเภทครัว — เมนูที่ผูกอยู่กลับเป็น "ไม่ระบุครัว" (FK onDelete: SetNull) ไม่หาย · ออร์เดอร์เก่าไม่กระทบ
+/// เพราะ KDS/ทิกเก็ตอ่าน station ผ่าน MenuItem ณ เวลาอ่าน ไม่ได้ snapshot ไว้ (ประเภทครัวเป็นเรื่องจัดคิวหลังครัว ไม่ใช่เงิน)
+export async function deleteKitchenStation(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
+  try {
+    ctx = await requireStoreAccess(["MO_MENU", "DELETE"])
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
+
+  const parsed = idSchema.safeParse({ id: formData.get("id") })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
+
+  // deleteMany เพื่อให้ forStore() กรอง storeId ได้ — id ของร้านอื่นได้ count 0 ไม่ใช่ลบข้ามร้าน
+  const deleted = await db.kitchenStation.deleteMany({ where: { id: parsed.data.id } })
+  if (deleted.count === 0) return { ok: false, error: "ไม่พบประเภทครัวที่ต้องการลบ" }
+
+  revalidateMenuPages(storeId)
+  revalidatePath("/mobile-order/kitchen")
+  return { ok: true, message: "ลบประเภทครัวแล้ว — เมนูที่เคยผูกไว้กลับเป็น “ไม่ระบุครัว”" }
 }

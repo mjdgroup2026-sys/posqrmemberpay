@@ -18,6 +18,9 @@ export type StoreSettingsValues = {
   coverImageUrl: string | null
   serviceChargePercent: number
   hasKDS: boolean
+  /// จอครัว (Phase 19)
+  kitchenAlertSound: boolean
+  kitchenAutoPrint: boolean
   crmEnabled: boolean
   /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
   posDefaultMode: "TABLE" | "TAKEAWAY"
@@ -40,6 +43,8 @@ export function StoreSettingsForm({
   const [logoUrl, setLogoUrl] = useState(settings.logoUrl ?? "")
   const [coverImageUrl, setCoverImageUrl] = useState(settings.coverImageUrl ?? "")
   const [hasKDS, setHasKDS] = useState(settings.hasKDS)
+  const [kitchenAlertSound, setKitchenAlertSound] = useState(settings.kitchenAlertSound)
+  const [kitchenAutoPrint, setKitchenAutoPrint] = useState(settings.kitchenAutoPrint)
   const [crmEnabled, setCrmEnabled] = useState(settings.crmEnabled)
   const [posDefaultMode, setPosDefaultMode] = useState<"TABLE" | "TAKEAWAY">(settings.posDefaultMode)
 
@@ -58,6 +63,8 @@ export function StoreSettingsForm({
     const formData = new FormData(event.currentTarget)
     formData.set("themeColor", themeColor)
     formData.set("hasKDS", String(hasKDS))
+    formData.set("kitchenAlertSound", String(kitchenAlertSound))
+    formData.set("kitchenAutoPrint", String(kitchenAutoPrint))
     formData.set("posDefaultMode", posDefaultMode)
     formData.set("crmEnabled", String(crmEnabled))
 
@@ -229,6 +236,40 @@ export function StoreSettingsForm({
                 </span>
               </span>
             </label>
+
+            {hasKDS ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 26 }}>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={kitchenAlertSound}
+                    onChange={(e) => setKitchenAlertSound(e.target.checked)}
+                  />
+                  <span>
+                    เสียงเตือนเมื่อมีออร์เดอร์ใหม่บนจอครัว
+                    <br />
+                    <span className="t-caption">
+                      ข้อความเตือนขึ้นเสมอ · เสียงต้องกด “เปิดเสียงเตือน” บนจอครัวครั้งแรกของแต่ละเครื่อง (ข้อจำกัดของเบราว์เซอร์)
+                    </span>
+                  </span>
+                </label>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={kitchenAutoPrint}
+                    onChange={(e) => setKitchenAutoPrint(e.target.checked)}
+                  />
+                  <span>
+                    เปิดกล่องพิมพ์ทิกเก็ตอัตโนมัติเมื่อออร์เดอร์เข้า (พิมพ์ผ่านเบราว์เซอร์/PDF)
+                    <br />
+                    <span className="t-caption">
+                      ทำงานบนจอครัวที่เปิดค้างไว้ · ยังต้องกด “พิมพ์” ในกล่องของเบราว์เซอร์ 1 ครั้งต่อใบ เว้นแต่รัน Chrome ด้วย
+                      --kiosk-printing · ร้านที่ต่อเครื่องพิมพ์ครัว (KITCHEN_PRINTER_HOST) พิมพ์เองอยู่แล้ว ไม่ต้องเปิด
+                    </span>
+                  </span>
+                </label>
+              </div>
+            ) : null}
 
             <div className="field">
               <span className="t-small">โหมดเริ่มต้นของจอขายอาหาร</span>

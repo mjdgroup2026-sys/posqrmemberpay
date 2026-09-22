@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { businessDayKey, businessDayRange, businessDateOnly, isSameBusinessDay } from "@/lib/day"
+import { businessDayKey, businessDayRange, businessDateOnly, isSameBusinessDay, parseBusinessDayKey } from "@/lib/day"
 
 /// วันทางธุรกิจยึดเวลาไทยเสมอ (UTC+7) ไม่ใช่ TZ ของเครื่องที่รัน —
 /// container บน production รันด้วย UTC ถ้าใช้เวลาเครื่องตรง ๆ "วันนี้" จะหมุนตอน 07:00 น. ตามเวลาไทย
@@ -38,5 +38,35 @@ describe("lib/day — วันทางธุรกิจตามเวลา�
     const morning = new Date("2026-09-03T02:00:00.000Z") // 09:00 ไทย
     const night = new Date("2026-09-03T16:00:00.000Z") // 23:00 ไทย
     expect(isSameBusinessDay(morning, night)).toBe(true)
+  })
+
+  // ───────────────────── Phase 19 — คีย์วันจากตัวเลือกวันปิดรอบ ─────────────────────
+
+  it("parseBusinessDayKey: คีย์ที่ถูกต้องคืนเวลาที่ตกในวันนั้นแน่นอน (ไม่ว่าคำนวณช่วง/คอลัมน์ DATE)", () => {
+    const now = new Date("2026-09-22T05:00:00.000Z") // 12:00 ไทย
+    const day = parseBusinessDayKey("2026-09-21", now)
+    expect(day).not.toBeNull()
+    if (!day) return
+    expect(businessDayKey(day)).toBe("2026-09-21")
+    expect(businessDateOnly(day).toISOString()).toBe("2026-09-21T00:00:00.000Z")
+    const { start, end } = businessDayRange(day)
+    expect(start.toISOString()).toBe("2026-09-20T17:00:00.000Z")
+    expect(end.toISOString()).toBe("2026-09-21T17:00:00.000Z")
+  })
+
+  it("parseBusinessDayKey: วันนี้ผ่าน · พรุ่งนี้ (ตามเวลาไทย) ไม่ผ่าน แม้ UTC ยังเป็นวันเดิม", () => {
+    const now = new Date("2026-09-22T16:30:00.000Z") // 23:30 ไทย วันที่ 22 — UTC ยังเป็นวันที่ 22 เช่นกัน
+    expect(parseBusinessDayKey("2026-09-22", now)).not.toBeNull()
+    expect(parseBusinessDayKey("2026-09-23", now)).toBeNull()
+    const late = new Date("2026-09-22T17:30:00.000Z") // 00:30 ไทย วันที่ 23 — UTC ยังวันที่ 22
+    expect(parseBusinessDayKey("2026-09-23", late)).not.toBeNull()
+  })
+
+  it("parseBusinessDayKey: รูปแบบผิด / วันที่ไม่มีจริง คืน null", () => {
+    expect(parseBusinessDayKey("22/09/2026")).toBeNull()
+    expect(parseBusinessDayKey("2026-9-2")).toBeNull()
+    expect(parseBusinessDayKey("2026-02-30")).toBeNull()
+    expect(parseBusinessDayKey("2026-13-01")).toBeNull()
+    expect(parseBusinessDayKey("")).toBeNull()
   })
 })

@@ -9,6 +9,7 @@ import {
   testPrisma,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
+import { businessDayKey, parseBusinessDayKey } from "@/lib/day"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
 /// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
@@ -102,7 +103,7 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
 
     // assert
     expect(second.ok).toBe(false)
-    expect(second.ok === false && second.error).toContain("ปิดยอดของวันนี้ไปแล้ว")
+    expect(second.ok === false && second.error).toContain("ปิดซ้ำวันเดิมไม่ได้")
     expect(await testPrisma().cashierClosing.count()).toBe(1)
   })
 
@@ -131,5 +132,79 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     const closing = await testPrisma().cashierClosing.findFirstOrThrow()
     expect(Number(closing.totalSales)).toBe(0)
     expect(closing.billCount).toBe(0)
+  })
+
+  // ───────────────────── Phase 19 — เลือกวันปิดรอบ (ย้อนหลัง) ─────────────────────
+
+  /// ย้ายบิลที่เพิ่งขายไป "เมื่อวาน" — เทสไม่ควรพึ่ง clock ของเครื่อง จึงเขียน createdAt ตรง ๆ
+  async function backdateSale(saleId: string, day: Date) {
+    await testPrisma().sale.update({ where: { id: saleId }, data: { createdAt: day } })
+  }
+
+  function yesterdayKey(): string {
+    return businessDayKey(new Date(Date.now() - 24 * 60 * 60_000))
+  }
+
+  it("ปิดรอบย้อนหลัง: นับเฉพาะบิลของวันที่เลือก ไม่ปนกับวันนี้ และบันทึก closingDate ตามที่เลือก", async () => {
+    // arrange — 1 บิลเมื่อวาน (200) + 1 บิลวันนี้ (100)
+    const product = await createTestProduct({ quantity: 100, price: "100.00" })
+    const old = await sell(product.id, 2, "CASH")
+    if (!old.ok || !old.data) throw new Error("ขายไม่สำเร็จ")
+    const yesterday = parseBusinessDayKey(yesterdayKey())
+    if (!yesterday) throw new Error("parse วันไม่ได้")
+    await backdateSale(old.data.id, yesterday)
+    await sell(product.id, 1, "CASH")
+
+    // act
+    const result = await closeCashierDay(makeFormData({ closingDate: yesterdayKey(), countedCash: 200, note: "" }))
+
+    // assert
+    expect(result.ok).toBe(true)
+    const closing = await testPrisma().cashierClosing.findFirstOrThrow()
+    expect(closing.closingDate.toISOString().slice(0, 10)).toBe(yesterdayKey())
+    expect(Number(closing.totalSales)).toBe(200)
+    expect(closing.billCount).toBe(1)
+    expect(Number(closing.difference)).toBe(0)
+  })
+
+  it("ปิดรอบย้อนหลังแล้ว ยังปิดรอบของวันนี้ได้ (คนละวัน) แต่ปิดวันเดิมซ้ำไม่ได้", async () => {
+    const first = await closeCashierDay(makeFormData({ closingDate: yesterdayKey(), countedCash: 0, note: "" }))
+    expect(first.ok).toBe(true)
+    const today = await closeCashierDay(makeFormData({ countedCash: 0, note: "" }))
+    expect(today.ok).toBe(true)
+    const again = await closeCashierDay(makeFormData({ closingDate: yesterdayKey(), countedCash: 0, note: "" }))
+    expect(again.ok).toBe(false)
+    expect(await testPrisma().cashierClosing.count()).toBe(2)
+  })
+
+  it("เลือกวันอนาคต / รูปแบบผิด ต้องถูกปฏิเสธเป็นภาษาไทย ไม่มีแถวถูกสร้าง", async () => {
+    const tomorrow = businessDayKey(new Date(Date.now() + 24 * 60 * 60_000))
+    const future = await closeCashierDay(makeFormData({ closingDate: tomorrow, countedCash: 0, note: "" }))
+    expect(future.ok).toBe(false)
+    expect(future.ok === false && future.error).toContain("ย้อนหลัง")
+
+    const garbage = await closeCashierDay(makeFormData({ closingDate: "22/09/2026", countedCash: 0, note: "" }))
+    expect(garbage.ok).toBe(false)
+    expect(garbage.ok === false && garbage.fieldErrors?.closingDate).toBeTruthy()
+
+    const impossible = await closeCashierDay(makeFormData({ closingDate: "2026-02-30", countedCash: 0, note: "" }))
+    expect(impossible.ok).toBe(false)
+
+    expect(await testPrisma().cashierClosing.count()).toBe(0)
+  })
+
+  it("ปิดรอบย้อนหลังแล้ว void บิลของวันนั้นต้องถูกปฏิเสธ (กติกา F9 ตามวันของบิล)", async () => {
+    // บิลเมื่อวาน — กติกา F6 เดิม (void ได้เฉพาะวันเดียวกัน) จะปฏิเสธก่อนอยู่แล้ว จึงต้องเทสด้วยบิล "วันนี้"
+    // ที่ปิดรอบวันนี้ผ่านฟิลด์ closingDate ชัด ๆ (ไม่ใช่ค่า default) ให้แน่ใจว่าเส้นทางเลือกวันล็อก void จริง
+    const product = await createTestProduct({ quantity: 100, price: "100.00" })
+    const sale = await sell(product.id, 1, "CASH")
+    if (!sale.ok || !sale.data) throw new Error("ขายไม่สำเร็จ")
+
+    const closed = await closeCashierDay(makeFormData({ closingDate: businessDayKey(), countedCash: 100, note: "" }))
+    expect(closed.ok).toBe(true)
+
+    const voided = await voidSale(makeFormData({ id: sale.data.id, reason: "หลังปิดรอบ" }))
+    expect(voided.ok).toBe(false)
+    expect((await testPrisma().sale.findUniqueOrThrow({ where: { id: sale.data.id } })).status).toBe("COMPLETED")
   })
 })

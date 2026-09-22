@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react"
 import { markTicketPrinted } from "@/app/actions/orders"
 import { formatClock, formatDateTime, formatNumber } from "@/lib/format"
 import type { KitchenTicketDoc } from "@/lib/queries"
+import { groupByStation, hasStationSplit } from "@/lib/ticket-lines"
+import { TICKET_PRINTED_MESSAGE } from "@/components/auto-print"
 
 /// ทิกเก็ตครัวสำหรับ "พิมพ์ผ่าน PDF" แทนเครื่องพิมพ์ความร้อน (Phase 8)
 ///
@@ -12,7 +14,9 @@ import type { KitchenTicketDoc } from "@/lib/queries"
 /// ฟอนต์ที่ใช้คือฟอนต์ที่แอปโหลดอยู่แล้ว จึงได้ผลลัพธ์ตรงกับที่เห็นบนจอเสมอ
 ///
 /// `?auto=1` = เปิดกล่องพิมพ์ให้ทันที (ใช้ตอนกดจากปุ่มบน KDS) · ไม่ใส่ = ดูเฉย ๆ ก่อน
-export function KitchenTicket({ ticket, auto }: { ticket: KitchenTicketDoc; auto: boolean }) {
+/// `?embed=1` (Phase 19) = รันใน iframe ของ AutoPrint บน KDS — ซ่อนปุ่ม แล้ว postMessage กลับไปหลังกล่องพิมพ์ปิด
+/// เพื่อให้คิวพิมพ์ปล่อยใบถัดไป · รายการจัดกลุ่มตามประเภทครัวด้วย lib/ticket-lines.ts (ตรงกับ KDS/เครื่องพิมพ์)
+export function KitchenTicket({ ticket, auto, embed = false }: { ticket: KitchenTicketDoc; auto: boolean; embed?: boolean }) {
   const [printedAt, setPrintedAt] = useState(ticket.printedAt)
   const marked = useRef(false)
 
@@ -39,9 +43,20 @@ export function KitchenTicket({ ticket, auto }: { ticket: KitchenTicketDoc; auto
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto])
 
+  // โหมด embed: บอก AutoPrint บน KDS ว่ากล่องพิมพ์ปิดแล้ว (พิมพ์หรือยกเลิกก็ตาม) จะได้ปล่อยใบถัดไป
+  useEffect(() => {
+    if (!embed) return
+    const notify = () => window.parent?.postMessage({ type: TICKET_PRINTED_MESSAGE, orderId: ticket.orderId }, window.location.origin)
+    window.addEventListener("afterprint", notify)
+    return () => window.removeEventListener("afterprint", notify)
+  }, [embed, ticket.orderId])
+
+  const groups = groupByStation(ticket.items, ticket.stationOrder)
+  const split = hasStationSplit(groups)
+
   return (
     <div style={{ padding: 24, display: "grid", placeItems: "start center", minHeight: "100dvh" }}>
-      <div className="no-print" style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+      <div className="no-print" style={{ display: embed ? "none" : "flex", gap: 10, marginBottom: 16 }}>
         <button type="button" className="btn btn-primary" onClick={print}>
           พิมพ์ทิกเก็ต (เครื่องพิมพ์ PDF)
         </button>
@@ -82,19 +97,28 @@ export function KitchenTicket({ ticket, auto }: { ticket: KitchenTicketDoc; auto
           {ticket.items.length === 0 ? (
             <p className="t-body">ไม่มีรายการที่ต้องทำ (ถูกยกเลิกทั้งหมด)</p>
           ) : (
-            <ul style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {ticket.items.map((item) => (
-                <li key={item.id}>
-                  <p style={{ fontSize: "1.05rem", fontWeight: 700 }}>
-                    <span className="num">{formatNumber(item.quantity)}</span> × {item.name}
-                  </p>
-                  {item.options.length > 0 ? (
-                    <p className="t-caption">({item.options.join(", ")})</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {groups.map((group) => (
+                <section key={group.stationId ?? "none"}>
+                  {split ? (
+                    <p className="t-eyebrow" style={{ marginBottom: 6 }}>
+                      [ {group.stationName} ]
+                    </p>
                   ) : null}
-                  {item.note ? <p className="t-caption">* {item.note}</p> : null}
-                </li>
+                  <ul style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {group.items.map((item) => (
+                      <li key={item.id}>
+                        <p style={{ fontSize: "1.05rem", fontWeight: 700 }}>
+                          <span className="num">{formatNumber(item.quantity)}</span> × {item.name}
+                        </p>
+                        {item.options.length > 0 ? <p className="t-caption">({item.options.join(", ")})</p> : null}
+                        {item.note ? <p className="t-caption">* {item.note}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </ul>
+            </div>
           )}
         </div>
 

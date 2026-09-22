@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { saveMenuItem, deleteMenuItem, toggleMenuItemActive } from "@/app/actions/menu"
 import { formatBaht, formatNumber } from "@/lib/format"
-import type { ManagedMenuItem } from "@/lib/queries"
+import type { KitchenStationRow, ManagedMenuItem } from "@/lib/queries"
+import { UNASSIGNED_STATION_LABEL } from "@/lib/ticket-lines"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconPlus, IconSpinner, IconTrash } from "@/components/icons"
 import { ImagePicker } from "@/components/image-picker"
@@ -27,10 +28,20 @@ const EMPTY_DRAFT = {
   price: "",
   imageUrl: "",
   isActive: true,
+  stationId: "",
   groups: [] as GroupDraft[],
 }
 
-export function MenuAdmin({ items, allowed = FULL_ACCESS }: { items: ManagedMenuItem[]; allowed?: AllowedActions }) {
+/// `stations` = ประเภทครัวของร้าน (Phase 19) — เลือกได้ในฟอร์มเมนู · จัดการตัว station เองอยู่ที่ components/station-manager.tsx
+export function MenuAdmin({
+  items,
+  stations = [],
+  allowed = FULL_ACCESS,
+}: {
+  items: ManagedMenuItem[]
+  stations?: KitchenStationRow[]
+  allowed?: AllowedActions
+}) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
@@ -78,6 +89,7 @@ export function MenuAdmin({ items, allowed = FULL_ACCESS }: { items: ManagedMenu
       price: String(item.price),
       imageUrl: item.imageUrl ?? "",
       isActive: item.isActive,
+      stationId: item.stationId ?? "",
       groups: item.modifierGroups.map((group) => ({ ...group, options: group.options.map((o) => ({ ...o })) })),
     })
     setFieldErrors({})
@@ -112,6 +124,7 @@ export function MenuAdmin({ items, allowed = FULL_ACCESS }: { items: ManagedMenu
     formData.set("price", draft.price)
     formData.set("imageUrl", draft.imageUrl)
     formData.set("isActive", String(draft.isActive))
+    formData.set("stationId", draft.stationId)
     formData.set("modifierGroups", JSON.stringify(draft.groups))
 
     if (await run(() => saveMenuItem(formData))) setOpen(false)
@@ -184,6 +197,9 @@ export function MenuAdmin({ items, allowed = FULL_ACCESS }: { items: ManagedMenu
                     <td style={{ padding: "12px 24px" }}>
                       <span style={{ fontWeight: 600 }}>{item.name}</span>
                       {item.isFeatured ? <span className="t-caption"> · เมนูแนะนำ</span> : null}
+                      {stations.length > 0 ? (
+                        <span className="t-caption"> · {item.stationName ?? UNASSIGNED_STATION_LABEL}</span>
+                      ) : null}
                       {item.description ? (
                         <>
                           <br />
@@ -291,6 +307,32 @@ export function MenuAdmin({ items, allowed = FULL_ACCESS }: { items: ManagedMenu
                 />
                 {fieldErrors.price ? <span className="field-hint error">{fieldErrors.price}</span> : null}
               </div>
+            </div>
+
+            {/* ประเภทครัว (Phase 19) — ครัวไหนรับผิดชอบเมนูนี้ · KDS แยกแท็บและทิกเก็ตจัดกลุ่มตามค่านี้ */}
+            <div className="field">
+              <label className="t-small" htmlFor="menuStation">
+                ประเภทครัว
+              </label>
+              <select
+                id="menuStation"
+                className="select"
+                value={draft.stationId}
+                onChange={(e) => setDraft({ ...draft, stationId: e.target.value })}
+              >
+                <option value="">{UNASSIGNED_STATION_LABEL}</option>
+                {stations.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">
+                {stations.length === 0
+                  ? "ยังไม่มีประเภทครัว — เพิ่มได้ที่การ์ด “ประเภทครัว” ด้านล่างของหน้านี้"
+                  : "จอครัวแยกแท็บตามประเภทนี้ และทิกเก็ตจัดกลุ่มรายการให้ครัวแต่ละส่วน"}
+              </span>
+              {fieldErrors.stationId ? <span className="field-hint error">{fieldErrors.stationId}</span> : null}
             </div>
 
             <div className="field">

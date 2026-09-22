@@ -60,3 +60,16 @@ export function minutesSince(value: Date | string, now: number = Date.now()): nu
   const d = typeof value === "string" ? new Date(value) : value
   return Math.max(0, Math.floor((now - d.getTime()) / 60_000))
 }
+
+/// วันที่แบบเต็มพร้อมชื่อวัน ("จันทร์ 22 ก.ย. 2569") ตามเวลาไทยเสมอ — ใช้บนหัวหน้าขาย/ปิดรอบ
+/// ระบุ timeZone ชัด ๆ ด้วยเหตุผลเดียวกับ formatClock (server UTC vs เบราว์เซอร์ไทย)
+export function formatBusinessDate(value: Date | string): string {
+  const d = typeof value === "string" ? new Date(value) : value
+  return d.toLocaleDateString("th-TH", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Bangkok",
+  })
+}

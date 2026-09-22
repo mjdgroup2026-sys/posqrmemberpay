@@ -26,9 +26,9 @@ const SAMPLE_TABLE_CODES = ["T1", "T2", "T3", "T4"] as const
 const SAMPLE_MENU = [
   // ชื่อขึ้นต้น "[ตัวอย่าง]" ให้เห็นชัดทุกที่ที่ชื่อเมนูโผล่ (จัดการเมนู/จอขาย/หน้าลูกค้า) — เจ้าของร้านใหม่เคยงงว่า
   // เมนูมาจากไหน (2026-09-17) · SAMPLE_MENU_PREFIX ใช้ตรวจว่าร้านยังมีเมนูตัวอย่างค้างอยู่ไหม
-  { name: `${SAMPLE_MENU_PREFIX} ข้าวผัดกะเพราไก่ไข่ดาว`, description: "เมนูตัวอย่าง — แก้ชื่อ/ราคา หรือลบทิ้งได้ที่ จัดการเมนูอาหาร", price: "65.00" },
-  { name: `${SAMPLE_MENU_PREFIX} ผัดไทยกุ้งสด`, description: "เมนูตัวอย่าง", price: "80.00" },
-  { name: `${SAMPLE_MENU_PREFIX} ชาไทยเย็น`, description: "เมนูตัวอย่าง", price: "35.00" },
+  { name: `${SAMPLE_MENU_PREFIX} ข้าวผัดกะเพราไก่ไข่ดาว`, description: "เมนูตัวอย่าง — แก้ชื่อ/ราคา หรือลบทิ้งได้ที่ จัดการเมนูอาหาร", price: "65.00", station: "ของผัด" },
+  { name: `${SAMPLE_MENU_PREFIX} ผัดไทยกุ้งสด`, description: "เมนูตัวอย่าง", price: "80.00", station: "ของผัด" },
+  { name: `${SAMPLE_MENU_PREFIX} ชาไทยเย็น`, description: "เมนูตัวอย่าง", price: "35.00", station: "บาร์น้ำ" },
 ] as const
 
 function qrToken() {
@@ -115,6 +115,17 @@ export async function createStore(formData: FormData): Promise<ActionResult<{ st
       // เจ้าของเลือกไม่ใส่เมนูตัวอย่าง → เริ่มจากเมนูว่าง (โต๊ะ/QR ตัวอย่างยังใส่ให้ ไม่งั้นทดลองสั่งไม่ได้เลย)
       if (!sampleMenu) return created.id
 
+      // ประเภทครัวตัวอย่าง (Phase 19) — ให้เห็นแท็บบน KDS และหัวกลุ่มบนทิกเก็ตตั้งแต่ออร์เดอร์แรก · ชื่อไม่มี prefix
+      // เพราะเป็นประเภททั่วไปที่ร้านใช้ต่อได้จริง (ลบได้ เมนูแค่กลับเป็น "ไม่ระบุครัว")
+      const stationIdByName = new Map<string, string>()
+      for (const [index, stationName] of [...new Set(SAMPLE_MENU.map((m) => m.station))].entries()) {
+        const station = await tx.kitchenStation.create({
+          data: { storeId: created.id, name: stationName, sortOrder: index },
+          select: { id: true },
+        })
+        stationIdByName.set(stationName, station.id)
+      }
+
       let order = 0
       for (const item of SAMPLE_MENU) {
         order += 1
@@ -126,6 +137,7 @@ export async function createStore(formData: FormData): Promise<ActionResult<{ st
             price: item.price,
             isFeatured: true,
             featuredSortOrder: order,
+            stationId: stationIdByName.get(item.station) ?? null,
           },
         })
       }
