@@ -110,6 +110,9 @@ enum ResourceKey {
   MO_SETUP
   /// Phase 17b — จอขายอาหารฝั่งพนักงาน (VIEW เข้าหน้า · ADD กดขาย/ส่งเข้าครัว)
   MO_POS
+  /// Phase 20 (ร้านนวด) — ประวัติ/กะพนักงานนวด · ตารางจอง/เช็กอิน/กระดานว่าง-ไม่ว่าง
+  SPA_THERAPISTS
+  SPA_BOOKINGS
 }
 
 /// บทบาทเป็นของร้าน (Phase 13) — แต่ละร้านมีชุดของตัวเอง ร้านใหม่ได้ 3 บทบาทระบบตอนสร้าง
@@ -169,6 +172,7 @@ model User {
   sentInvites               StoreInvite[]     @relation("StoreInviteInvitedBy")
   acceptedInvites           StoreInvite[]     @relation("StoreInviteAcceptedBy")
   uploadedAssets            StoreAsset[]      @relation("AssetUploadedBy")
+  createdBookings           Booking[]         @relation("BookingCreatedBy")
   closings                  CashierClosing[]
 
   @@map("user")
@@ -285,23 +289,27 @@ model Sale {
 }
 
 model SaleItem {
-  id         String  @id @default(cuid())
-  saleId     String
+  id          String  @id @default(cuid())
+  saleId      String
   /// บิลขายหน้าร้านอ้าง Product — บิลจาก MJD Mobile Order เป็น null (อ้าง menuItemId แทน)
-  productId  String?
+  productId   String?
   /// บิลจาก MJD Mobile Order อ้าง MenuItem — บิลขายหน้าร้านเป็น null
-  menuItemId String?
+  menuItemId  String?
+  /// พนักงานนวดที่ให้บริการบรรทัดนี้ (Phase 20) — snapshot ลงบิลไว้ทำรายงาน/ค่ามือต่อคน · บิลอาหาร/สินค้าเป็น null
+  therapistId String?
   /// ชื่อรายการ ณ เวลาขาย (snapshot) — หน้าประวัติ/ใบเสร็จอ่านจากฟิลด์นี้ ไม่ต้อง join กลับ
-  name       String
-  quantity   Int
-  unitPrice  Decimal @db.Decimal(12, 2)
-  subtotal   Decimal @db.Decimal(12, 2)
+  name        String
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(12, 2)
+  subtotal    Decimal @db.Decimal(12, 2)
 
-  sale     Sale      @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale      Sale       @relation(fields: [saleId], references: [id], onDelete: Cascade)
   // คง RESTRICT ไว้เหมือนก่อนทำให้ productId เป็น optional — ห้ามลบสินค้าที่เคยขายไปแล้ว
   // (ค่า default ของ Prisma สำหรับ relation แบบ optional คือ SetNull ซึ่งจะล้างประวัติการขายทิ้ง)
-  product  Product?  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  menuItem MenuItem? @relation(fields: [menuItemId], references: [id])
+  product   Product?   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  menuItem  MenuItem?  @relation(fields: [menuItemId], references: [id])
+  // RESTRICT — ห้ามลบพนักงานนวดที่มีชื่อในบิลแล้ว (ปิดใช้งานแทน) เหตุผลเดียวกับ product
+  therapist Therapist? @relation(fields: [therapistId], references: [id], onDelete: Restrict)
 
   @@index([saleId])
   @@index([productId])
@@ -408,21 +416,35 @@ model Table {
   code           String
   /// denormalized — ต้องอัปเดตใน transaction เดียวกับเหตุการณ์เสมอ (เหมือน Product.quantity คู่กับ StockTransaction)
   status         TableStatus @default(EMPTY)
+  /// Phase 20 — โต๊ะอาหาร หรือห้องนวด (จองล่วงหน้าได้เฉพาะ ROOM) · ร้านนวดมีทั้งสองแบบร่วมกันได้
+  kind           TableKind   @default(TABLE)
+  /// ประเภทห้อง (ห้องนวดเท้า/ห้องนวดไทย …) — ใช้ตาราง KitchenStation เดียวกับประเภทบริการของโปรแกรมนวด
+  /// เพื่อให้ "ห้องต้องตรงกับรายการนวด" เช็คได้ · null = ห้องทั่วไป/โต๊ะ
+  stationId      String?
   primaryTableId String?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  store        Store          @relation(fields: [storeId], references: [id])
-  primaryTable Table?         @relation("TableMerge", fields: [primaryTableId], references: [id])
-  mergedTables Table[]        @relation("TableMerge")
+  store        Store           @relation(fields: [storeId], references: [id])
+  primaryTable Table?          @relation("TableMerge", fields: [primaryTableId], references: [id])
+  station      KitchenStation? @relation("RoomStation", fields: [stationId], references: [id], onDelete: SetNull)
+  mergedTables Table[]         @relation("TableMerge")
   sessions     TableSession[]
   qrCodes      QRCode[]
+  bookings     Booking[]
 
   @@unique([storeId, code])
   @@index([storeId])
   @@index([status])
   @@index([primaryTableId])
+  @@index([stationId])
   @@map("restaurant_table")
+}
+
+/// ชนิดของ "โต๊ะ" (Phase 20) — TABLE = โต๊ะอาหาร · ROOM = ห้องนวด (จองล่วงหน้าได้ · มีประเภทห้อง)
+enum TableKind {
+  TABLE
+  ROOM
 }
 
 model TableSession {
@@ -451,6 +473,8 @@ model TableSession {
   /// บิลที่เกิดตอนปิด session — FK อยู่ฝั่ง Sale (Sale.tableSessionId) ด้านเดียว
   /// ไม่เก็บ saleId ซ้ำที่นี่ เพราะ FK ชี้กันไปมาสองทางทำให้ลำดับการเขียนในทรานแซคชันพันกัน
   sale           Sale?
+  /// การจองที่เช็กอินเข้ามาเป็น session นี้ (Phase 20b)
+  bookings       Booking[]
 
   @@index([storeId])
   @@index([tableId])
@@ -459,32 +483,161 @@ model TableSession {
 }
 
 model MenuItem {
-  id                String   @id @default(cuid())
+  id                String       @id @default(cuid())
   storeId           String
   name              String
   description       String?
-  price             Decimal  @db.Decimal(12, 2)
+  price             Decimal      @db.Decimal(12, 2)
   imageUrl          String?
-  isActive          Boolean  @default(true)
+  isActive          Boolean      @default(true)
   /// ปักหมุดได้สูงสุด 6 รายการพร้อมกัน — บังคับที่ server action (F21)
-  isFeatured        Boolean  @default(false)
+  isFeatured        Boolean      @default(false)
   featuredSortOrder Int?
+  /// Phase 20 — FOOD = อาหาร/เครื่องดื่ม (เข้าครัว/KDS) · SERVICE = โปรแกรมนวด (ต้องมีพนักงานนวด ไม่เข้า KDS)
+  itemType          MenuItemType @default(FOOD)
+  /// ระยะเวลาบริการเป็นนาที — บังคับเมื่อ itemType = SERVICE · ใช้คำนวณช่วงจอง/เวลาห้องไม่ว่าง
+  durationMinutes   Int?
   /// ประเภทครัว/สถานีปรุงที่รับผิดชอบเมนูนี้ (Phase 19) — null = ไม่ระบุ · ลบ station แล้วเมนูกลับเป็น null ไม่หาย
+  /// ในโหมดร้านนวด (Phase 20) ตารางเดียวกันนี้คือ "ประเภทบริการ" (นวดเท้า/นวดไทย …) ที่ผูกทั้งโปรแกรม ห้อง และทักษะพนักงาน
   stationId         String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   store          Store             @relation(fields: [storeId], references: [id])
   station        KitchenStation?   @relation(fields: [stationId], references: [id], onDelete: SetNull)
   modifierGroups ModifierGroup[]
   orderItems     MobileOrderItem[]
   saleItems      SaleItem[]
+  bookings       Booking[]
 
   @@index([storeId])
   @@index([isActive])
   @@index([isFeatured])
   @@index([stationId])
   @@map("menu_item")
+}
+
+/// ชนิดของรายการในเมนู (Phase 20) — FOOD = อาหาร/เครื่องดื่ม (เข้าครัว/KDS) · SERVICE = โปรแกรมนวด (มีระยะเวลา ต้องมีพนักงานนวด)
+enum MenuItemType {
+  FOOD
+  SERVICE
+}
+
+/// พนักงานนวด (Phase 20) — ไม่ผูกกับบัญชีล็อกอิน (พนักงานนวดไม่ต้องมี user) · `code` เช่น "001" unique ต่อร้าน
+/// ทักษะ = ประเภทบริการ (KitchenStation) ที่ทำได้ · ปิดใช้งานด้วย isActive ไม่ลบ ถ้าเคยมีชื่อในบิล (SaleItem.therapistId RESTRICT)
+model Therapist {
+  id        String    @id @default(cuid())
+  storeId   String
+  code      String
+  name      String
+  nickname  String?
+  phone     String?
+  gender    String?
+  startedAt DateTime? @db.Date
+  note      String?
+  imageUrl  String?
+  isActive  Boolean   @default(true)
+  /// ผูกกับบัญชีผู้ใช้ทีหลังได้ (ไม่บังคับ) — เผื่อให้พนักงานนวดล็อกอินดูคิวตัวเอง
+  userId    String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  store      Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  skills     KitchenStation[]  @relation("TherapistSkills")
+  orderItems MobileOrderItem[]
+  saleItems  SaleItem[]
+  shifts     TherapistShift[]
+  bookings   Booking[]
+
+  @@unique([storeId, code])
+  @@index([storeId])
+  @@index([isActive])
+  @@map("therapist")
+}
+
+/// กะทำงานของพนักงานนวด (Phase 20b) — 1 แถว = พนักงาน 1 คน ต่อ 1 วัน
+///
+/// เก็บ "รายวัน" ไม่ใช่รูปแบบประจำสัปดาห์ เพราะร้านนวดสลับกะ/ลาหยุดกันบ่อยจนรูปแบบประจำไม่เคยตรง —
+/// การตั้งทั้งสัปดาห์ทำด้วยปุ่มคัดลอกในหน้าจอ (copyShifts) ซึ่งเขียนแถวรายวันให้ครบเหมือนกัน
+/// · ไม่มีแถว = "ยังไม่ตั้งกะ" (ยังจองได้ แต่กระดานบอกว่ายังไม่เข้ากะ) · isOff = หยุด (จองไม่ได้)
+model TherapistShift {
+  id          String   @id @default(cuid())
+  storeId     String
+  therapistId String
+  /// วันทำงานตามวันทางธุรกิจของร้าน (เวลาไทย) — ชนิด DATE ไม่มีเวลา
+  workDate    DateTime @db.Date
+  /// นาทีนับจากเที่ยงคืนของวันนั้น (08:30 = 510) — เก็บเป็นนาทีเพื่อเทียบช่วงได้ตรงโดยไม่ต้องยุ่งกับ timezone
+  startMinute Int
+  endMinute   Int
+  /// วันหยุดของคนนี้ — เก็บแถวไว้เพื่อให้กระดานแยก "หยุด" ออกจาก "ยังไม่ตั้งกะ" ได้
+  isOff       Boolean  @default(false)
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  therapist Therapist @relation(fields: [therapistId], references: [id], onDelete: Cascade)
+
+  @@unique([therapistId, workDate])
+  @@index([storeId, workDate])
+  @@map("therapist_shift")
+}
+
+/// สถานะการจอง (Phase 20b) — BOOKED → CHECKED_IN → IN_SERVICE → DONE คือเส้นทางปกติ
+/// CANCELLED (ยกเลิก) และ NO_SHOW (ไม่มาตามนัด) เป็นทางออกที่ปล่อยช่วงเวลาคืนให้จองใหม่ได้
+enum BookingStatus {
+  BOOKED
+  CHECKED_IN
+  IN_SERVICE
+  DONE
+  CANCELLED
+  NO_SHOW
+}
+
+/// การจองล่วงหน้า (Phase 20b)
+///
+/// **ไม่ใช่บิล** — เป็นแค่การกันเวลาของพนักงาน (และห้อง ถ้าเลือกไว้) · เงินเกิดตอนเช็กอินเท่านั้น
+/// ซึ่งเปิด TableSession + MobileOrder ด้วยเส้นทางเดิม แล้วปิดบิลที่หน้าเดิมทุกประการ (กติกาข้อ 8)
+/// · durationMinutes เป็น snapshot ณ ตอนจอง — แก้เวลาโปรแกรมในเมนูภายหลังต้องไม่ทำให้คิวที่จองไว้เลื่อน
+/// · กันคิวชนกันด้วย advisory lock ต่อพนักงาน/ห้องใน lib/booking.ts (ไม่ใช่ EXCLUDE constraint เพราะ Prisma ไม่รู้จัก)
+model Booking {
+  id              String        @id @default(cuid())
+  storeId         String
+  customerName    String
+  customerPhone   String?
+  /// โปรแกรมนวดที่จอง (MenuItem.itemType = SERVICE)
+  menuItemId      String
+  /// snapshot ระยะเวลาจากเมนู ณ ตอนจอง
+  durationMinutes Int
+  /// พนักงานนวด — บังคับตั้งแต่ตอนจอง (ลูกค้ามักขอชื่อคนเดิม) · ห้องเลือกทีหลังตอนเช็กอินได้
+  therapistId     String
+  tableId         String?
+  startAt         DateTime
+  /// startAt + durationMinutes — เก็บซ้ำเพื่อให้ query ช่วงเวลาทับซ้อนทำได้ด้วย index เดียว
+  endAt           DateTime
+  status          BookingStatus @default(BOOKED)
+  note            String?
+  createdById     String?
+  /// session ที่เกิดตอนเช็กอิน — ปิดบิลด้วยเส้นทางเดิมของโต๊ะ/ห้อง
+  tableSessionId  String?
+  checkedInAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  store     Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  menuItem  MenuItem      @relation(fields: [menuItemId], references: [id])
+  therapist Therapist     @relation(fields: [therapistId], references: [id])
+  table     Table?        @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  session   TableSession? @relation(fields: [tableSessionId], references: [id], onDelete: SetNull)
+  createdBy User?         @relation("BookingCreatedBy", fields: [createdById], references: [id])
+
+  @@index([storeId, startAt])
+  @@index([therapistId, startAt])
+  @@index([tableId, startAt])
+  @@index([status])
+  @@map("booking")
 }
 
 /// ประเภทครัว / สถานีปรุง (Phase 19) — ของทอด ของผัด ต้ม/นึ่ง บาร์น้ำ ของหวาน ผลไม้ …
@@ -498,8 +651,11 @@ model KitchenStation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  store     Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  menuItems MenuItem[]
+  store      Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  menuItems  MenuItem[]
+  /// Phase 20 — ห้องนวดที่มีประเภทนี้ และพนักงานนวดที่มีทักษะนี้
+  rooms      Table[]     @relation("RoomStation")
+  therapists Therapist[] @relation("TherapistSkills")
 
   @@unique([storeId, name])
   @@index([storeId])
@@ -580,6 +736,8 @@ model MobileOrderItem {
   unitPrice               Decimal         @db.Decimal(12, 2)
   /// [{ groupName, optionName, priceDelta }] — snapshot ด้วยเหตุผลเดียวกับ unitPrice
   selectedOptionsSnapshot Json            @default("[]")
+  /// พนักงานนวดของบรรทัดบริการ (Phase 20) — ลูกค้าสั่งเองผ่าน QR จะเป็น null จนพนักงาน "มอบหมาย" · อาหารเป็น null เสมอ
+  therapistId             String?
   note                    String?
   status                  OrderItemStatus @default(AWAITING_KITCHEN)
   cancelledAt             DateTime?
@@ -591,6 +749,7 @@ model MobileOrderItem {
   order       MobileOrder @relation(fields: [mobileOrderId], references: [id], onDelete: Cascade)
   menuItem    MenuItem    @relation(fields: [menuItemId], references: [id])
   cancelledBy User?       @relation("OrderItemCancelledBy", fields: [cancelledById], references: [id])
+  therapist   Therapist?  @relation(fields: [therapistId], references: [id], onDelete: SetNull)
 
   @@index([mobileOrderId])
   @@index([status])
@@ -673,6 +832,11 @@ model StoreSettings {
   /// (เส้นทาง ESC/POS ผ่าน KITCHEN_PRINTER_HOST พิมพ์อัตโนมัติอยู่แล้ว ไม่ขึ้นกับค่านี้)
   kitchenAlertSound    Boolean        @default(true)
   kitchenAutoPrint     Boolean        @default(false)
+  /// ตัวเลือกร้านนวด (Phase 20) — เปิดแล้ว "เพิ่ม" พนักงานนวด/โปรแกรมนวด/ห้องนวด/จองล่วงหน้า ของเดิมยังอยู่ครบ ใช้ร่วมกันได้
+  spaEnabled           Boolean        @default(false)
+  /// ช่วงพักระหว่างคิวของพนักงานคนเดียวกัน/ห้องเดียวกัน เป็นนาที (Phase 20b) — 0 = จองต่อกันติดได้
+  /// ใช้ทั้งตอนตรวจชนคิวและตอนเสนอช่วงเวลาว่างในฟอร์มจอง
+  bookingBufferMinutes Int            @default(10)
   updatedAt            DateTime       @updatedAt
   updatedById          String?
 
@@ -817,6 +981,9 @@ model Store {
   tableSessions     TableSession[]
   menuItems         MenuItem[]
   kitchenStations   KitchenStation[]
+  therapists        Therapist[]
+  therapistShifts   TherapistShift[]
+  bookings          Booking[]
   modifierGroups    ModifierGroup[]
   mobileOrders      MobileOrder[]
   qrCodes           QRCode[]

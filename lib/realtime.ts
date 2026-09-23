@@ -13,7 +13,7 @@ import "server-only"
 ///     ไป Postgres LISTEN/NOTIFY หรือ Redis
 ///   · เก็บบน globalThis กัน Turbopack HMR สร้าง module ใหม่แล้ว listener เดิมหาย (dev เท่านั้น production ไม่มีผล)
 
-export type RealtimeTopic = "tables" | "orders" | "notifications" | "payments" | "menu"
+export type RealtimeTopic = "tables" | "orders" | "notifications" | "payments" | "menu" | "bookings"
 
 export type RealtimeEvent = { topic: RealtimeTopic; at: number }
 

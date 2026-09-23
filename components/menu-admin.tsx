@@ -29,6 +29,8 @@ const EMPTY_DRAFT = {
   imageUrl: "",
   isActive: true,
   stationId: "",
+  itemType: "FOOD" as "FOOD" | "SERVICE",
+  durationMinutes: "",
   groups: [] as GroupDraft[],
 }
 
@@ -36,10 +38,13 @@ const EMPTY_DRAFT = {
 export function MenuAdmin({
   items,
   stations = [],
+  spaEnabled = false,
   allowed = FULL_ACCESS,
 }: {
   items: ManagedMenuItem[]
   stations?: KitchenStationRow[]
+  /// ร้านเปิดตัวเลือกร้านนวด (Phase 20) — โชว์ตัวเลือก "อาหาร / โปรแกรมนวด" + ระยะเวลา
+  spaEnabled?: boolean
   allowed?: AllowedActions
 }) {
   const router = useRouter()
@@ -90,6 +95,8 @@ export function MenuAdmin({
       imageUrl: item.imageUrl ?? "",
       isActive: item.isActive,
       stationId: item.stationId ?? "",
+      itemType: item.itemType,
+      durationMinutes: item.durationMinutes ? String(item.durationMinutes) : "",
       groups: item.modifierGroups.map((group) => ({ ...group, options: group.options.map((o) => ({ ...o })) })),
     })
     setFieldErrors({})
@@ -125,6 +132,8 @@ export function MenuAdmin({
     formData.set("imageUrl", draft.imageUrl)
     formData.set("isActive", String(draft.isActive))
     formData.set("stationId", draft.stationId)
+    formData.set("itemType", draft.itemType)
+    formData.set("durationMinutes", draft.durationMinutes)
     formData.set("modifierGroups", JSON.stringify(draft.groups))
 
     if (await run(() => saveMenuItem(formData))) setOpen(false)
@@ -197,6 +206,12 @@ export function MenuAdmin({
                     <td style={{ padding: "12px 24px" }}>
                       <span style={{ fontWeight: 600 }}>{item.name}</span>
                       {item.isFeatured ? <span className="t-caption"> · เมนูแนะนำ</span> : null}
+                      {item.itemType === "SERVICE" ? (
+                        <span className="chip chip-brand" style={{ marginLeft: 6 }}>
+                          <span className="dot" />
+                          โปรแกรมนวด {item.durationMinutes ? `${item.durationMinutes} นาที` : ""}
+                        </span>
+                      ) : null}
                       {stations.length > 0 ? (
                         <span className="t-caption"> · {item.stationName ?? UNASSIGNED_STATION_LABEL}</span>
                       ) : null}
@@ -309,10 +324,55 @@ export function MenuAdmin({
               </div>
             </div>
 
-            {/* ประเภทครัว (Phase 19) — ครัวไหนรับผิดชอบเมนูนี้ · KDS แยกแท็บและทิกเก็ตจัดกลุ่มตามค่านี้ */}
+            {/* ชนิดรายการ (Phase 20 — ร้านนวด): อาหารเข้าครัว/KDS · โปรแกรมนวดมีระยะเวลาและต้องเลือกพนักงานนวดตอนขาย */}
+            {spaEnabled || draft.itemType === "SERVICE" ? (
+              <div className="field-grid">
+                <div className="field">
+                  <span className="t-small">ชนิดรายการ</span>
+                  <div className="row" style={{ gap: 8 }}>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${draft.itemType === "FOOD" ? "btn-primary" : "btn-subtle"}`}
+                      onClick={() => setDraft({ ...draft, itemType: "FOOD" })}
+                    >
+                      อาหาร / เครื่องดื่ม
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${draft.itemType === "SERVICE" ? "btn-primary" : "btn-subtle"}`}
+                      onClick={() => setDraft({ ...draft, itemType: "SERVICE" })}
+                    >
+                      โปรแกรมนวด
+                    </button>
+                  </div>
+                  <span className="field-hint">
+                    {draft.itemType === "SERVICE" ? "ไม่เข้าครัว/KDS · ตอนขายต้องเลือกพนักงานนวด" : "เข้าครัว/KDS ตามปกติ"}
+                  </span>
+                </div>
+                {draft.itemType === "SERVICE" ? (
+                  <div className="field">
+                    <label className="t-small" htmlFor="menuDuration">
+                      ระยะเวลา (นาที) <span style={{ color: "var(--danger)" }}>*</span>
+                    </label>
+                    <input
+                      id="menuDuration"
+                      className="input num"
+                      inputMode="numeric"
+                      required
+                      value={draft.durationMinutes}
+                      onChange={(e) => setDraft({ ...draft, durationMinutes: e.target.value.replace(/[^0-9]/g, "") })}
+                      placeholder="60"
+                    />
+                    {fieldErrors.durationMinutes ? <span className="field-hint error">{fieldErrors.durationMinutes}</span> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* ประเภทครัว (Phase 19) — ครัวไหนรับผิดชอบเมนูนี้ · KDS แยกแท็บและทิกเก็ตจัดกลุ่มตามค่านี้ · ร้านนวด = ประเภทบริการ */}
             <div className="field">
               <label className="t-small" htmlFor="menuStation">
-                ประเภทครัว
+                {draft.itemType === "SERVICE" ? "ประเภทบริการ" : "ประเภทครัว"}
               </label>
               <select
                 id="menuStation"

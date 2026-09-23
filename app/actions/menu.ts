@@ -128,6 +128,8 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
     imageUrl: formData.get("imageUrl") ?? "",
     isActive: formData.get("isActive") === "true" || formData.get("isActive") === "on",
     stationId: formData.get("stationId") ?? undefined,
+    itemType: formData.get("itemType") ?? "FOOD",
+    durationMinutes: formData.get("durationMinutes") ?? undefined,
   })
   if (!parsed.success) {
     return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
@@ -172,6 +174,8 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
                 imageUrl: data.imageUrl,
                 isActive: data.isActive,
                 stationId,
+                itemType: data.itemType,
+                durationMinutes: data.itemType === "SERVICE" ? (data.durationMinutes ?? null) : null,
               },
               select: { id: true },
             })
@@ -186,6 +190,8 @@ export async function saveMenuItem(formData: FormData): Promise<ActionResult> {
                 imageUrl: data.imageUrl,
                 isActive: data.isActive,
                 stationId,
+                itemType: data.itemType,
+                durationMinutes: data.itemType === "SERVICE" ? (data.durationMinutes ?? null) : null,
               },
               select: { id: true },
             })

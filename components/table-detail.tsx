@@ -5,11 +5,18 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { cancelOrderItem, markItemServed, reduceOrderItemQuantity, reprintKitchenTicket } from "@/app/actions/orders"
+import {
+  assignOrderItemTherapist,
+  cancelOrderItem,
+  markItemServed,
+  reduceOrderItemQuantity,
+  reprintKitchenTicket,
+  startServiceItem,
+} from "@/app/actions/orders"
 import { cancelTableSession } from "@/app/actions/tables"
 import { acknowledgeNotification } from "@/app/actions/notifications"
 import { formatBaht, formatClock, formatDateTime, formatNumber } from "@/lib/format"
-import type { OrderItemRow, TableDetail as TableDetailData } from "@/lib/queries"
+import type { OrderItemRow, TableDetail as TableDetailData, TherapistOption } from "@/lib/queries"
 import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { IconBack, IconPlus, IconReceipt, IconSpinner } from "@/components/icons"
@@ -36,6 +43,7 @@ export function TableDetail({
   canAcknowledge = true,
   canKitchen = true,
   canOrderMore = true,
+  therapists = [],
 }: {
   detail: TableDetailData
   /// สิทธิ์บน MO_TABLES: EDIT ปิดบิล/กดเสิร์ฟ/พิมพ์ทิกเก็ต · DELETE ยกเลิกโต๊ะ/รายการ
@@ -46,6 +54,8 @@ export function TableDetail({
   canKitchen?: boolean
   /// MO_POS:ADD — ปุ่ม "สั่งเพิ่ม" พาไปจอขายโดยเลือกโต๊ะนี้ให้ (F13: เพิ่มจำนวน = รอบใหม่ ทิกเก็ตใหม่)
   canOrderMore?: boolean
+  /// พนักงานนวดที่เปิดใช้งาน (Phase 20) — ให้มอบหมาย/เปลี่ยนคนบนบรรทัดโปรแกรมนวด · ว่าง = ร้านไม่ได้เปิดตัวเลือกร้านนวด
+  therapists?: TherapistOption[]
 }) {
   const canServe = allowed.includes("EDIT") || canKitchen
   const router = useRouter()
@@ -82,6 +92,21 @@ export function TableDetail({
     const formData = new FormData()
     formData.set("id", item.id)
     void run(() => markItemServed(formData))
+  }
+
+  // โปรแกรมนวด (Phase 20) — เริ่มนวด / มอบหมายพนักงาน จากหน้าห้อง ไม่ผ่าน KDS
+  function startService(item: OrderItemRow) {
+    const formData = new FormData()
+    formData.set("id", item.id)
+    void run(() => startServiceItem(formData))
+  }
+
+  function assignTherapist(item: OrderItemRow, therapistId: string) {
+    if (!therapistId) return
+    const formData = new FormData()
+    formData.set("id", item.id)
+    formData.set("therapistId", therapistId)
+    void run(() => assignOrderItemTherapist(formData))
   }
 
   function reprint(orderId: string) {
@@ -286,6 +311,36 @@ export function TableDetail({
                     <span className="t-caption">เหตุผลที่ยกเลิก: {item.cancelReason}</span>
                   ) : null}
 
+                  {/* โปรแกรมนวด (Phase 20) — พนักงานนวดที่รับผิดชอบ · มอบหมาย/เปลี่ยนได้จนกว่าจะเสร็จ */}
+                  {item.itemType === "SERVICE" ? (
+                    <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                      <span className="t-caption">
+                        {item.durationMinutes ? `${item.durationMinutes} นาที · ` : ""}
+                        พนักงานนวด: {item.therapistLabel ?? <span style={{ color: "var(--danger)" }}>ยังไม่มอบหมาย</span>}
+                      </span>
+                      {canServe && (item.status === "AWAITING_KITCHEN" || item.status === "COOKING") && therapists.length > 0 ? (
+                        <select
+                          className="select"
+                          style={{ maxWidth: 220 }}
+                          value={item.therapistId ?? ""}
+                          disabled={pending}
+                          onChange={(e) => assignTherapist(item, e.target.value)}
+                          aria-label={`มอบหมายพนักงานนวดให้ ${item.menuItemName}`}
+                        >
+                          <option value="">— เลือกพนักงาน —</option>
+                          {therapists
+                            .filter((t) => !item.stationId || t.skillIds.includes(item.stationId))
+                            .map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.label}
+                                {t.busyNow && t.id !== item.therapistId ? " (ไม่ว่าง)" : ""}
+                              </option>
+                            ))}
+                        </select>
+                      ) : null}
+                    </span>
+                  ) : null}
+
                   <div className="row" style={{ gap: 6 }}>
                     {/* ปุ่มยกเลิกโผล่เฉพาะตอนยังรอครัวรับ — server ก็ปฏิเสธซ้ำอีกชั้นด้วย conditional update */}
                     {item.status === "AWAITING_KITCHEN" && allowed.includes("DELETE") ? (
@@ -317,8 +372,28 @@ export function TableDetail({
                       </button>
                     ) : null}
 
-                    {/* ร้านที่ไม่มี KDS ข้ามจากรอครัวรับไป "เสิร์ฟแล้ว" ได้เลย */}
-                    {canServe && (item.status === "READY" || (!detail.hasKDS && item.status === "AWAITING_KITCHEN")) ? (
+                    {/* โปรแกรมนวด (Phase 20): เริ่มนวด → กำลังนวด → เสร็จ กดจากหน้าห้อง ไม่ผ่าน KDS */}
+                    {item.itemType === "SERVICE" ? (
+                      <>
+                        {canServe && item.status === "AWAITING_KITCHEN" ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            disabled={pending || !item.therapistId}
+                            title={!item.therapistId ? "มอบหมายพนักงานนวดก่อน" : undefined}
+                            onClick={() => startService(item)}
+                          >
+                            เริ่มนวด
+                          </button>
+                        ) : null}
+                        {canServe && item.status === "COOKING" ? (
+                          <button type="button" className="btn btn-accent btn-sm" disabled={pending} onClick={() => serveItem(item)}>
+                            นวดเสร็จแล้ว
+                          </button>
+                        ) : null}
+                      </>
+                    ) : canServe && (item.status === "READY" || (!detail.hasKDS && item.status === "AWAITING_KITCHEN")) ? (
+                      /* ร้านที่ไม่มี KDS ข้ามจากรอครัวรับไป "เสิร์ฟแล้ว" ได้เลย */
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"

@@ -43,6 +43,7 @@ export default async function StoreSettingsPage() {
           hasKDS: settings?.hasKDS ?? false,
           kitchenAlertSound: settings?.kitchenAlertSound ?? true,
           kitchenAutoPrint: settings?.kitchenAutoPrint ?? false,
+          spaEnabled: settings?.spaEnabled ?? false,
           crmEnabled: settings?.crmEnabled ?? false,
           posDefaultMode: settings?.posDefaultMode ?? "TABLE",
         }}

@@ -211,6 +211,13 @@ export const cartLineSchema = z.object({
     .max(200, "โน้ตยาวเกินไป")
     .nullish()
     .transform((v) => (v === "" || v === null ? undefined : v)),
+  /// พนักงานนวดของบรรทัดบริการ (Phase 20) — ฝั่งพนักงานส่งมาได้ · ฝั่งลูกค้าไม่ส่ง (พนักงานมอบหมายทีหลัง) · เช็คว่าเป็นของร้านใน buildOrderLines
+  therapistId: z
+    .string()
+    .trim()
+    .max(64)
+    .nullish()
+    .transform((v) => (v ? v : undefined)),
 })
 
 export const submitOrderSchema = z.object({
@@ -336,6 +343,8 @@ export const storeSettingsSchema = z.object({
   /// จอครัว (Phase 19) — เสียงเตือนออร์เดอร์ใหม่ · เปิดกล่องพิมพ์ทิกเก็ต PDF อัตโนมัติ
   kitchenAlertSound: z.coerce.boolean(),
   kitchenAutoPrint: z.coerce.boolean(),
+  /// ตัวเลือกร้านนวด (Phase 20)
+  spaEnabled: z.coerce.boolean(),
   /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
   posDefaultMode: z.enum(["TABLE", "TAKEAWAY"], { error: "โหมดเริ่มต้นของจอขายไม่ถูกต้อง" }).default("TABLE"),
   crmEnabled: z.coerce.boolean(),
@@ -395,11 +404,22 @@ const tableCode = z
   .max(12, "รหัสโต๊ะยาวเกินไป (ไม่เกิน 12 ตัวอักษร)")
   .regex(/^[A-Za-z0-9ก-๙\-]+$/, "รหัสโต๊ะใช้ได้เฉพาะตัวอักษร ตัวเลข และขีด (-)")
 
-export const createTableSchema = z.object({ code: tableCode })
+/// ชนิดโต๊ะ/ห้อง (Phase 20) — ROOM = ห้องนวด · stationId = ประเภทห้อง (เช็คว่าเป็นของร้านใน action)
+const tableKind = z.enum(["TABLE", "ROOM"], { error: "ชนิดไม่ถูกต้อง" }).default("TABLE")
+const optionalStationId = z
+  .string()
+  .trim()
+  .max(64, "ประเภทไม่ถูกต้อง")
+  .nullish()
+  .transform((v) => (v === "" || v === null ? undefined : v))
+
+export const createTableSchema = z.object({ code: tableCode, kind: tableKind, stationId: optionalStationId })
 
 export const renameTableSchema = z.object({
   id: requiredId("ไม่พบโต๊ะที่ต้องการแก้ไข"),
   code: tableCode,
+  kind: tableKind,
+  stationId: optionalStationId,
 })
 
 /// สร้างโต๊ะเป็นชุด เช่น prefix "T" ตั้งแต่ 1 ถึง 16 → T01…T16
@@ -437,6 +457,11 @@ export const menuItemSchema = z.object({
     .refine((v) => v === "" || /^(https?:\/\/|\/)/.test(v), "ลิงก์รูปต้องขึ้นต้นด้วย http://, https:// หรือ /")
     .transform((v) => (v === "" ? null : v)),
   isActive: z.coerce.boolean(),
+  /// Phase 20 — FOOD/SERVICE · SERVICE ต้องมี durationMinutes (บังคับใน superRefine ด้านล่าง)
+  itemType: z.enum(["FOOD", "SERVICE"], { error: "ชนิดรายการไม่ถูกต้อง" }).default("FOOD"),
+  durationMinutes: z
+    .union([z.literal(""), z.null(), z.undefined(), z.coerce.number({ error: "ระยะเวลาต้องเป็นตัวเลข" }).int("ระยะเวลาต้องเป็นจำนวนเต็ม (นาที)").min(5, "ระยะเวลาอย่างน้อย 5 นาที").max(600, "ระยะเวลาไม่เกิน 600 นาที")])
+    .transform((v) => (v === "" || v === null || v === undefined ? undefined : v)),
   /// ประเภทครัว (Phase 19) — "" = ไม่ระบุ · action ต้องเช็คเองว่า id เป็นของร้านนี้ (FK จากฟอร์ม กติกาข้อ 5)
   stationId: z
     .string()
@@ -444,6 +469,10 @@ export const menuItemSchema = z.object({
     .max(64, "ประเภทครัวไม่ถูกต้อง")
     .nullish()
     .transform((v) => (v === "" || v === null ? undefined : v)),
+}).superRefine((v, ctx) => {
+  if (v.itemType === "SERVICE" && v.durationMinutes === undefined) {
+    ctx.addIssue({ code: "custom", path: ["durationMinutes"], message: "โปรแกรมนวดต้องระบุระยะเวลา (นาที)" })
+  }
 })
 
 /// ประเภทครัว / สถานีปรุง (Phase 19)
@@ -506,6 +535,8 @@ export const createStoreSchema = z.object({
   copyMenuFromStoreId: z.string().trim().max(64).nullish().transform((v) => v || null),
   /// ใส่เมนูตัวอย่าง 3 รายการให้ลองใช้ไหม (2026-09-17) — "off" = ไม่ใส่ · ไม่ส่งมา = ใส่ (ของเดิม) · ถูกข้ามเมื่อคัดลอกเมนู
   sampleMenu: z.union([z.literal("on"), z.literal("off"), z.literal("")]).nullish().transform((v) => v !== "off"),
+  /// ร้านนวด/สปา (Phase 20) — "on" = เปิดตัวเลือกร้านนวดตั้งแต่สร้าง + ใส่ตัวอย่างโปรแกรม/ห้อง/พนักงานนวด (เมื่อใส่ตัวอย่าง)
+  spa: z.union([z.literal("on"), z.literal("")]).nullish().transform((v) => v === "on"),
 })
 
 export const inviteMemberSchema = z.object({
@@ -692,4 +723,126 @@ export const scbCredentialsSchema = z.object({
     .trim()
     .toUpperCase()
     .regex(/^[A-Z0-9]{2,8}$/, "ref3 prefix ต้องเป็น A-Z/0-9 ยาว 2–8 ตัว ตามที่ SCB กำหนดให้"),
+})
+
+// ───────────────────── ร้านนวด (Phase 20) ─────────────────────
+
+/// พนักงานนวด — code เช่น "001" unique ต่อร้าน · skills = id ของประเภทบริการ (KitchenStation) เช็คว่าเป็นของร้านใน action
+export const therapistSchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  code: z
+    .string({ error: "กรุณากรอกรหัสพนักงาน" })
+    .trim()
+    .min(1, "กรุณากรอกรหัสพนักงาน")
+    .max(12, "รหัสพนักงานยาวเกินไป (ไม่เกิน 12 ตัวอักษร)")
+    .regex(/^[A-Za-z0-9\-]+$/, "รหัสพนักงานใช้ได้เฉพาะตัวอักษรอังกฤษ ตัวเลข และขีด (-)"),
+  name: z.string({ error: "กรุณากรอกชื่อพนักงาน" }).trim().min(1, "กรุณากรอกชื่อพนักงาน").max(80, "ชื่อยาวเกินไป"),
+  nickname: z.string().trim().max(40, "ชื่อเล่นยาวเกินไป").nullish().transform((v) => (v ? v : undefined)),
+  phone: z
+    .string()
+    .trim()
+    .max(20, "เบอร์โทรยาวเกินไป")
+    .regex(/^[0-9+\-\s]*$/, "เบอร์โทรใช้ได้เฉพาะตัวเลข")
+    .nullish()
+    .transform((v) => (v ? v : undefined)),
+  gender: z.enum(["F", "M", "OTHER", ""], { error: "เพศไม่ถูกต้อง" }).nullish().transform((v) => (v ? v : undefined)),
+  startedAt: z
+    .string()
+    .trim()
+    .regex(/^(\d{4}-\d{2}-\d{2})?$/, "รูปแบบวันเริ่มงานไม่ถูกต้อง")
+    .nullish()
+    .transform((v) => (v ? v : undefined)),
+  note: z.string().trim().max(300, "หมายเหตุยาวเกินไป").nullish().transform((v) => (v ? v : undefined)),
+  imageUrl: z
+    .string()
+    .trim()
+    .max(500, "ลิงก์รูปยาวเกินไป")
+    .refine((v) => v === "" || /^(https?:\/\/|\/)/.test(v), "ลิงก์รูปต้องขึ้นต้นด้วย http://, https:// หรือ /")
+    .nullish()
+    .transform((v) => (v ? v : null)),
+  isActive: z.coerce.boolean(),
+  /// รายการ id คั่นด้วยจุลภาค
+  skillIds: z
+    .string()
+    .nullish()
+    .transform((v) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []))
+    .pipe(z.array(z.string().max(64)).max(30, "เลือกทักษะมากเกินไป")),
+})
+
+/// มอบหมาย/เปลี่ยนพนักงานนวดให้บรรทัดบริการที่ยังไม่เสร็จ
+export const assignTherapistSchema = z.object({
+  id: requiredId("ไม่พบรายการบริการ"),
+  therapistId: requiredId("กรุณาเลือกพนักงานนวด"),
+})
+
+// ───────────────────── ร้านนวด — กะ + การจอง (Phase 20b) ─────────────────────
+
+const dayKeyField = (label: string) =>
+  z.string({ error: label }).trim().regex(/^\d{4}-\d{2}-\d{2}$/, label)
+
+const timeField = (label: string) =>
+  z.string({ error: label }).trim().regex(/^\d{1,2}:\d{2}$/, label)
+
+/// กะรายวันของพนักงานนวด — `isOff` = หยุด (เวลาถูกมองข้าม แต่ยังต้องส่งค่าที่ผ่านรูปแบบมา)
+export const shiftSchema = z
+  .object({
+    therapistId: requiredId("กรุณาเลือกพนักงานนวด"),
+    workDate: dayKeyField("รูปแบบวันที่ไม่ถูกต้อง"),
+    startTime: timeField("รูปแบบเวลาเข้างานไม่ถูกต้อง (เช่น 09:00)"),
+    endTime: timeField("รูปแบบเวลาออกงานไม่ถูกต้อง (เช่น 20:00)"),
+    isOff: z.coerce.boolean(),
+    note: z.string().trim().max(200, "หมายเหตุยาวเกินไป").nullish().transform((v) => (v ? v : undefined)),
+  })
+  .refine((v) => v.isOff || v.startTime < v.endTime, {
+    message: "เวลาออกงานต้องอยู่หลังเวลาเข้างาน",
+    path: ["endTime"],
+  })
+
+/// คัดลอกกะของวันหนึ่งไปหลายวัน — ใช้ทั้งปุ่ม "คัดลอกไปทั้งสัปดาห์" และ "คัดลอกไปสัปดาห์หน้า"
+export const copyShiftsSchema = z.object({
+  sourceDate: dayKeyField("รูปแบบวันต้นทางไม่ถูกต้อง"),
+  targetDates: z
+    .string()
+    .nullish()
+    .transform((v) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []))
+    .pipe(
+      z
+        .array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "รูปแบบวันปลายทางไม่ถูกต้อง"))
+        .min(1, "กรุณาเลือกวันปลายทางอย่างน้อย 1 วัน")
+        .max(31, "คัดลอกได้ครั้งละไม่เกิน 31 วัน"),
+    ),
+})
+
+/// จองล่วงหน้า — พนักงานบังคับตั้งแต่จอง (ลูกค้ามักขอชื่อคนเดิม) · ห้องเลือกทีหลังตอนเช็กอินได้
+export const bookingSchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  customerName: z
+    .string({ error: "กรุณากรอกชื่อลูกค้า" })
+    .trim()
+    .min(1, "กรุณากรอกชื่อลูกค้า")
+    .max(80, "ชื่อลูกค้ายาวเกินไป"),
+  customerPhone: z
+    .string()
+    .trim()
+    .max(20, "เบอร์โทรยาวเกินไป")
+    .regex(/^[0-9+\-\s]*$/, "เบอร์โทรใช้ได้เฉพาะตัวเลข")
+    .nullish()
+    .transform((v) => (v ? v : undefined)),
+  menuItemId: requiredId("กรุณาเลือกโปรแกรมนวด"),
+  therapistId: requiredId("กรุณาเลือกพนักงานนวด"),
+  tableId: z.string().trim().nullish().transform((v) => (v ? v : undefined)),
+  bookingDate: dayKeyField("รูปแบบวันที่จองไม่ถูกต้อง"),
+  startTime: timeField("รูปแบบเวลาจองไม่ถูกต้อง (เช่น 13:30)"),
+  note: z.string().trim().max(300, "หมายเหตุยาวเกินไป").nullish().transform((v) => (v ? v : undefined)),
+})
+
+/// เช็กอิน — ต้องมีห้องเสมอ (ห้องคือที่ที่ session เปิด) แม้ตอนจองจะยังไม่ได้เลือกไว้
+export const bookingCheckInSchema = z.object({
+  id: requiredId("ไม่พบการจองที่ต้องการ"),
+  tableId: requiredId("กรุณาเลือกห้องนวด"),
+})
+
+export const bookingCancelSchema = z.object({
+  id: requiredId("ไม่พบการจองที่ต้องการ"),
+  reason: z.string().trim().max(200, "เหตุผลยาวเกินไป").nullish().transform((v) => (v ? v : undefined)),
 })

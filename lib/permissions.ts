@@ -50,6 +50,9 @@ export const RESOURCE_ACTIONS: Record<ResourceKey, PermissionAction[]> = {
   MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
   // Phase 17b — จอขายอาหารฝั่งพนักงาน: ADD = กดขาย/ส่งออร์เดอร์เข้าครัว
   MO_POS: ["VIEW", "ADD"],
+  // Phase 20 — ร้านนวด (เห็นเมนูเมื่อร้านเปิด spaEnabled): พนักงานนวด = master data เหมือนเมนู · จอง: ADD = จอง/เช็กอิน · EDIT = แก้/ย้ายเวลา/มอบหมาย · DELETE = ยกเลิก/no-show
+  SPA_THERAPISTS: ["VIEW", "ADD", "EDIT", "DELETE"],
+  SPA_BOOKINGS: ["VIEW", "ADD", "EDIT", "DELETE"],
 }
 
 export const RESOURCE_LABEL: Record<ResourceKey, string> = {
@@ -69,6 +72,8 @@ export const RESOURCE_LABEL: Record<ResourceKey, string> = {
   MO_MENU: "จัดการเมนูอาหาร",
   MO_SETUP: "จัดการโต๊ะและ QR Code",
   MO_POS: "ขายอาหารหน้าร้าน",
+  SPA_THERAPISTS: "พนักงานนวด (ร้านนวด)",
+  SPA_BOOKINGS: "ตารางจองและกระดานห้องนวด (ร้านนวด)",
 }
 
 export const ACTION_LABEL: Record<PermissionAction, string> = {
@@ -92,6 +97,10 @@ export const ACTION_HINT: Partial<Record<`${ResourceKey}:${PermissionAction}`, s
   "MO_SETUP:ADD": "สร้างโต๊ะ/ออก QR Code",
   "MO_SETUP:DELETE": "ลบโต๊ะ/ยกเลิก QR Code",
   "MO_POS:ADD": "กดขายอาหาร/ส่งออร์เดอร์เข้าครัว",
+  "SPA_THERAPISTS:EDIT": "แก้ประวัติ/ทักษะ/กะพนักงานนวด",
+  "SPA_BOOKINGS:ADD": "จองล่วงหน้า/เช็กอิน",
+  "SPA_BOOKINGS:EDIT": "แก้เวลา/มอบหมายพนักงานนวด",
+  "SPA_BOOKINGS:DELETE": "ยกเลิกการจอง/บันทึกไม่มา",
 }
 
 export type CurrentUserPermissions = {

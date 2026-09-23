@@ -98,7 +98,8 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
         )
       }
 
-      const rows = await buildOrderLines(tx, items)
+      // จอขายพนักงาน: บรรทัดบริการต้องมีพนักงานนวดตั้งแต่ตอนส่ง (Phase 20) — ลูกค้าสั่งเองผ่าน QR ไม่บังคับ
+      const rows = await buildOrderLines(tx, items, { requireTherapistForService: true })
 
       // เลขรอบสั่งต่อ session — unique (tableSessionId, orderNumber) เป็นด่านจริงถ้ากดส่งซ้อนกัน
       const last = await tx.mobileOrder.findFirst({
@@ -120,6 +121,7 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
               unitPrice: row.unitPrice.toFixed(2),
               note: row.note,
               selectedOptionsSnapshot: row.options,
+              therapistId: row.therapistId,
             })),
           },
         },
@@ -168,12 +170,15 @@ async function printTicketAfterCommit(
   rows: OrderLine[],
 ): Promise<boolean> {
   if (!isPrinterConfigured()) return false
+  // ทิกเก็ตครัวพิมพ์เฉพาะอาหาร — โปรแกรมนวด (SERVICE) ไปขึ้นกระดานพนักงานนวดแทน (Phase 20) · ไม่มีอาหารเลย = ไม่พิมพ์
+  const foodRows = rows.filter((row) => row.itemType === "FOOD")
+  if (foodRows.length === 0) return false
 
   const printed = await printKitchenTicket({
     tableCode,
     orderNumber: order.orderNumber,
     submittedAt: order.submittedAt,
-    items: rows.map((row) => ({
+    items: foodRows.map((row) => ({
       quantity: row.quantity,
       name: row.menuItemName,
       options: row.options.map((o) => o.optionName),

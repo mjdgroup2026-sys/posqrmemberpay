@@ -12,6 +12,7 @@ import {
   TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
+import { addDays, businessDayKey } from "@/lib/day"
 import { setActiveTestStore, setTestUser } from "../helpers/session-mock"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
@@ -66,6 +67,13 @@ type StoreFixture = {
   assetId: string
   /// Phase 19 — ประเภทครัว
   stationId: string
+  /// Phase 20 — พนักงานนวด + บรรทัดโปรแกรมนวด
+  therapistId: string
+  serviceItemId: string
+  /// Phase 20b — คิวจอง + กะของวันนี้
+  bookingId: string
+  roomId: string
+  bookingCustomer: string
 }
 
 describe.skipIf(!dbReady)("การแยกข้อมูลตามร้าน (Phase 13 — tenant isolation)", () => {
@@ -104,6 +112,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "scb-config": await import("@/app/actions/scb-config"),
       assets: await import("@/app/actions/assets"),
       "staff-order": await import("@/app/actions/staff-order"),
+      therapists: await import("@/app/actions/therapists"),
+      bookings: await import("@/app/actions/bookings"),
+      "therapist-shifts": await import("@/app/actions/therapist-shifts"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -195,6 +206,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     const session = await db.tableSession.create({ data: { storeId, tableId: table.id, qrCodeId: qr.id } })
 
     const station = await db.kitchenStation.create({ data: { storeId, name: `ครัวร้าน ${tag}`, sortOrder: 0 } })
+    const therapist = await db.therapist.create({
+      data: { storeId, code: `T${tag}`, name: `พนักงานนวดร้าน ${tag}`, skills: { connect: [{ id: station.id }] } },
+    })
     const menuItem = await db.menuItem.create({
       data: {
         storeId,
@@ -221,6 +235,32 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     const order = await db.mobileOrder.create({ data: { storeId, tableSessionId: session.id, orderNumber: 1 } })
     const orderItem = await db.mobileOrderItem.create({
       data: { mobileOrderId: order.id, menuItemId: menuItem.id, quantity: 1, unitPrice: "80.00", status: "AWAITING_KITCHEN" },
+    })
+    const serviceMenu = await db.menuItem.create({
+      // ปิดขาย + ไม่ระบุประเภท + ราคาบรรทัด 0 โดยตั้งใจ — ไม่ให้กระทบเทสเดิมที่นับเมนู/ยอดบิลของ fixture (copyMenu ข้ามเมนูปิดขาย)
+      data: { storeId, name: `โปรแกรมนวดร้าน ${tag}`, price: "300.00", itemType: "SERVICE", durationMinutes: 60, isActive: false },
+    })
+    const serviceItem = await db.mobileOrderItem.create({
+      data: { mobileOrderId: order.id, menuItemId: serviceMenu.id, quantity: 1, unitPrice: "0.00", status: "AWAITING_KITCHEN", therapistId: therapist.id },
+    })
+    // Phase 20b — ห้องนวด + กะวันนี้ + คิวจองพรุ่งนี้เที่ยง (ใช้พรุ่งนี้เพื่อไม่ให้ชนกับเทสที่สร้างคิวของวันนี้เอง)
+    const room = await db.table.create({ data: { storeId, code: `R${tag}`, kind: "ROOM", stationId: station.id } })
+    const today = new Date(`${businessDayKey()}T00:00:00.000Z`)
+    await db.therapistShift.create({
+      data: { storeId, therapistId: therapist.id, workDate: today, startMinute: 8 * 60, endMinute: 22 * 60 },
+    })
+    const bookingStart = new Date(`${addDays(businessDayKey(), 1)}T05:00:00.000Z`)
+    const booking = await db.booking.create({
+      data: {
+        storeId,
+        customerName: `ลูกค้าจองร้าน ${tag}`,
+        menuItemId: serviceMenu.id,
+        durationMinutes: 60,
+        therapistId: therapist.id,
+        tableId: room.id,
+        startAt: bookingStart,
+        endAt: new Date(bookingStart.getTime() + 60 * 60_000),
+      },
     })
     const notification = await db.notification.create({
       data: { storeId, tableSessionId: session.id, type: "CALL_STAFF", reason: `เรียกร้าน ${tag}` },
@@ -318,6 +358,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       subscriptionRef: subscription.requestRef,
       assetId: asset.id,
       stationId: station.id,
+      therapistId: therapist.id,
+      serviceItemId: serviceItem.id,
+      bookingId: booking.id,
+      roomId: room.id,
+      bookingCustomer: `ลูกค้าจองร้าน ${tag}`,
     }
   }
 
@@ -349,6 +394,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       f.subscriptionId,
       f.subscriptionRef,
       f.stationId,
+      f.therapistId,
+      f.serviceItemId,
+      f.bookingId,
+      f.roomId,
+      f.bookingCustomer,
       `ร้าน ${f.tag}`,
     ]
   }
@@ -416,6 +466,14 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getScbConfig", (q, a) => q.getScbConfig(a.storeId)],
     ["listTablesForPos", (q, a) => q.listTablesForPos(a.storeId)],
     ["listKitchenStations", (q, a) => q.listKitchenStations(a.storeId)],
+    ["listTherapists", (q, a) => q.listTherapists(a.storeId)],
+    ["listTherapistOptions", (q, a) => q.listTherapistOptions(a.storeId)],
+    ["listTherapistShifts", (q, a) => q.listTherapistShifts(a.storeId, businessDayKey(), 7)],
+    ["listBookingsForDay", (q, a) => q.listBookingsForDay(a.storeId, addDays(businessDayKey(), 1))],
+    ["getBookingDay", (q, a) => q.getBookingDay(a.storeId, addDays(businessDayKey(), 1))],
+    ["getSpaBoard", (q, a) => q.getSpaBoard(a.storeId)],
+    ["listUpcomingBookings", (q, a) => q.listUpcomingBookings(a.storeId)],
+    ["countUpcomingBookings", (q, a) => q.countUpcomingBookings(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -437,7 +495,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       expect((await queries.listProducts(A.storeId)).map((p) => p.id)).toEqual([A.productId])
       expect((await queries.listSales(A.storeId, {})).map((s) => s.id)).toEqual([A.saleId])
       expect((await queries.listTableOverview(A.storeId)).map((t) => t.id).sort()).toEqual(
-        [A.tableId, A.table2Id].sort(),
+        [A.tableId, A.table2Id, A.roomId].sort(),
       )
       expect((await queries.listNotifications(A.storeId)).map((n) => n.id)).toEqual([A.notificationId])
       expect((await queries.listPaymentsAwaitingCallback(A.storeId)).map((p) => p.ref1)).toEqual([A.intentRef1])
@@ -465,6 +523,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "generateMissingQRCodes",
     "createTable",
     "createTablesBulk",
+    // Phase 20b: คัดลอกกะรับแค่คีย์วัน (ไม่มี id ของข้อมูล) — ขอบเขตร้านมาจาก forStore() ล้วน
+    "copyShifts",
     "createRole",
     "createCategory",
     "updateStoreSettings",
@@ -593,6 +653,32 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "deleteKitchenStation",
       (b) => makeFormData({ id: b.stationId }),
       async (b) => expect(await testPrisma().kitchenStation.count({ where: { id: b.stationId } })).toBe(1),
+    ],
+    // Phase 20 — พนักงานนวด: แก้/ปิด/ลบด้วย id ของร้าน B ต้องไม่ถึง · มอบหมาย/เริ่มนวดบรรทัดบริการของ B ต้องไม่ถึง
+    [
+      "saveTherapist",
+      (b) => makeFormData({ id: b.therapistId, code: "HACK", name: "ถูกร้าน A แก้", isActive: "true", skillIds: "" }),
+      async (b) => expect((await testPrisma().therapist.findUniqueOrThrow({ where: { id: b.therapistId } })).code).toBe(`T${b.tag}`),
+    ],
+    [
+      "toggleTherapistActive",
+      (b) => makeFormData({ id: b.therapistId }),
+      async (b) => expect((await testPrisma().therapist.findUniqueOrThrow({ where: { id: b.therapistId } })).isActive).toBe(true),
+    ],
+    [
+      "deleteTherapist",
+      (b) => makeFormData({ id: b.therapistId }),
+      async (b) => expect(await testPrisma().therapist.count({ where: { id: b.therapistId } })).toBe(1),
+    ],
+    [
+      "assignOrderItemTherapist",
+      (b, a) => makeFormData({ id: b.serviceItemId, therapistId: a.therapistId }),
+      async (b) => expect((await testPrisma().mobileOrderItem.findUniqueOrThrow({ where: { id: b.serviceItemId } })).therapistId).toBe(b.therapistId),
+    ],
+    [
+      "startServiceItem",
+      (b) => makeFormData({ id: b.serviceItemId }),
+      async (b) => expect((await testPrisma().mobileOrderItem.findUniqueOrThrow({ where: { id: b.serviceItemId } })).status).toBe("AWAITING_KITCHEN"),
     ],
     [
       "toggleMenuItemActive",
@@ -780,7 +866,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     [
       "copyMenuFromStore",
       (b) => makeFormData({ sourceStoreId: b.storeId }),
-      async (b) => expect(await testPrisma().menuItem.count({ where: { storeId: b.storeId } })).toBe(1),
+      // B มีเมนู 2 รายการตั้งแต่ seed (อาหาร 1 + โปรแกรมนวดปิดขาย 1 — Phase 20) ต้องไม่เพิ่ม/ลดจากคำขอที่ล้ม
+      async (b) => expect(await testPrisma().menuItem.count({ where: { storeId: b.storeId } })).toBe(2),
     ],
     [
       "requestBrandBatch",
@@ -800,6 +887,48 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         return fd
       },
       async (b) => expect(await testPrisma().mobileOrder.count({ where: { storeId: b.storeId } })).toBe(1),
+    ],
+    // Phase 20b — คิวจอง/กะของร้าน B: แก้ · ยกเลิก · เช็กอิน · ตั้งกะ ด้วย id ของร้าน B ต้องไม่ถึง
+    [
+      "saveBooking",
+      (b) =>
+        makeFormData({
+          id: b.bookingId,
+          customerName: "ถูกร้าน A แก้",
+          menuItemId: b.menuItemId,
+          therapistId: b.therapistId,
+          bookingDate: addDays(businessDayKey(), 1),
+          startTime: "15:00",
+        }),
+      async (b) => expect((await testPrisma().booking.findUniqueOrThrow({ where: { id: b.bookingId } })).customerName).toBe(b.bookingCustomer),
+    ],
+    [
+      "cancelBooking",
+      (b) => makeFormData({ id: b.bookingId }),
+      async (b) => expect((await testPrisma().booking.findUniqueOrThrow({ where: { id: b.bookingId } })).status).toBe("BOOKED"),
+    ],
+    [
+      "markBookingNoShow",
+      (b) => makeFormData({ id: b.bookingId }),
+      async (b) => expect((await testPrisma().booking.findUniqueOrThrow({ where: { id: b.bookingId } })).status).toBe("BOOKED"),
+    ],
+    [
+      "checkInBooking",
+      (b) => makeFormData({ id: b.bookingId, tableId: b.roomId }),
+      async (b) => expect((await testPrisma().booking.findUniqueOrThrow({ where: { id: b.bookingId } })).status).toBe("BOOKED"),
+    ],
+    [
+      "saveShift",
+      (b) => makeFormData({ therapistId: b.therapistId, workDate: businessDayKey(), startTime: "01:00", endTime: "02:00", isOff: "false" }),
+      async (b) =>
+        expect(
+          (await testPrisma().therapistShift.findFirstOrThrow({ where: { therapistId: b.therapistId } })).startMinute,
+        ).toBe(8 * 60),
+    ],
+    [
+      "deleteShift",
+      (b) => makeFormData({ therapistId: b.therapistId, workDate: businessDayKey() }),
+      async (b) => expect(await testPrisma().therapistShift.count({ where: { therapistId: b.therapistId } })).toBe(1),
     ],
     [
       "deleteStoreAsset",
@@ -862,6 +991,28 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       )
       expect(ok.ok).toBe(true)
       expect(await testPrisma().menuItem.count({ where: { storeId: A.storeId, stationId: A.stationId } })).toBe(2)
+    })
+
+    it("Phase 20: FK ข้ามร้านบนฟอร์ม — therapist ของ B ในตะกร้า A · skill ของ B ให้พนักงาน A · ประเภทห้องของ B ให้ห้อง A ต้องถูกปฏิเสธ", async () => {
+      // พนักงานนวดของร้าน B บนบรรทัดโปรแกรมนวดของร้าน A
+      const serviceA = await testPrisma().menuItem.create({
+        data: { storeId: A.storeId, name: "นวด A", price: "300.00", itemType: "SERVICE", durationMinutes: 60 },
+      })
+      const order = await actions.createStaffTableOrder(
+        makeFormData({ tableId: A.table2Id, items: JSON.stringify([{ menuItemId: serviceA.id, quantity: 1, optionIds: [], therapistId: B.therapistId }]) }),
+      )
+      expect(order.ok).toBe(false)
+      expect(await testPrisma().mobileOrderItem.count({ where: { menuItemId: serviceA.id } })).toBe(0)
+
+      // ทักษะ (ประเภทบริการ) ของร้าน B ให้พนักงานใหม่ของร้าน A
+      const th = await actions.saveTherapist(makeFormData({ code: "NEW", name: "คนใหม่ A", isActive: "true", skillIds: B.stationId }))
+      expect(th.ok).toBe(false)
+      expect(await testPrisma().therapist.count({ where: { storeId: A.storeId, code: "NEW" } })).toBe(0)
+
+      // ประเภทห้องของร้าน B ให้ห้องใหม่ของร้าน A
+      const room = await actions.createTable(makeFormData({ code: "R9", kind: "ROOM", stationId: B.stationId }))
+      expect(room.ok).toBe(false)
+      expect(await testPrisma().table.count({ where: { storeId: A.storeId, code: "R9" } })).toBe(0)
     })
 
     it("switchActiveStore ไปร้านที่ไม่ได้เป็นสมาชิกต้องถูกปฏิเสธ", async () => {

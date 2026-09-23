@@ -118,6 +118,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
                   quantity: true,
                   unitPrice: true,
                   menuItem: { select: { name: true } },
+                  therapistId: true,
                 },
               },
             },
@@ -179,6 +180,8 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
             create: lines.map((line) => ({
               menuItemId: line.menuItemId,
               name: line.menuItem.name,
+              // พนักงานนวดของบรรทัดบริการ (Phase 20) — snapshot ลงบิลไว้ทำรายงานต่อคน
+              therapistId: line.therapistId ?? null,
               quantity: line.quantity,
               unitPrice: toNumber(line.unitPrice).toFixed(2),
               subtotal: round2(toNumber(line.unitPrice) * line.quantity).toFixed(2),
@@ -208,6 +211,12 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
       })
       await tx.table.update({ where: { id: session.tableId }, data: { status: "EMPTY" } })
 
+      // คิวนวดที่เช็กอินเข้ามาเป็น session นี้ถือว่าจบพร้อมบิล (Phase 20b) — ไม่งั้นกระดานจะค้างว่ายังนวดอยู่
+      await tx.booking.updateMany({
+        where: { tableSessionId: session.id, status: { in: ["CHECKED_IN", "IN_SERVICE"] } },
+        data: { status: "DONE" },
+      })
+
       return { saleId: sale.id, saleNumber: sale.saleNumber, total, alreadyClosed: false }
     })
 
@@ -215,6 +224,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
     if (!result.alreadyClosed) {
       publishStoreEvent(input.storeId, "payments")
       publishStoreEvent(input.storeId, "tables")
+      publishStoreEvent(input.storeId, "bookings")
     }
     return { ok: true, ...result }
   } catch (error) {

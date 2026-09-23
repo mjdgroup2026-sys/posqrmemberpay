@@ -58,4 +58,7 @@ export {
   VolumeX as IconSoundOff,
   Printer as IconPrinter,
   Flame as IconStation,
+  // Phase 20 — ร้านนวด
+  HandHeart as IconTherapist,
+  BedDouble as IconRoom,
 } from "lucide-react"

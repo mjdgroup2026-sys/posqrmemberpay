@@ -51,6 +51,7 @@ export function OnboardingForm({
   const [copyFrom, setCopyFrom] = useState("")
   // ใส่เมนูตัวอย่าง 3 รายการไหม (2026-09-17) — ค่าเริ่มต้นใส่ · ถูกข้ามอัตโนมัติเมื่อคัดลอกเมนูจากสาขาอื่น
   const [sampleMenu, setSampleMenu] = useState(true)
+  const [spa, setSpa] = useState(false)
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [name, setName] = useState("")
@@ -75,6 +76,7 @@ export function OnboardingForm({
     if (joinBrand && brand) formData.set("joinBrand", "on")
     if (copyFrom) formData.set("copyMenuFromStoreId", copyFrom)
     formData.set("sampleMenu", sampleMenu ? "on" : "off")
+    formData.set("spa", spa ? "on" : "")
 
     try {
       const result = await createStore(formData)
@@ -202,6 +204,18 @@ export function OnboardingForm({
           </span>
         </label>
       )}
+
+      {/* ตัวเลือกร้านนวด (Phase 20) — เปิดเพิ่มจากของเดิม ไม่ใช่โหมดสลับ · เปลี่ยนทีหลังได้ที่ตั้งค่าร้าน */}
+      <label className="checkbox-row">
+        <input type="checkbox" checked={spa} onChange={(e) => setSpa(e.target.checked)} />
+        <span>
+          ร้านนวด / สปา (เปิดตัวเลือกพนักงานนวด โปรแกรมนวด ห้องนวด)
+          <span className="t-caption" style={{ display: "block" }}>
+            ใช้ร่วมกับเมนูอาหาร/โต๊ะได้ตามปกติ{copyFrom || !sampleMenu ? "" : " · จะได้โปรแกรมนวด 3 · ห้องนวด 2 · พนักงานนวดตัวอย่าง 2 คน ให้ลองกด"} —
+            เปิด/ปิดทีหลังได้ที่ ตั้งค่าร้าน
+          </span>
+        </span>
+      </label>
 
       {trialUsed ? (
         <div className="alert-banner warning" style={{ display: "block" }}>

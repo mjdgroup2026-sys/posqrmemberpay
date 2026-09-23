@@ -9,21 +9,24 @@ import {
 } from "@/app/actions/notifications"
 import Link from "next/link"
 import { formatBaht, formatClock, formatDateTime, formatNumber } from "@/lib/format"
-import type { CustomerPaidBill, NotificationCard, PaymentAwaitingCallback } from "@/lib/queries"
+import type { BookingRow, CustomerPaidBill, NotificationCard, PaymentAwaitingCallback } from "@/lib/queries"
 import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { AwaitingCallbackBadge, CustomerPaidBadge } from "@/components/payment-alerts"
-import { IconBell, IconReceipt, IconSpinner, IconWarning } from "@/components/icons"
+import { IconBell, IconCalendar, IconReceipt, IconSpinner, IconWarning } from "@/components/icons"
 
 export function NotificationBoard({
   notifications,
   awaitingCallback = [],
   paidBills = [],
+  upcomingBookings = [],
   canAcknowledge = true,
 }: {
   notifications: NotificationCard[]
   awaitingCallback?: PaymentAwaitingCallback[]
   paidBills?: CustomerPaidBill[]
+  /// คิวนวดที่ใกล้ถึงเวลาแล้วยังไม่เช็กอิน (Phase 20b) — คำนวณสด ไม่ใช่แถวใน Notification จึงไม่มีปุ่มรับทราบ
+  upcomingBookings?: BookingRow[]
   /// MO_NOTIFICATIONS:EDIT — ไม่มี = ดูอย่างเดียว
   canAcknowledge?: boolean
 }) {
@@ -200,6 +203,41 @@ export function NotificationBoard({
                   className="btn btn-subtle btn-block btn-sm"
                 >
                   เปิดหน้าปิดบิลของโต๊ะนี้
+                </Link>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {/* คิวนวดที่ใกล้ถึงเวลา (Phase 20b) — ถูกนับรวมใน badge ของ sidebar เหมือนใบรอธนาคารยืนยัน
+          จึงต้องมีที่แสดงเสมอ ไม่งั้นพนักงานเห็นตัวเลขค้างแล้วหาที่มาไม่เจอ · ไม่มีปุ่มรับทราบ
+          เพราะรายการนี้หายเองเมื่อเช็กอิน/ยกเลิก */}
+      {upcomingBookings.length > 0 ? (
+        <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <h2 className="t-h3" style={{ color: "var(--warning)" }}>
+            คิวนวดที่ใกล้ถึงเวลา · <span className="num">{formatNumber(upcomingBookings.length)}</span>
+          </h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+            {upcomingBookings.map((booking) => (
+              <article key={booking.id} className="card-ui card-pad" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                  <span className="row" style={{ gap: 8 }}>
+                    <IconCalendar size={17} aria-hidden />
+                    <span style={{ fontWeight: 700 }}>{booking.customerName}</span>
+                  </span>
+                  <span className="chip chip-info">
+                    <span className="dot" />
+                    <span className="num">{formatClock(booking.startAt)}</span>
+                  </span>
+                </div>
+                <span className="t-small">
+                  {booking.menuItemName} · {booking.therapistLabel}
+                  {booking.tableCode ? ` · ห้อง ${booking.tableCode}` : " · ยังไม่เลือกห้อง"}
+                </span>
+                {booking.customerPhone ? <span className="t-caption num">{booking.customerPhone}</span> : null}
+                <Link href={`/spa/bookings?date=${booking.startAt.toISOString().slice(0, 10)}`} className="btn btn-subtle btn-block btn-sm">
+                  เปิดตารางจองเพื่อเช็กอิน
                 </Link>
               </article>
             ))}

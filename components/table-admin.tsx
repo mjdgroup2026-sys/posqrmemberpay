@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { createTable, createTablesBulk, renameTable, deleteTable } from "@/app/actions/tables"
 import { formatNumber } from "@/lib/format"
-import type { ManagedTable } from "@/lib/queries"
+import type { KitchenStationRow, ManagedTable } from "@/lib/queries"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconBack, IconPlus, IconSpinner, IconTable, IconTrash } from "@/components/icons"
 import {
@@ -26,18 +26,33 @@ const STATUS_LABEL: Record<ManagedTable["status"], string> = {
   OCCUPIED_MERGED: "ถูกรวมกับโต๊ะอื่น",
 }
 
-export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedTable[]; allowed?: AllowedActions }) {
+/// Phase 20 (ร้านนวด): `spaEnabled` เปิดตัวเลือก "โต๊ะอาหาร / ห้องนวด" + ประเภทห้อง (จาก `stations`) ตอนเพิ่ม/แก้
+export function TableAdmin({
+  tables,
+  allowed = FULL_ACCESS,
+  spaEnabled = false,
+  stations = [],
+}: {
+  tables: ManagedTable[]
+  allowed?: AllowedActions
+  spaEnabled?: boolean
+  stations?: KitchenStationRow[]
+}) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
 
   const [single, setSingle] = useState("")
+  const [singleKind, setSingleKind] = useState<"TABLE" | "ROOM">("TABLE")
+  const [singleStation, setSingleStation] = useState("")
   const [prefix, setPrefix] = useState("T")
   const [from, setFrom] = useState("1")
   const [to, setTo] = useState("10")
 
   const [renaming, setRenaming] = useState<ManagedTable | null>(null)
   const [newCode, setNewCode] = useState("")
+  const [newKind, setNewKind] = useState<"TABLE" | "ROOM">("TABLE")
+  const [newStation, setNewStation] = useState("")
   const [removing, setRemoving] = useState<ManagedTable | null>(null)
 
   async function run(action: () => Promise<{ ok: boolean; message?: string; error?: string; fieldErrors?: FieldErrors }>) {
@@ -65,6 +80,8 @@ export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedT
     event.preventDefault()
     const formData = new FormData()
     formData.set("code", single)
+    formData.set("kind", singleKind)
+    formData.set("stationId", singleKind === "ROOM" ? singleStation : "")
     if (await run(() => createTable(formData))) setSingle("")
   }
 
@@ -83,6 +100,8 @@ export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedT
     const formData = new FormData()
     formData.set("id", renaming.id)
     formData.set("code", newCode)
+    formData.set("kind", newKind)
+    formData.set("stationId", newKind === "ROOM" ? newStation : "")
     if (await run(() => renameTable(formData))) setRenaming(null)
   }
 
@@ -134,6 +153,16 @@ export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedT
               />
               {fieldErrors.code ? <span className="field-hint error">{fieldErrors.code}</span> : null}
             </div>
+            {spaEnabled ? (
+              <KindPicker
+                kind={singleKind}
+                station={singleStation}
+                stations={stations}
+                onKind={setSingleKind}
+                onStation={setSingleStation}
+                error={fieldErrors.stationId}
+              />
+            ) : null}
             <button type="submit" className="btn btn-primary btn-block" disabled={pending}>
               {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : <IconPlus size={17} aria-hidden />}
               เพิ่มโต๊ะ
@@ -227,7 +256,12 @@ export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedT
                   const busy = table.status !== "EMPTY" || table.mergedInto !== null || table.mergedCount > 0
                   return (
                     <tr key={table.id} style={{ borderTop: "1px solid var(--line)" }}>
-                      <td style={{ padding: "12px 24px", fontWeight: 600 }}>{table.code}</td>
+                      <td style={{ padding: "12px 24px", fontWeight: 600 }}>
+                        {table.code}
+                        {table.kind === "ROOM" ? (
+                          <span className="t-caption" style={{ fontWeight: 400 }}> · ห้องนวด{table.stationName ? ` (${table.stationName})` : ""}</span>
+                        ) : null}
+                      </td>
                       <td style={{ padding: "12px" }}>
                         <span className={`chip ${table.status === "EMPTY" ? "chip-neutral" : "chip-warning"}`}>
                           <span className="dot" />
@@ -253,6 +287,8 @@ export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedT
                             title={busy ? "โต๊ะกำลังใช้งานอยู่ แก้ไม่ได้" : undefined}
                             onClick={() => {
                               setNewCode(table.code)
+                              setNewKind(table.kind)
+                              setNewStation(table.stationId ?? "")
                               setRenaming(table)
                             }}
                           >
@@ -309,6 +345,16 @@ export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedT
               />
               {fieldErrors.code ? <span className="field-hint error">{fieldErrors.code}</span> : null}
             </div>
+            {spaEnabled ? (
+              <KindPicker
+                kind={newKind}
+                station={newStation}
+                stations={stations}
+                onKind={setNewKind}
+                onStation={setNewStation}
+                error={fieldErrors.stationId}
+              />
+            ) : null}
             <DialogFooter>
               <button type="button" className="btn btn-ghost" onClick={() => setRenaming(null)}>
                 ยกเลิก
@@ -342,5 +388,50 @@ export function TableAdmin({ tables, allowed = FULL_ACCESS }: { tables: ManagedT
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+/// ตัวเลือก "โต๊ะอาหาร / ห้องนวด" + ประเภทห้อง (Phase 20) — ใช้ทั้งตอนเพิ่มและตอนแก้
+function KindPicker({
+  kind,
+  station,
+  stations,
+  onKind,
+  onStation,
+  error,
+}: {
+  kind: "TABLE" | "ROOM"
+  station: string
+  stations: KitchenStationRow[]
+  onKind: (kind: "TABLE" | "ROOM") => void
+  onStation: (id: string) => void
+  error?: string
+}) {
+  return (
+    <div className="field">
+      <span className="t-small">ชนิด</span>
+      <div className="row" style={{ gap: 8 }}>
+        <button type="button" className={`btn btn-sm ${kind === "TABLE" ? "btn-primary" : "btn-subtle"}`} onClick={() => onKind("TABLE")}>
+          โต๊ะอาหาร
+        </button>
+        <button type="button" className={`btn btn-sm ${kind === "ROOM" ? "btn-primary" : "btn-subtle"}`} onClick={() => onKind("ROOM")}>
+          ห้องนวด
+        </button>
+      </div>
+      {kind === "ROOM" ? (
+        <>
+          <select className="select" value={station} onChange={(e) => onStation(e.target.value)} aria-label="ประเภทห้อง" style={{ marginTop: 6 }}>
+            <option value="">ห้องทั่วไป (ใช้ได้ทุกประเภทบริการ)</option>
+            {stations.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <span className="field-hint">ประเภทห้อง เช่น ห้องนวดเท้า / ห้องนวดไทย — ตารางจอง (20b) จะเสนอเฉพาะห้องที่ตรงกับโปรแกรม</span>
+          {error ? <span className="field-hint error">{error}</span> : null}
+        </>
+      ) : null}
+    </div>
   )
 }

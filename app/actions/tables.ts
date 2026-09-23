@@ -23,7 +23,17 @@ import {
 } from "@/lib/validation"
 import type { ActionResult, FieldErrors } from "@/lib/types"
 
-
+/// ประเภทห้อง (Phase 20) — ใส่ได้เฉพาะห้องนวด (ROOM) และต้องเป็นประเภทบริการของร้านนี้ (FK จากฟอร์ม กติกาข้อ 5)
+/// คืน stationId = null เมื่อเป็นโต๊ะอาหาร/ไม่ระบุ · คืน ok:false เมื่อ id แปลกปลอม (forStore() หาไม่เจอ)
+async function resolveRoomStation(
+  db: ReturnType<typeof forStore>,
+  input: { kind: "TABLE" | "ROOM"; stationId?: string },
+): Promise<{ ok: true; stationId: string | null } | { ok: false; error: string; fieldErrors: FieldErrors }> {
+  if (input.kind !== "ROOM" || !input.stationId) return { ok: true, stationId: null }
+  const station = await db.kitchenStation.findUnique({ where: { id: input.stationId }, select: { id: true } })
+  if (!station) return { ok: false, error: "ไม่พบประเภทห้องที่เลือก", fieldErrors: { stationId: "ไม่พบประเภทห้องที่เลือก" } }
+  return { ok: true, stationId: station.id }
+}
 
 /// revalidate + ส่งสัญญาณ SSE (Phase 8 realtime) — เรียกหลังเขียน DB สำเร็จเท่านั้น
 function revalidateTablePages(storeId: string) {
@@ -368,16 +378,24 @@ export async function createTable(formData: FormData): Promise<ActionResult> {
   const storeId = ctx.storeId
   const db = forStore(storeId)
 
-  const parsed = createTableSchema.safeParse({ code: formData.get("code") })
+  const parsed = createTableSchema.safeParse({
+    code: formData.get("code"),
+    kind: formData.get("kind") ?? "TABLE",
+    stationId: formData.get("stationId") ?? undefined,
+  })
   if (!parsed.success) {
     return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
   }
+
+  const room = await resolveRoomStation(db, parsed.data)
+  if (!room.ok) return { ok: false, error: room.error, fieldErrors: room.fieldErrors }
+  const roomStation = room.stationId
 
   try {
     // เพดานโต๊ะตาม tier (Phase 14b) — นับใต้ advisory lock ในทรานแซคชันเดียวกับการสร้าง
     await db.$transaction(async (tx) => {
       await assertTableCapacity(tx, storeId, ctx.plan.tableLimit, 1)
-      await tx.table.create({ data: { storeId, code: parsed.data.code } })
+      await tx.table.create({ data: { storeId, code: parsed.data.code, kind: parsed.data.kind, stationId: roomStation } })
     })
   } catch (error) {
     if (error instanceof TableLimitExceeded) return { ok: false, error: error.userMessage }
@@ -459,15 +477,27 @@ export async function renameTable(formData: FormData): Promise<ActionResult> {
   const storeId = ctx.storeId
   const db = forStore(storeId)
 
-  const parsed = renameTableSchema.safeParse({ id: formData.get("id"), code: formData.get("code") })
+  const parsed = renameTableSchema.safeParse({
+    id: formData.get("id"),
+    code: formData.get("code"),
+    kind: formData.get("kind") ?? "TABLE",
+    stationId: formData.get("stationId") ?? undefined,
+  })
   if (!parsed.success) {
     return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
   }
 
+  const room = await resolveRoomStation(db, parsed.data)
+  if (!room.ok) return { ok: false, error: room.error, fieldErrors: room.fieldErrors }
+  const roomStation = room.stationId
+
   try {
     await db.$transaction(async (tx) => {
       await assertTableIdle(tx, parsed.data.id)
-      await tx.table.update({ where: { id: parsed.data.id }, data: { code: parsed.data.code } })
+      await tx.table.update({
+        where: { id: parsed.data.id },
+        data: { code: parsed.data.code, kind: parsed.data.kind, stationId: roomStation },
+      })
     })
   } catch (error) {
     if (error instanceof TableAbort) return { ok: false, ...error.failure }
