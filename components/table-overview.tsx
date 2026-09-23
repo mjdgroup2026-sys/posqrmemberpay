@@ -16,7 +16,7 @@ import { formatBaht, formatClock, formatNumber } from "@/lib/format"
 import type { CustomerPaidBill, PaymentAwaitingCallback, TableCard } from "@/lib/queries"
 import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
-import { IconBell, IconMerge, IconReceipt, IconSpinner, IconTable } from "@/components/icons"
+import { IconBell, IconMerge, IconReceipt, IconRoom, IconSpinner, IconTable } from "@/components/icons"
 import { AwaitingCallbackBadge, CustomerPaidBadge } from "@/components/payment-alerts"
 import {
   Dialog,
@@ -103,6 +103,15 @@ export function TableOverview({
   )
 
   const visible = tables.filter((t) => matchesFilter(t, filter))
+  // ร้านนวด (Phase 20): ห้องนวดขึ้นเป็นกลุ่มแรก โต๊ะอาหารกลุ่มถัดไป · ไม่มีห้องเลย = ผังเดิมไม่มีหัวกลุ่ม
+  const rooms = visible.filter((t) => t.kind === "ROOM")
+  const showGroupTitles = tables.some((t) => t.kind === "ROOM")
+  const groups = showGroupTitles
+    ? [
+        { key: "ROOM", title: "ห้องนวด", items: rooms },
+        { key: "TABLE", title: "โต๊ะ", items: visible.filter((t) => t.kind !== "ROOM") },
+      ].filter((g) => g.items.length > 0)
+    : [{ key: "TABLE", title: "โต๊ะ", items: visible }]
   const emptyTables = tables.filter((t) => t.status === "EMPTY")
 
   // จับคู่บิลที่เพิ่งชำระเข้ากับการ์ดของโต๊ะนั้น — ป้ายต้องอยู่ในกรอบเดิมของโต๊ะ ไม่ใช่กรอบใหม่
@@ -229,10 +238,17 @@ export function TableOverview({
           <p className="t-body">ไม่มีโต๊ะตามเงื่อนไขที่เลือก</p>
         </section>
       ) : (
-        <section
-          style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 14 }}
-        >
-          {visible.map((table) => (
+        <>
+          {groups.map((group) => (
+            <div key={group.key} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {showGroupTitles ? (
+                <h2 className="t-h3 row" style={{ gap: 8 }}>
+                  {group.key === "ROOM" ? <IconRoom size={18} aria-hidden /> : <IconTable size={18} aria-hidden />}
+                  {group.title} <span className="t-caption num">{formatNumber(group.items.length)}</span>
+                </h2>
+              ) : null}
+              <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 14 }}>
+          {group.items.map((table) => (
             <article
               key={table.id}
               className="card-ui card-pad"
@@ -241,7 +257,12 @@ export function TableOverview({
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <span className="row" style={{ gap: 8 }}>
                   <IconTable size={16} aria-hidden style={{ color: "var(--ink-3)" }} />
-                  <span style={{ fontWeight: 700, fontSize: "1.05rem" }}>โต๊ะ {table.code}</span>
+                  <span style={{ fontWeight: 700, fontSize: "1.05rem" }}>
+                    {table.kind === "ROOM" ? "ห้อง" : "โต๊ะ"} {table.code}
+                    {table.kind === "ROOM" && table.stationName ? (
+                      <span className="t-caption" style={{ fontWeight: 400 }}> · {table.stationName}</span>
+                    ) : null}
+                  </span>
                 </span>
                 <span className={`chip ${STATUS_CHIP[table.status]}`}>
                   <span className="dot" />
@@ -384,7 +405,10 @@ export function TableOverview({
               </div>
             </article>
           ))}
-        </section>
+              </section>
+            </div>
+          ))}
+        </>
       )}
 
       <Dialog open={merging !== null} onOpenChange={(open) => !open && setMerging(null)}>

@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { getTableDetail } from "@/lib/queries"
+import { getStoreSettings, getTableDetail, listTherapistOptions } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { TableDetail } from "@/components/table-detail"
 
@@ -9,7 +9,9 @@ export default async function TableDetailPage({ params }: PageProps<"/mobile-ord
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
   const { storeId, granted } = await requirePageAccess("MO_TABLES")
   const { tableId } = await params
-  const detail = await getTableDetail(storeId, tableId)
+  const [detail, settings] = await Promise.all([getTableDetail(storeId, tableId), getStoreSettings(storeId)])
+  // ร้านนวด (Phase 20): ตัวเลือกพนักงานนวดสำหรับมอบหมายบนบรรทัดโปรแกรมนวด
+  const therapists = settings?.spaEnabled ? await listTherapistOptions(storeId) : []
 
   if (!detail) {
     return (
@@ -32,6 +34,7 @@ export default async function TableDetailPage({ params }: PageProps<"/mobile-ord
       canAcknowledge={granted.MO_NOTIFICATIONS?.includes("EDIT") ?? false}
       canKitchen={granted.MO_KITCHEN?.includes("EDIT") ?? false}
       canOrderMore={granted.MO_POS?.includes("ADD") ?? false}
+      therapists={therapists}
     />
   )
 }

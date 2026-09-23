@@ -50,11 +50,12 @@ export async function createStore(formData: FormData): Promise<ActionResult<{ st
     joinBrand: formData.get("joinBrand"),
     copyMenuFromStoreId: formData.get("copyMenuFromStoreId"),
     sampleMenu: formData.get("sampleMenu"),
+    spa: formData.get("spa") ?? "",
   })
   if (!parsed.success) {
     return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
   }
-  const { name, slug, themeColor, joinBrand, copyMenuFromStoreId, sampleMenu } = parsed.data
+  const { name, slug, themeColor, joinBrand, copyMenuFromStoreId, sampleMenu, spa } = parsed.data
 
   // Phase 14c — แบรนด์ของผู้ใช้ (1 คน = 1 แบรนด์) และสาขาต้นทางที่คัดลอกเมนูได้ (ต้องเป็น OWNER)
   let brandId: string | null = null
@@ -100,6 +101,8 @@ export async function createStore(formData: FormData): Promise<ActionResult<{ st
       // แล้วคนที่สองไปได้ร้านของคนแรก (upsert ไม่ล้ม) → ต้อง create ตรงให้ unique ล้มเอง
       const created = await tx.store.create({ data: { slug, name, brandId }, select: { id: true } })
       await provisionStore(tx, { id: created.id, slug, name, themeColor, ownerUserId: userId })
+      // ร้านนวด (Phase 20) — เปิดตัวเลือกตั้งแต่สร้างร้าน (แถว StoreSettings ถูกสร้างใน provisionStore แล้ว)
+      if (spa) await tx.storeSettings.update({ where: { storeId: created.id }, data: { spaEnabled: true } })
 
       for (const code of SAMPLE_TABLE_CODES) {
         const table = await tx.table.create({ data: { storeId: created.id, code }, select: { id: true } })
@@ -140,6 +143,62 @@ export async function createStore(formData: FormData): Promise<ActionResult<{ st
             stationId: stationIdByName.get(item.station) ?? null,
           },
         })
+      }
+
+      // ตัวอย่างร้านนวด (Phase 20a) — ประเภทบริการ 2 · โปรแกรมนวด 3 (SERVICE มีระยะเวลา) · ห้องนวด 2 (มีประเภทห้อง) ·
+      // พนักงานนวด 2 คนพร้อมทักษะ → กดขายโปรแกรม/เลือกพนักงาน/เข้าห้อง ได้ทันทีตั้งแต่สร้างร้าน
+      if (spa) {
+        const spaStations = new Map<string, string>()
+        for (const [index, stationName] of ["นวดไทย", "นวดเท้า"].entries()) {
+          const station = await tx.kitchenStation.create({
+            data: { storeId: created.id, name: stationName, sortOrder: 100 + index },
+            select: { id: true },
+          })
+          spaStations.set(stationName, station.id)
+        }
+        const programs = [
+          { name: `${SAMPLE_MENU_PREFIX} นวดไทย 60 นาที`, price: "300.00", minutes: 60, station: "นวดไทย" },
+          { name: `${SAMPLE_MENU_PREFIX} นวดไทย 120 นาที`, price: "550.00", minutes: 120, station: "นวดไทย" },
+          { name: `${SAMPLE_MENU_PREFIX} นวดฝ่าเท้า 60 นาที`, price: "350.00", minutes: 60, station: "นวดเท้า" },
+        ]
+        for (const program of programs) {
+          await tx.menuItem.create({
+            data: {
+              storeId: created.id,
+              name: program.name,
+              description: "โปรแกรมตัวอย่าง — แก้ราคา/ระยะเวลา หรือลบทิ้งได้ที่ จัดการเมนูอาหาร",
+              price: program.price,
+              itemType: "SERVICE",
+              durationMinutes: program.minutes,
+              stationId: spaStations.get(program.station) ?? null,
+            },
+          })
+        }
+        for (const room of [
+          { code: "3/1", station: "นวดไทย" },
+          { code: "5/1", station: "นวดเท้า" },
+        ]) {
+          const table = await tx.table.create({
+            data: { storeId: created.id, code: room.code, kind: "ROOM", stationId: spaStations.get(room.station) ?? null },
+            select: { id: true },
+          })
+          await tx.qRCode.create({ data: { storeId: created.id, tableId: table.id, type: "STATIC", token: qrToken() } })
+        }
+        for (const person of [
+          { code: "001", name: "พนักงานตัวอย่าง 1", nickname: "นิด", skills: ["นวดไทย", "นวดเท้า"] },
+          { code: "002", name: "พนักงานตัวอย่าง 2", nickname: "หน่อย", skills: ["นวดเท้า"] },
+        ]) {
+          await tx.therapist.create({
+            data: {
+              storeId: created.id,
+              code: person.code,
+              name: person.name,
+              nickname: person.nickname,
+              note: "พนักงานตัวอย่าง — แก้ประวัติหรือลบทิ้งได้ที่หน้า พนักงานนวด",
+              skills: { connect: person.skills.flatMap((s) => (spaStations.has(s) ? [{ id: spaStations.get(s) as string }] : [])) },
+            },
+          })
+        }
       }
 
       return created.id

@@ -121,6 +121,7 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
               unitPrice: row.unitPrice.toFixed(2),
               note: row.note,
               selectedOptionsSnapshot: row.options,
+              therapistId: row.therapistId,
             })),
           },
         },
@@ -135,7 +136,9 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
 
     // พิมพ์ทิกเก็ตหลัง commit — พิมพ์ไม่ผ่านต้องไม่ทำให้ออร์เดอร์ของลูกค้าหาย
     let printed = false
-    if (isPrinterConfigured()) {
+    // ทิกเก็ตครัวพิมพ์เฉพาะอาหาร — โปรแกรมนวดไม่เข้าครัว (Phase 20)
+    const foodRows = created.rows.filter((row) => row.itemType === "FOOD")
+    if (isPrinterConfigured() && foodRows.length > 0) {
       const table = await db.table.findUnique({
         where: { id: created.tableId },
         select: { code: true },
@@ -144,7 +147,7 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
         tableCode: table?.code ?? "-",
         orderNumber: created.order.orderNumber,
         submittedAt: created.order.submittedAt,
-        items: created.rows.map((row) => ({
+        items: foodRows.map((row) => ({
           quantity: row.quantity,
           name: row.menuItemName,
           options: row.options.map((o) => o.optionName),

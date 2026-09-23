@@ -70,7 +70,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    · แล้วทุก query ต้องผ่าน `forStore(storeId)` จาก `lib/db.ts` ไม่ใช่ `prisma` ตรง ๆ (ESLint บังคับใน
    `app/actions/**` และ `lib/queries.ts`) · **raw SQL ต้องเติม `WHERE "storeId" = ${storeId}` เอง** เพราะ
    extension ช่วยไม่ได้ · `findUnique` ด้วย id จากผู้ใช้ปลอดภัยเพราะ extension ยัด storeId เข้า where ให้ —
-   แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId`) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
+   แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId` · Phase 19–20: `stationId` ของเมนู/ห้อง · `therapistId` ในตะกร้า/มอบหมาย/การจอง · `skillIds` ของพนักงานนวด · `menuItemId`/`tableId` ของการจอง) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
    · เพิ่ม query/action ใหม่ต้องเพิ่มในตารางของ `__tests__/integration/tenant-isolation.test.ts` ไม่งั้นเทสแดง
    · **การค้นข้ามร้านทำได้ 4 ที่เท่านั้น** (Phase 13–14c): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
    qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้ · **Phase 17a เพิ่ม `findAssetById()`** — `<img src="/api/assets/<id>">`
@@ -85,7 +85,8 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    `switchActiveStore` ก็ใช้ `loadStoreContext()` ตรวจ ไม่ใช่ `StoreMember` ตรง ๆ
    · **(Phase 14b) action ที่ "ขายใหม่" ต้องผ่าน `requireSellingStore()`** (หรือ `guardAction(..., { selling: true })` สำหรับ POS)
    ไม่ใช่ `requireStore()` — แพ็กเกจหมดอายุ = อ่านได้ ขายไม่ได้ (`STORE_EXPIRED`) · ที่ใช้อยู่: `createSale`, `openTableSession`
-   ทั้งสองทาง, `submitOrder`, `createStaffTableOrder`/`createTakeawaySale` (Phase 17) · ห้ามใส่กับปิดบิล/void/รายงาน
+   ทั้งสองทาง, `submitOrder`, `createStaffTableOrder`/`createTakeawaySale` (Phase 17), `checkInBooking` (Phase 20b —
+   จองไว้ได้ แต่เช็กอินคือการเปิดบิลใหม่) · ห้ามใส่กับปิดบิล/void/รายงาน
 6. **ข้อความที่ผู้ใช้เห็นเป็นภาษาไทยทั้งหมด** รวมถึงข้อความ validation และ error
 7. **(Phase 6+, MJD Mobile Order) เปลี่ยน `MobileOrderItem.status` ต้องเป็น conditional update**
    (`updateMany` + `where: { status: 'AWAITING_KITCHEN' }`) เหมือนกติกากันขายเกินสต็อกในข้อ 4 — ป้องกัน race
@@ -313,7 +314,9 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   ```
   ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (8 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`),
   `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
-  และ `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
+  `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
+  และ `lib/booking.ts` (2 จุด — advisory lock กันจองซ้อน namespace 720_003 ต่อพนักงาน / 720_004 ต่อห้อง, Phase 20b
+  · **ลำดับการจับต้องคงที่เสมอ**: พนักงานก่อน แล้วค่อยห้อง ไม่งั้น deadlock)
   · ทุกจุดต้องมี `WHERE "storeId" = ${storeId}` (Phase 13)
 - **Client Component ที่ใช้ `useSearchParams()` ต้องมี `<Suspense>` ครอบ** ถ้าหน้านั้นถูก prerender แบบ static
   (หน้า auth ทั้งหมดเข้าข่าย) ไม่งั้น `pnpm build` จะพัง
@@ -543,6 +546,28 @@ station ที่ `lib/ticket-lines.ts` ที่เดียว** (KDS/ทิ�
 (ต้องกด "เปิดเสียงเตือน" ครั้งแรกต่อเครื่อง — ข้อจำกัดเบราว์เซอร์ · `components/kitchen-alert.ts`) · พิมพ์อัตโนมัติผ่าน iframe ซ่อน `/tickets/[id]?auto=1&embed=1`
 ทีละใบ (`components/auto-print.tsx` · **กล่องพิมพ์ยังเด้งให้กด 1 ครั้ง** เว้นแต่ Chrome `--kiosk-printing` · ร้านที่ตั้ง `KITCHEN_PRINTER_HOST` ไม่เข้าคิวนี้เพราะ
 `printedAt` ไม่ null) · ลูกค้าไม่เห็น station (ตัดสินใจ 2026-09-22) · เทสใหม่ 27 + tenant-isolation +4 · **Phase 18 (`/explore`) ยกเลิกวันเดียวกัน**
+
+**🔧 Phase 20a ตัวเลือกร้านนวด — โค้ดเสร็จ 2026-09-22 (รอ deploy · migration 3 ไฟล์ `20260922120000_add_spa_resources` (ADD VALUE แยก) → `…120100_add_spa_option_and_therapist` (additive) → `…120200_backfill_spa_permissions` · ไม่มี env ใหม่)**:
+ตัดสินใจ "ใช้ร่วมกันได้กรณีร้านนวด" → **สวิตช์ `StoreSettings.spaEnabled` เปิดเพิ่มจากของเดิม ไม่ใช่โหมดสลับ** (ร้านนวดมีทั้งโปรแกรมนวดและอาหาร ทั้งห้องนวดและโต๊ะ) ·
+`Therapist` ต่อร้าน (ไม่ผูกบัญชีล็อกอิน · ทักษะ = m:n กับ `KitchenStation` ซึ่งในร้านนวดคือ "ประเภทบริการ") · `MenuItem.itemType FOOD|SERVICE` + `durationMinutes` ·
+`Table.kind TABLE|ROOM` + `stationId` (ประเภทห้อง) · `MobileOrderItem.therapistId` (SetNull) / `SaleItem.therapistId` (RESTRICT — snapshot ลงบิลไว้ทำรายงานต่อคน 20c) ·
+resource `SPA_THERAPISTS` (หน้า `/spa/therapists`) + `SPA_BOOKINGS` (จองไว้ให้ 20b) backfill ตาม MO_MENU/MO_TABLES · **กติกาที่เพิ่ม**: บรรทัด SERVICE จากจอขายพนักงานต้องมีพนักงานนวด
+(`buildOrderLines(…, { requireTherapistForService: true })` ปฏิเสธพนักงานของร้านอื่น/ปิดใช้งาน/ทักษะไม่ตรง · อาหารระบุพนักงานไม่ได้) · ลูกค้าสั่งผ่าน QR ได้โดยไม่มีพนักงาน แล้วพนักงาน
+"มอบหมาย" ทีหลัง (`assignOrderItemTherapist`) · **SERVICE ไม่เข้า KDS/ทิกเก็ตครัว** (query กรอง `itemType: FOOD` · ESC-POS/PDF พิมพ์เฉพาะอาหาร) — สถานะเดินจากหน้าห้อง
+`startServiceItem` (→COOKING ต้องมีพนักงาน) / `markItemServed` (ข้าม READY ได้แม้ร้านเปิด KDS) · ปิดบิล/รายงาน/ปิดรอบ เส้นทางเดิมทั้งหมด · onboarding ติ๊ก "ร้านนวด/สปา" ได้ตัวอย่างครบ ·
+เทส `spa-therapist.test.ts` 10 + tenant-isolation +8 (623 ทั้งชุด)
+
+**🔧 Phase 20b กะ + จองล่วงหน้า + กระดานว่าง/ไม่ว่าง — โค้ดเสร็จ 2026-09-23 (รอ deploy · migration 1 ไฟล์ `20260923090000_add_therapist_shift_and_booking` additive ล้วน · ไม่มี env ใหม่ · `migrate diff` สะอาด)**:
+ตัดสินใจ 2026-09-23: **กะเก็บรายวัน** (คัดลอกทั้งสัปดาห์ได้) · **พนักงานบังคับตั้งแต่ตอนจอง ห้องเลือกทีหลังตอนเช็กอินได้** ·
+`TherapistShift` (unique therapistId+workDate · `isOff` = หยุด · **ไม่มีแถว = "ยังไม่ตั้งกะ" ซึ่งยังจองได้**) · `Booking` + enum `BookingStatus`
+(BOOKED→CHECKED_IN→IN_SERVICE→DONE / CANCELLED / NO_SHOW · `durationMinutes` เป็น snapshot) · `StoreSettings.bookingBufferMinutes` (default 10) ·
+**ตรรกะว่าง/ไม่ว่างอยู่ที่ `lib/booking.ts` ที่เดียว ห้ามลอก** (`resolveBookingTarget` ตรวจ FK+ทักษะ+ประเภทห้อง · `assertWithinShift` · `assertSlotFree`
+จับ advisory lock 720_003/720_004 ในทรานแซคชันเดียวกับการเขียน) · หน้า `/spa/bookings?date=` (ตารางรายวัน + ฟอร์ม + เช็กอิน) ·
+`/spa/shifts?week=` (ตารางกะ + คัดลอกทั้งสัปดาห์ · สิทธิ์ `SPA_THERAPISTS`) · `/spa/board` (กระดานสด คำนวณสดล้วน) · SSE topic ใหม่ `bookings` ·
+เช็กอิน = conditional update `status: BOOKED` **ก่อน** เปิด session/ออร์เดอร์ (กดพร้อมกันได้ใบเดียว) แล้วใช้ `openOrReuseSession`+`buildOrderLines` เดิม ·
+สถานะคิวเดินตามงานจริง (`startServiceItem`→IN_SERVICE · `markItemServed`→DONE · ปิดบิลปิดคิวค้างเป็น DONE ในทรานแซคชันเดียวกัน) ·
+เตือนคิวใกล้ถึงเวลา 15 นาทีในหน้าแจ้งเตือน + badge (คำนวณสด ไม่มีปุ่มรับทราบ) · เทส `booking.test.ts` 12 + `therapist-shift.test.ts` 4 +
+tenant-isolation +6 query +6 action (651 ทั้งชุด) · **20c (รายงานต่อพนักงานนวด) ยังไม่เริ่ม** — แผนใน spec §8
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

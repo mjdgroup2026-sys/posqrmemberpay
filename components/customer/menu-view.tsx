@@ -49,6 +49,9 @@ export function MenuView({
           ) : null}
           <p className="num" style={{ marginTop: 6, fontWeight: 700, color: "var(--brand-strong)" }}>
             ฿{formatBaht(item.price)}
+            {item.itemType === "SERVICE" && item.durationMinutes ? (
+              <span className="t-caption" style={{ fontWeight: 400, marginLeft: 6 }}>· {item.durationMinutes} นาที</span>
+            ) : null}
           </p>
         </div>
         <span className="btn btn-subtle btn-sm">เลือก</span>

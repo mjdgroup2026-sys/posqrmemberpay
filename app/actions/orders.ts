@@ -6,7 +6,8 @@ import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { orderTicketLabel } from "@/lib/order-label"
-import { idSchema, cancelOrderItemSchema, reduceOrderItemSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
+import { advanceSessionBooking } from "@/lib/booking"
+import { idSchema, cancelOrderItemSchema, reduceOrderItemSchema, assignTherapistSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { OrderItemStatus } from "@/generated/prisma/client"
 import { isPrinterConfigured, printKitchenTicket } from "@/lib/kitchen-printer"
 import type { ActionResult } from "@/lib/types"
@@ -87,6 +88,19 @@ async function transition(
   return { ok: true, message: `${item.menuItem.name} — ${STATUS_LABEL[to]}` }
 }
 
+/// เลื่อนสถานะของการจองตามงานจริงหน้าห้อง (Phase 20b) — ออร์เดอร์กลับบ้านไม่มี session จึงข้ามไป
+async function advanceBookingForItem(
+  storeId: string,
+  tableSessionId: string | null,
+  therapistId: string | null,
+  to: "IN_SERVICE" | "DONE",
+): Promise<void> {
+  if (!tableSessionId || !therapistId) return
+  const db = forStore(storeId)
+  await advanceSessionBooking(db, { tableSessionId, therapistId, to })
+  publishStoreEvent(storeId, "bookings")
+}
+
 /// ครัวกด "เริ่มปรุง" บน KDS
 export async function startCookingItem(formData: FormData): Promise<ActionResult> {
   let ctx: StoreContext
@@ -136,11 +150,87 @@ export async function markItemServed(formData: FormData): Promise<ActionResult> 
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  const from: OrderItemStatus[] = (await hasKDS(storeId))
-    ? ["READY"]
-    : ["AWAITING_KITCHEN", "COOKING", "READY"]
+  // โปรแกรมนวด (SERVICE — Phase 20) ไม่ผ่าน KDS: "เริ่มนวด" = COOKING · "เสร็จ" = SERVED กดจากหน้าห้องได้เลยแม้ร้านเปิด KDS
+  const service = await forStore(storeId).mobileOrderItem.findFirst({
+    where: { id: parsed.data.id, order: { storeId }, menuItem: { itemType: "SERVICE" } },
+    select: { id: true, therapistId: true, order: { select: { tableSessionId: true } } },
+  })
+  const from: OrderItemStatus[] =
+    !service && (await hasKDS(storeId)) ? ["READY"] : ["AWAITING_KITCHEN", "COOKING", "READY"]
 
-  return transition(storeId, parsed.data.id, from, "SERVED")
+  const result = await transition(storeId, parsed.data.id, from, "SERVED")
+  if (result.ok && service) await advanceBookingForItem(storeId, service.order.tableSessionId, service.therapistId, "DONE")
+  return result
+}
+
+/// เริ่มนวด (Phase 20) — บรรทัดบริการเปลี่ยน AWAITING_KITCHEN → COOKING จากหน้าห้อง (ไม่ผ่าน KDS) · ต้องมีพนักงานนวดก่อน
+export async function startServiceItem(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
+  try {
+    ctx = await requireStoreAccess(["MO_TABLES", "EDIT"], ["SPA_BOOKINGS", "EDIT"])
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+  const storeId = ctx.storeId
+
+  const parsed = idSchema.safeParse({ id: formData.get("id") })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
+
+  const item = await forStore(storeId).mobileOrderItem.findFirst({
+    where: { id: parsed.data.id, order: { storeId } },
+    select: { therapistId: true, menuItem: { select: { itemType: true } }, order: { select: { tableSessionId: true } } },
+  })
+  if (!item) return { ok: false, error: "ไม่พบรายการบริการนี้" }
+  if (item.menuItem.itemType !== "SERVICE") return { ok: false, error: "รายการนี้เป็นอาหาร ให้ครัวกดเริ่มทำจาก KDS แทน" }
+  if (!item.therapistId) return { ok: false, error: "กรุณามอบหมายพนักงานนวดก่อนเริ่มนวด" }
+
+  const result = await transition(storeId, parsed.data.id, ["AWAITING_KITCHEN"], "COOKING")
+  // คิวที่เช็กอินเข้ามาเป็น session นี้เดินสถานะตามงานจริง (Phase 20b) — ลูกค้า walk-in ไม่มีการจอง ก็ไม่เกิดอะไรขึ้น
+  if (result.ok) await advanceBookingForItem(storeId, item.order.tableSessionId, item.therapistId, "IN_SERVICE")
+  return result
+}
+
+/// มอบหมาย/เปลี่ยนพนักงานนวดให้บรรทัดบริการ (Phase 20) — ทำได้ตอนยังไม่เสร็จ/ไม่ถูกยกเลิก
+/// พนักงานต้องเป็นของร้าน ยังทำงานอยู่ และมีทักษะตรงประเภทบริการของโปรแกรม (ถ้าโปรแกรมระบุประเภท)
+export async function assignOrderItemTherapist(formData: FormData): Promise<ActionResult> {
+  let ctx: StoreContext
+  try {
+    ctx = await requireStoreAccess(["MO_TABLES", "EDIT"], ["SPA_BOOKINGS", "EDIT"])
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
+
+  const parsed = assignTherapistSchema.safeParse({ id: formData.get("id"), therapistId: formData.get("therapistId") })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
+
+  const [item, therapist] = await Promise.all([
+    db.mobileOrderItem.findFirst({
+      where: { id: parsed.data.id, order: { storeId } },
+      select: { id: true, menuItem: { select: { name: true, itemType: true, stationId: true, station: { select: { name: true } } } } },
+    }),
+    db.therapist.findUnique({
+      where: { id: parsed.data.therapistId },
+      select: { id: true, code: true, name: true, nickname: true, isActive: true, skills: { select: { id: true } } },
+    }),
+  ])
+  if (!item) return { ok: false, error: "ไม่พบรายการบริการนี้" }
+  if (item.menuItem.itemType !== "SERVICE") return { ok: false, error: `${item.menuItem.name} ไม่ใช่โปรแกรมนวด มอบหมายพนักงานไม่ได้` }
+  if (!therapist || !therapist.isActive) return { ok: false, error: "ไม่พบพนักงานนวดคนนี้ หรือปิดใช้งานแล้ว" }
+  if (item.menuItem.stationId && !therapist.skills.some((s) => s.id === item.menuItem.stationId)) {
+    return { ok: false, error: `พนักงาน ${therapist.code} ไม่มีทักษะ "${item.menuItem.station?.name ?? ""}"` }
+  }
+
+  // เปลี่ยนได้เฉพาะรายการที่ยังไม่จบ (conditional update — กติกาข้อ 7)
+  const updated = await db.mobileOrderItem.updateMany({
+    where: { id: item.id, order: { storeId }, status: { in: ["AWAITING_KITCHEN", "COOKING"] } },
+    data: { therapistId: therapist.id },
+  })
+  if (updated.count === 0) return { ok: false, error: `${item.menuItem.name} เสร็จหรือถูกยกเลิกไปแล้ว เปลี่ยนพนักงานไม่ได้` }
+
+  revalidateOrderPages(storeId)
+  return { ok: true, message: `มอบหมาย ${item.menuItem.name} ให้พนักงาน ${therapist.code} ${therapist.nickname ?? therapist.name} แล้ว` }
 }
 
 /// ยกเลิกรายการอาหารทีละรายการ — อนุญาตเฉพาะตอนยังเป็น AWAITING_KITCHEN เท่านั้น (กติกาข้อ 7)

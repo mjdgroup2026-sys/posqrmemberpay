@@ -8,7 +8,7 @@ import { toNumber } from "@/lib/format"
 import { orderTicketLabel } from "@/lib/order-label"
 import { decodeStoreScb, getStoreScb } from "@/lib/scb-store"
 import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
-import { businessDayRange, businessDateOnly } from "@/lib/day"
+import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFromKey, minuteOfBusinessDay } from "@/lib/day"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import type { PaymentMethodValue } from "@/lib/types"
 import type { PaymentMode, PermissionAction as PermissionActionValue, Prisma, ResourceKey } from "@/generated/prisma/client"
@@ -312,6 +312,8 @@ export type SaleListItem = {
     name: string
     sku: string
     unit: string
+    /// พนักงานนวดของบรรทัดโปรแกรมนวด (Phase 20) — undefined สำหรับสินค้า/อาหาร
+    therapistLabel?: string
     quantity: number
     unitPrice: number
     subtotal: number
@@ -339,7 +341,7 @@ export async function listSales(storeId: string, params: { from?: string; to?: s
       cashier: { select: { name: true } },
       voidedBy: { select: { name: true } },
       session: { select: { table: { select: { code: true } } } },
-      items: { include: { product: { select: { sku: true, unit: true } } } },
+      items: { include: { product: { select: { sku: true, unit: true } }, therapist: { select: { code: true, name: true, nickname: true } } } },
     },
   })
 
@@ -379,6 +381,8 @@ export async function listSales(storeId: string, params: { from?: string; to?: s
       // ชื่อเป็น snapshot ในแถวเอง — บิลจาก Mobile Order ไม่มี product ให้ join (Phase 10)
       name: item.name,
       sku: item.product?.sku ?? "",
+      // พนักงานนวดของบรรทัดบริการ (Phase 20) — โชว์บนใบเสร็จ/ประวัติ
+      therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : undefined,
       unit: item.product?.unit ?? "",
       quantity: item.quantity,
       unitPrice: toNumber(item.unitPrice),
@@ -594,6 +598,9 @@ export type TableCard = {
   primaryTableCode: string | null
   mergedTableCodes: string[]
   pendingNotification: { id: string; type: "CALL_STAFF" | "CHECK_BILL"; reason: string | null } | null
+  /// Phase 20 — โต๊ะอาหาร/ห้องนวด (ผังแยกกลุ่ม) + ประเภทห้อง
+  kind: "TABLE" | "ROOM"
+  stationName: string | null
 }
 
 /// ยอดสดต่อ session (ไม่รวมรายการที่ยกเลิก) — ใช้ raw SQL เพราะ Prisma groupBy ข้ามความสัมพันธ์ไม่ได้
@@ -615,7 +622,7 @@ async function liveSessionTotals(storeId: string) {
 export async function listTableOverview(storeId: string): Promise<TableCard[]> {
   const db = forStore(storeId)
   const [tables, sessions, totals, notifications] = await Promise.all([
-    db.table.findMany({ orderBy: { code: "asc" } }),
+    db.table.findMany({ orderBy: { code: "asc" }, include: { station: { select: { name: true } } } }),
     db.tableSession.findMany({
       where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
       orderBy: { openedAt: "desc" },
@@ -660,6 +667,8 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
       pendingNotification: notification
         ? { id: notification.id, type: notification.type, reason: notification.reason }
         : null,
+      kind: t.kind,
+      stationName: t.station?.name ?? null,
     }
   })
 }
@@ -716,12 +725,14 @@ export async function listNotifications(storeId: string, limit = 60): Promise<No
 
 export async function getPendingNotificationCount(storeId: string) {
   const db = forStore(storeId)
-  const [notifications, awaitingCallback] = await Promise.all([
+  const [notifications, awaitingCallback, upcomingBookings] = await Promise.all([
     db.notification.count({ where: { status: "PENDING" } }),
     countPaymentsAwaitingCallback(storeId),
+    // คิวนวดที่ใกล้ถึงเวลา (Phase 20b) — ร้านที่ไม่ได้เปิดตัวเลือกร้านนวดจะไม่มีแถว booking เลย ค่าจึงเป็น 0 เสมอ
+    countUpcomingBookings(storeId),
   ])
   // รวมเข้า badge เดียวกัน — ถ้าไม่รวม พนักงานจะไม่มีวันรู้ว่ามีเรื่องต้องดู จนกว่าจะบังเอิญเปิดหน้านี้
-  return notifications + awaitingCallback
+  return notifications + awaitingCallback + upcomingBookings
 }
 
 /// เวลาที่ยอมให้ callback ของธนาคารมาช้าได้ ก่อนจะเตือนพนักงานให้ไปตรวจเอง
@@ -881,6 +892,11 @@ export type OrderItemRow = {
   /// ประเภทครัวของเมนู ณ ตอนอ่าน (Phase 19) — null = ไม่ระบุ · ใช้แยกแท็บ KDS และจัดกลุ่มบนทิกเก็ต
   stationId: string | null
   stationName: string | null
+  /// Phase 20 — FOOD/SERVICE · นาที · พนักงานนวด (SERVICE เท่านั้น; null = ยังไม่มอบหมาย)
+  itemType: "FOOD" | "SERVICE"
+  durationMinutes: number | null
+  therapistId: string | null
+  therapistLabel: string | null
 }
 
 export type TableDetail = {
@@ -944,7 +960,7 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
           include: {
             items: {
               orderBy: { createdAt: "asc" },
-              include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } } },
+              include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
             },
           },
         },
@@ -978,6 +994,10 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
       cancelReason: item.cancelReason,
       stationId: item.menuItem.stationId,
       stationName: item.menuItem.station?.name ?? null,
+      itemType: item.menuItem.itemType,
+      durationMinutes: item.menuItem.durationMinutes,
+      therapistId: item.therapist?.id ?? null,
+      therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
   }))
 
@@ -1021,15 +1041,16 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
     where: {
       // ออร์เดอร์ที่โต๊ะต้องมี session ที่ยังเปิดอยู่ · ออร์เดอร์กลับบ้านไม่มีโต๊ะเลย (Phase 17c)
       OR: [{ session: { status: { in: ["OPEN", "AWAITING_BILL"] } } }, { orderType: "TAKEAWAY" }],
-      items: { some: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY"] } } },
+      // เฉพาะอาหาร — โปรแกรมนวด (SERVICE) ไม่เข้าครัว (Phase 20)
+      items: { some: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY"] }, menuItem: { itemType: "FOOD" } } },
     },
     orderBy: { submittedAt: "asc" },
     include: {
       session: { select: { table: { select: { code: true } } } },
       items: {
-        where: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY", "CANCELLED"] } },
+        where: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY", "CANCELLED"] }, menuItem: { itemType: "FOOD" } },
         orderBy: { createdAt: "asc" },
-        include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } } },
+        include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
       },
     },
   })
@@ -1058,6 +1079,10 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
       cancelReason: item.cancelReason,
       stationId: item.menuItem.stationId,
       stationName: item.menuItem.station?.name ?? null,
+      itemType: item.menuItem.itemType,
+      durationMinutes: item.menuItem.durationMinutes,
+      therapistId: item.therapist?.id ?? null,
+      therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
   }))
 }
@@ -1078,6 +1103,7 @@ export async function getStoreSettings(storeId: string) {
     posDefaultMode: settings.posDefaultMode,
     kitchenAlertSound: settings.kitchenAlertSound,
     kitchenAutoPrint: settings.kitchenAutoPrint,
+    spaEnabled: settings.spaEnabled,
   }
 }
 
@@ -1151,6 +1177,9 @@ export type MenuItemCard = {
   /// ประเภทครัว (Phase 19) — ใช้กรองบนจอขายพนักงาน · ลูกค้าไม่เห็น
   stationId: string | null
   stationName: string | null
+  /// Phase 20 — โปรแกรมนวดมีระยะเวลา · อาหารเป็น FOOD/null
+  itemType: "FOOD" | "SERVICE"
+  durationMinutes: number | null
   modifierGroups: MenuModifierGroup[]
 }
 
@@ -1163,6 +1192,8 @@ function toMenuCard(item: {
   isFeatured: boolean
   stationId: string | null
   station: { name: string } | null
+  itemType: "FOOD" | "SERVICE"
+  durationMinutes: number | null
   modifierGroups: {
     id: string
     name: string
@@ -1180,6 +1211,8 @@ function toMenuCard(item: {
     isFeatured: item.isFeatured,
     stationId: item.stationId,
     stationName: item.station?.name ?? null,
+    itemType: item.itemType,
+    durationMinutes: item.durationMinutes,
     modifierGroups: item.modifierGroups.map((group) => ({
       id: group.id,
       name: group.name,
@@ -1251,7 +1284,7 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
       orders: {
         orderBy: { orderNumber: "asc" },
         include: {
-          items: { orderBy: { createdAt: "asc" }, include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } } } },
+          items: { orderBy: { createdAt: "asc" }, include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } } },
         },
       },
     },
@@ -1274,6 +1307,10 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
       cancelReason: item.cancelReason,
       stationId: item.menuItem.stationId,
       stationName: item.menuItem.station?.name ?? null,
+      itemType: item.menuItem.itemType,
+      durationMinutes: item.menuItem.durationMinutes,
+      therapistId: item.therapist?.id ?? null,
+      therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
   }))
 
@@ -1576,7 +1613,7 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
       customerLabel: true,
       session: { select: { tableId: true, table: { select: { code: true } } } },
       items: {
-        where: { status: { not: "CANCELLED" } },
+        where: { status: { not: "CANCELLED" }, menuItem: { itemType: "FOOD" } },
         orderBy: { createdAt: "asc" },
         select: {
           id: true,
@@ -1725,6 +1762,10 @@ export type ManagedTable = {
   mergedCount: number
   sessionCount: number
   hasActiveQr: boolean
+  /// Phase 20 — โต๊ะอาหาร/ห้องนวด + ประเภทห้อง
+  kind: "TABLE" | "ROOM"
+  stationId: string | null
+  stationName: string | null
 }
 
 /// โต๊ะทั้งหมดพร้อมข้อมูลที่ใช้ตัดสินว่าแก้/ลบได้ไหม — หน้า /mobile-order/tables/manage
@@ -1737,6 +1778,9 @@ export async function listTablesForManage(storeId: string): Promise<ManagedTable
       code: true,
       status: true,
       primaryTable: { select: { code: true } },
+      kind: true,
+      stationId: true,
+      station: { select: { name: true } },
       _count: { select: { mergedTables: true, sessions: true } },
       qrCodes: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
     },
@@ -1750,6 +1794,9 @@ export async function listTablesForManage(storeId: string): Promise<ManagedTable
     mergedCount: table._count.mergedTables,
     sessionCount: table._count.sessions,
     hasActiveQr: table.qrCodes.length > 0,
+    kind: table.kind,
+    stationId: table.stationId,
+    stationName: table.station?.name ?? null,
   }))
 }
 
@@ -1763,6 +1810,8 @@ export type ManagedMenuItem = {
   isFeatured: boolean
   stationId: string | null
   stationName: string | null
+  itemType: "FOOD" | "SERVICE"
+  durationMinutes: number | null
   orderedCount: number
   modifierGroups: {
     name: string
@@ -1787,6 +1836,8 @@ export async function listMenuForManage(storeId: string): Promise<ManagedMenuIte
       isFeatured: true,
       stationId: true,
       station: { select: { name: true } },
+      itemType: true,
+      durationMinutes: true,
       _count: { select: { orderItems: true, saleItems: true } },
       modifierGroups: {
         orderBy: { sortOrder: "asc" },
@@ -1810,6 +1861,8 @@ export async function listMenuForManage(storeId: string): Promise<ManagedMenuIte
     isFeatured: item.isFeatured,
     stationId: item.stationId,
     stationName: item.station?.name ?? null,
+    itemType: item.itemType,
+    durationMinutes: item.durationMinutes,
     orderedCount: item._count.orderItems + item._count.saleItems,
     modifierGroups: item.modifierGroups.map((group) => ({
       name: group.name,
@@ -2170,4 +2223,387 @@ export async function listKitchenStations(storeId: string): Promise<KitchenStati
     select: { id: true, name: true, sortOrder: true, _count: { select: { menuItems: true } } },
   })
   return rows.map((row) => ({ id: row.id, name: row.name, sortOrder: row.sortOrder, menuCount: row._count.menuItems }))
+}
+
+// ───────────────────── ร้านนวด — พนักงานนวด (Phase 20a) ─────────────────────
+
+export type TherapistRow = {
+  id: string
+  code: string
+  name: string
+  nickname: string | null
+  phone: string | null
+  gender: string | null
+  startedAt: Date | null
+  note: string | null
+  imageUrl: string | null
+  isActive: boolean
+  /// ทักษะ = ประเภทบริการ (KitchenStation) ที่ทำได้
+  skills: { id: string; name: string }[]
+  /// จำนวนบรรทัดบริการที่เคยทำ (จากบิลที่ปิดแล้ว) — ใช้ตัดสินว่าลบได้ไหม (มีประวัติ = ปิดใช้งานแทน)
+  servedCount: number
+  /// กำลังนวดอยู่ตอนนี้? (มีบรรทัดบริการสถานะ COOKING ใน session ที่ยังเปิด) — 20b จะต่อยอดเป็นกระดานเต็ม
+  busyNow: boolean
+}
+
+/// พนักงานนวดทั้งหมดของร้าน (รวมที่ปิดใช้งาน) — หน้า /spa/therapists และตัวเลือกบนจอขาย
+export async function listTherapists(storeId: string): Promise<TherapistRow[]> {
+  const rows = await forStore(storeId).therapist.findMany({
+    orderBy: [{ isActive: "desc" }, { code: "asc" }],
+    include: {
+      skills: { select: { id: true, name: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] },
+      _count: { select: { saleItems: true } },
+      orderItems: {
+        where: { status: "COOKING", order: { session: { status: { in: ["OPEN", "AWAITING_BILL"] } } } },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  })
+  return rows.map((t) => ({
+    id: t.id,
+    code: t.code,
+    name: t.name,
+    nickname: t.nickname,
+    phone: t.phone,
+    gender: t.gender,
+    startedAt: t.startedAt,
+    note: t.note,
+    imageUrl: t.imageUrl,
+    isActive: t.isActive,
+    skills: t.skills,
+    servedCount: t._count.saleItems,
+    busyNow: t.orderItems.length > 0,
+  }))
+}
+
+/// ตัวเลือกพนักงานนวดสำหรับจอขาย/มอบหมาย — เฉพาะที่ยังทำงานอยู่ พร้อม id ทักษะไว้กรองตามโปรแกรม
+export type TherapistOption = { id: string; code: string; label: string; skillIds: string[]; busyNow: boolean }
+
+export async function listTherapistOptions(storeId: string): Promise<TherapistOption[]> {
+  const rows = await listTherapists(storeId)
+  return rows
+    .filter((t) => t.isActive)
+    .map((t) => ({
+      id: t.id,
+      code: t.code,
+      label: `${t.code} ${t.nickname ?? t.name}`,
+      skillIds: t.skills.map((s) => s.id),
+      busyNow: t.busyNow,
+    }))
+}
+
+// ───────────────────── ร้านนวด — กะ + การจอง (Phase 20b) ─────────────────────
+
+/// ช่วงเวลาจริงของ "วันจอง" (เวลาไทย) — ใช้ตัวเดียวกับที่อื่นเพื่อไม่ให้ตารางเวลากับรายงานตีความวันคนละแบบ
+function bookingDayRange(dayKey: string): { start: Date; end: Date } {
+  const start = new Date(`${dayKey}T00:00:00.000+07:00`)
+  return { start, end: new Date(start.getTime() + 86_400_000) }
+}
+
+export type ShiftRow = {
+  therapistId: string
+  /// คีย์วัน YYYY-MM-DD (เวลาไทย)
+  workDate: string
+  startMinute: number
+  endMinute: number
+  isOff: boolean
+  note: string | null
+}
+
+/// กะของทุกคนในช่วง `days` วันนับจาก `fromDayKey` — หน้าตารางกะเรียกทีละสัปดาห์ (days = 7)
+export async function listTherapistShifts(storeId: string, fromDayKey: string, days = 7): Promise<ShiftRow[]> {
+  const rows = await forStore(storeId).therapistShift.findMany({
+    where: { workDate: { gte: dateOnlyFromKey(fromDayKey), lt: dateOnlyFromKey(addDays(fromDayKey, days)) } },
+    orderBy: [{ workDate: "asc" }],
+    select: { therapistId: true, workDate: true, startMinute: true, endMinute: true, isOff: true, note: true },
+  })
+  return rows.map((row) => ({
+    therapistId: row.therapistId,
+    // คอลัมน์ชนิด DATE คืนมาเป็นเที่ยงคืน UTC อยู่แล้ว จึงตัดสตริงตรง ๆ ได้โดยไม่ต้องขยับ timezone
+    workDate: row.workDate.toISOString().slice(0, 10),
+    startMinute: row.startMinute,
+    endMinute: row.endMinute,
+    isOff: row.isOff,
+    note: row.note,
+  }))
+}
+
+export type BookingStatusValue = "BOOKED" | "CHECKED_IN" | "IN_SERVICE" | "DONE" | "CANCELLED" | "NO_SHOW"
+
+export type BookingRow = {
+  id: string
+  customerName: string
+  customerPhone: string | null
+  menuItemId: string
+  menuItemName: string
+  durationMinutes: number
+  therapistId: string
+  therapistLabel: string
+  tableId: string | null
+  tableCode: string | null
+  startAt: Date
+  endAt: Date
+  /// นาทีนับจากเที่ยงคืน (เวลาไทย) — ให้ client วางบล็อกบนตารางได้โดยไม่ต้องคำนวณ timezone เอง
+  startMinute: number
+  endMinute: number
+  status: BookingStatusValue
+  note: string | null
+  tableSessionId: string | null
+}
+
+type BookingWithRelations = {
+  id: string
+  customerName: string
+  customerPhone: string | null
+  menuItemId: string
+  durationMinutes: number
+  therapistId: string
+  tableId: string | null
+  startAt: Date
+  endAt: Date
+  status: string
+  note: string | null
+  tableSessionId: string | null
+  menuItem: { name: string }
+  therapist: { code: string; name: string; nickname: string | null }
+  table: { code: string } | null
+}
+
+function toBookingRow(row: BookingWithRelations): BookingRow {
+  const endMinuteRaw = minuteOfBusinessDay(row.endAt)
+  return {
+    id: row.id,
+    customerName: row.customerName,
+    customerPhone: row.customerPhone,
+    menuItemId: row.menuItemId,
+    menuItemName: row.menuItem.name,
+    durationMinutes: row.durationMinutes,
+    therapistId: row.therapistId,
+    therapistLabel: `${row.therapist.code} ${row.therapist.nickname ?? row.therapist.name}`,
+    tableId: row.tableId,
+    tableCode: row.table?.code ?? null,
+    startAt: row.startAt,
+    endAt: row.endAt,
+    startMinute: minuteOfBusinessDay(row.startAt),
+    // คิวที่ล้นข้ามเที่ยงคืนต้องได้นาทีมากกว่า 1440 ไม่งั้นบล็อกบนตารางจะกลับหัว
+    endMinute: businessDayKey(row.endAt) === businessDayKey(row.startAt) ? endMinuteRaw : endMinuteRaw + 1440,
+    status: row.status as BookingStatusValue,
+    note: row.note,
+    tableSessionId: row.tableSessionId,
+  }
+}
+
+const BOOKING_INCLUDE = {
+  menuItem: { select: { name: true } },
+  therapist: { select: { code: true, name: true, nickname: true } },
+  table: { select: { code: true } },
+} as const
+
+/// การจองทั้งหมดของวันนั้น (รวมที่ยกเลิก/ไม่มา เพื่อให้พนักงานเห็นประวัติของวันครบ)
+export async function listBookingsForDay(storeId: string, dayKey: string): Promise<BookingRow[]> {
+  const { start, end } = bookingDayRange(dayKey)
+  const rows = await forStore(storeId).booking.findMany({
+    where: { startAt: { gte: start, lt: end } },
+    orderBy: [{ startAt: "asc" }],
+    include: BOOKING_INCLUDE,
+  })
+  return rows.map(toBookingRow)
+}
+
+export type BookingProgram = { id: string; name: string; durationMinutes: number; price: number; stationId: string | null }
+export type BookingRoom = { id: string; code: string; stationId: string | null }
+
+/// ข้อมูลทั้งหมดที่หน้าตารางจองต้องใช้ในคำขอเดียว — โปรแกรม/พนักงาน/ห้อง/กะ/คิวของวันนั้น
+export async function getBookingDay(storeId: string, dayKey: string) {
+  const db = forStore(storeId)
+  const [programs, rooms, therapists, shifts, bookings, settings] = await Promise.all([
+    db.menuItem.findMany({
+      where: { itemType: "SERVICE", isActive: true },
+      orderBy: [{ name: "asc" }],
+      select: { id: true, name: true, durationMinutes: true, price: true, stationId: true },
+    }),
+    db.table.findMany({
+      where: { kind: "ROOM", primaryTableId: null },
+      orderBy: [{ code: "asc" }],
+      select: { id: true, code: true, stationId: true },
+    }),
+    listTherapistOptions(storeId),
+    listTherapistShifts(storeId, dayKey, 1),
+    listBookingsForDay(storeId, dayKey),
+    db.storeSettings.findUnique({ where: { storeId }, select: { bookingBufferMinutes: true } }),
+  ])
+
+  const programRows: BookingProgram[] = programs
+    .filter((p) => (p.durationMinutes ?? 0) > 0)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      durationMinutes: p.durationMinutes ?? 0,
+      price: toNumber(p.price),
+      stationId: p.stationId,
+    }))
+
+  return {
+    dayKey,
+    programs: programRows,
+    rooms: rooms as BookingRoom[],
+    therapists,
+    shifts,
+    bookings,
+    bufferMinutes: settings?.bookingBufferMinutes ?? 0,
+  }
+}
+
+export type TherapistBoardState = "OFF" | "NO_SHIFT" | "BEFORE_SHIFT" | "AFTER_SHIFT" | "BUSY" | "FREE"
+
+export type TherapistBoardRow = {
+  id: string
+  code: string
+  label: string
+  state: TherapistBoardState
+  /// ห้องที่กำลังนวดอยู่ (เมื่อ state = BUSY)
+  roomCode: string | null
+  programName: string | null
+  /// เวลาที่คาดว่าจะเสร็จ — มาจากคิวที่จองไว้ · null = ลูกค้า walk-in จึงไม่มีเวลาจบที่แน่นอน
+  busyUntil: Date | null
+  shiftStartMinute: number | null
+  shiftEndMinute: number | null
+  nextBookingAt: Date | null
+  nextBookingCustomer: string | null
+}
+
+export type RoomBoardRow = {
+  id: string
+  code: string
+  status: string
+  currentCustomer: string | null
+  currentUntil: Date | null
+  currentTherapistLabel: string | null
+  nextBookingAt: Date | null
+}
+
+/// กระดานสด "ใครว่าง/ใครไม่ว่าง · ห้องไหนใช้อยู่" (Phase 20b)
+///
+/// ทุกค่าคำนวณสดจากของที่มีอยู่แล้ว (กะ · คิว · บรรทัดบริการที่กำลังทำ) — ไม่มีตารางสถานะแยกให้ค้าง
+/// ด้วยเหตุผลเดียวกับใบเตือน "รอธนาคารยืนยัน": สถานะที่เก็บไว้จะเพี้ยนทันทีที่มีทางอื่นมาเปลี่ยนข้อมูล
+export async function getSpaBoard(storeId: string, now: Date = new Date()) {
+  const db = forStore(storeId)
+  const dayKey = businessDayKey(now)
+  const { start, end } = bookingDayRange(dayKey)
+  const nowMinute = minuteOfBusinessDay(now)
+
+  const [therapists, rooms, bookings] = await Promise.all([
+    db.therapist.findMany({
+      where: { isActive: true },
+      orderBy: [{ code: "asc" }],
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        nickname: true,
+        shifts: { where: { workDate: dateOnlyFromKey(dayKey) }, select: { startMinute: true, endMinute: true, isOff: true } },
+        // บรรทัดบริการที่กำลังทำอยู่ — อ่านผ่าน therapist (scoped ด้วย storeId แล้ว) ไม่ยิง mobileOrderItem ตรง ๆ
+        orderItems: {
+          where: { status: "COOKING", order: { session: { status: { in: ["OPEN", "AWAITING_BILL"] } } } },
+          orderBy: { updatedAt: "desc" },
+          take: 1,
+          select: {
+            menuItem: { select: { name: true } },
+            order: { select: { session: { select: { id: true, table: { select: { code: true } } } } } },
+          },
+        },
+      },
+    }),
+    db.table.findMany({
+      where: { kind: "ROOM", primaryTableId: null },
+      orderBy: [{ code: "asc" }],
+      select: { id: true, code: true, status: true },
+    }),
+    db.booking.findMany({
+      where: { startAt: { gte: start, lt: end }, status: { in: ["BOOKED", "CHECKED_IN", "IN_SERVICE"] } },
+      orderBy: [{ startAt: "asc" }],
+      include: BOOKING_INCLUDE,
+    }),
+  ])
+
+  const bookingRows = bookings.map(toBookingRow)
+  const nextOf = (match: (row: BookingRow) => boolean) => bookingRows.find((row) => match(row) && row.startAt > now) ?? null
+  const currentOf = (match: (row: BookingRow) => boolean) =>
+    bookingRows.find((row) => match(row) && row.startAt <= now && row.endAt > now) ?? null
+
+  const therapistRows: TherapistBoardRow[] = therapists.map((t) => {
+    const shift = t.shifts[0] ?? null
+    const working = t.orderItems[0] ?? null
+    const next = nextOf((row) => row.therapistId === t.id)
+    const current = currentOf((row) => row.therapistId === t.id)
+
+    let state: TherapistBoardState
+    if (working) state = "BUSY"
+    else if (!shift) state = "NO_SHIFT"
+    else if (shift.isOff) state = "OFF"
+    else if (nowMinute < shift.startMinute) state = "BEFORE_SHIFT"
+    else if (nowMinute >= shift.endMinute) state = "AFTER_SHIFT"
+    else state = "FREE"
+
+    return {
+      id: t.id,
+      code: t.code,
+      label: `${t.code} ${t.nickname ?? t.name}`,
+      state,
+      roomCode: working?.order.session?.table.code ?? null,
+      programName: working?.menuItem.name ?? null,
+      busyUntil: working && current ? current.endAt : null,
+      shiftStartMinute: shift && !shift.isOff ? shift.startMinute : null,
+      shiftEndMinute: shift && !shift.isOff ? shift.endMinute : null,
+      nextBookingAt: next?.startAt ?? null,
+      nextBookingCustomer: next?.customerName ?? null,
+    }
+  })
+
+  const roomRows: RoomBoardRow[] = rooms.map((room) => {
+    const current = currentOf((row) => row.tableId === room.id)
+    const next = nextOf((row) => row.tableId === room.id)
+    return {
+      id: room.id,
+      code: room.code,
+      status: room.status,
+      currentCustomer: current?.customerName ?? null,
+      currentUntil: current?.endAt ?? null,
+      currentTherapistLabel: current?.therapistLabel ?? null,
+      nextBookingAt: next?.startAt ?? null,
+    }
+  })
+
+  return { dayKey, therapists: therapistRows, rooms: roomRows, bookings: bookingRows }
+}
+
+/// เตือนล่วงหน้ากี่นาทีก่อนถึงคิว — พนักงานต้องมีเวลาจัดห้องและตามพนักงานนวดให้พร้อม
+const BOOKING_ALERT_LEAD_MINUTES = 15
+
+/// ย้อนหลังได้ไกลแค่ไหน — คิวที่เลยเวลาแล้วยังไม่เช็กอินต้องค้างเตือนไว้ (ลูกค้ามาสาย/พนักงานลืมกด)
+/// แต่ไม่ควรค้างทั้งวันจนแถบเตือนล้น
+const BOOKING_ALERT_OVERDUE_HOURS = 3
+
+/// คิวที่ใกล้ถึงเวลาแล้วยังไม่เช็กอิน (Phase 20b)
+///
+/// คำนวณสดเหมือนใบเตือน "รอธนาคารยืนยัน" — ไม่ใช่แถวใน Notification จึงหายเองเมื่อเช็กอิน/ยกเลิก
+/// ไม่ต้องมีใครกดรับทราบ
+export async function listUpcomingBookings(storeId: string, now: Date = new Date()): Promise<BookingRow[]> {
+  const rows = await forStore(storeId).booking.findMany({
+    where: {
+      status: "BOOKED",
+      startAt: {
+        lte: new Date(now.getTime() + BOOKING_ALERT_LEAD_MINUTES * 60_000),
+        gte: new Date(now.getTime() - BOOKING_ALERT_OVERDUE_HOURS * 60 * 60_000),
+      },
+    },
+    orderBy: [{ startAt: "asc" }],
+    include: BOOKING_INCLUDE,
+  })
+  return rows.map(toBookingRow)
+}
+
+export async function countUpcomingBookings(storeId: string, now: Date = new Date()): Promise<number> {
+  return (await listUpcomingBookings(storeId, now)).length
 }

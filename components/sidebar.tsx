@@ -25,6 +25,9 @@ import {
   IconCard,
   IconMenu,
   IconBrand,
+  IconTherapist,
+  IconCalendar,
+  IconRoom,
 } from "@/components/icons"
 import type { ResourceKey } from "@/lib/permissions"
 
@@ -40,6 +43,8 @@ type NavItem = {
   platformAdmin?: true
   /// เมนูของเจ้าของร้าน (Phase 14b) — StoreMember.role = OWNER เท่านั้น
   ownerOnly?: true
+  /// เมนูของร้านนวด (Phase 20) — โผล่เมื่อร้านเปิด StoreSettings.spaEnabled (ยังต้องมีสิทธิ์ VIEW ของ resource ด้วย)
+  spaOnly?: true
 }
 
 const GROUPS: { title?: string; items: NavItem[] }[] = [
@@ -62,6 +67,15 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
       { href: "/mobile-order/tables/manage", label: "จัดการโต๊ะ", Icon: IconTable, resource: "MO_SETUP" },
       { href: "/mobile-order/qr-codes", label: "จัดการ QR Code", Icon: IconQr, resource: "MO_SETUP" },
       { href: "/mobile-order/settings", label: "ตั้งค่าร้าน", Icon: IconStore, ownerOnly: true },
+    ],
+  },
+  {
+    title: "ร้านนวด",
+    items: [
+      { href: "/spa/therapists", label: "พนักงานนวด", Icon: IconTherapist, resource: "SPA_THERAPISTS", spaOnly: true },
+      { href: "/spa/shifts", label: "ตารางกะ", Icon: IconCalendar, resource: "SPA_THERAPISTS", spaOnly: true },
+      { href: "/spa/bookings", label: "ตารางจอง", Icon: IconCalendar, resource: "SPA_BOOKINGS", spaOnly: true },
+      { href: "/spa/board", label: "กระดานห้องนวด", Icon: IconRoom, resource: "SPA_BOOKINGS", spaOnly: true },
     ],
   },
   {
@@ -102,6 +116,7 @@ export function Sidebar({
   viewableResources,
   isPlatformAdmin = false,
   isOwner = false,
+  spaEnabled = false,
 }: {
   lowStockCount: number
   pendingNotificationCount?: number
@@ -109,6 +124,8 @@ export function Sidebar({
   viewableResources: ResourceKey[]
   isPlatformAdmin?: boolean
   isOwner?: boolean
+  /// ร้านเปิดตัวเลือกร้านนวดไหม (Phase 20) — คุมกลุ่มเมนู "ร้านนวด"
+  spaEnabled?: boolean
 }) {
   const pathname = usePathname()
 
@@ -117,6 +134,7 @@ export function Sidebar({
   const canView = (item: NavItem) => {
     if (item.platformAdmin) return isPlatformAdmin
     if (item.ownerOnly) return isOwner
+    if (item.spaOnly && !spaEnabled) return false
     return !item.resource || viewableResources.includes(item.resource)
   }
 

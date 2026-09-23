@@ -38,6 +38,8 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       MO_MENU: ["VIEW", "ADD", "EDIT", "DELETE"],
       MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
       MO_POS: ["VIEW", "ADD"],
+      SPA_THERAPISTS: ["VIEW", "ADD", "EDIT", "DELETE"],
+      SPA_BOOKINGS: ["VIEW", "ADD", "EDIT", "DELETE"],
     },
   },
   {
@@ -61,6 +63,8 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       MO_MENU: ["VIEW", "ADD", "EDIT", "DELETE"],
       MO_SETUP: ["VIEW", "ADD", "EDIT", "DELETE"],
       MO_POS: ["VIEW", "ADD"],
+      SPA_THERAPISTS: ["VIEW", "ADD", "EDIT", "DELETE"],
+      SPA_BOOKINGS: ["VIEW", "ADD", "EDIT", "DELETE"],
     },
   },
   {
@@ -81,6 +85,8 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       MO_MENU: ["VIEW"],
       MO_SETUP: ["VIEW"],
       MO_POS: ["VIEW", "ADD"],
+      SPA_THERAPISTS: ["VIEW"],
+      SPA_BOOKINGS: ["VIEW", "ADD", "EDIT", "DELETE"],
     },
   },
   // Phase 16 — พนักงานที่ทำงานเฉพาะฝั่ง Mobile Order (ไม่เห็นคลังสินค้า/POS) · migration backfill ผูกให้ STAFF
@@ -96,6 +102,8 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       MO_MENU: ["VIEW"],
       MO_SETUP: ["VIEW"],
       MO_POS: ["VIEW", "ADD"],
+      SPA_THERAPISTS: ["VIEW"],
+      SPA_BOOKINGS: ["VIEW", "ADD", "EDIT", "DELETE"],
     },
   },
 ]

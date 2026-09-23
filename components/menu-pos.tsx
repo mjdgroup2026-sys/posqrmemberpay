@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { buildStorePromptPayQr, createStaffTableOrder, createTakeawaySale, type StorePromptPayQr } from "@/app/actions/staff-order"
 import { formatBaht } from "@/lib/format"
-import type { MenuItemCard, PosTableOption } from "@/lib/queries"
+import type { MenuItemCard, PosTableOption, TherapistOption } from "@/lib/queries"
 import {
   FULL_ACCESS,
   PAYMENT_METHOD_LABEL,
@@ -39,6 +39,9 @@ type CartLine = {
   quantity: number
   optionIds: string[]
   optionNames: string[]
+  /// พนักงานนวดของบรรทัดโปรแกรมนวด (Phase 20) — อาหารไม่มี
+  therapistId?: string
+  therapistLabel?: string
   note?: string
 }
 
@@ -53,6 +56,7 @@ export function MenuPos({
   initialTableId,
   defaultMode = "TABLE",
   dateLabel,
+  therapists = [],
 }: {
   menu: { featured: MenuItemCard[]; all: MenuItemCard[] }
   tables: PosTableOption[]
@@ -64,6 +68,8 @@ export function MenuPos({
   allowed?: AllowedActions
   /// วันทางธุรกิจวันนี้ (เวลาไทย) จัดรูปแบบมาจาก server แล้ว (Phase 19) — โชว์บนหัวจอให้พนักงานเห็นว่าบิลจะลงวันไหน
   dateLabel?: string
+  /// พนักงานนวดที่เปิดใช้งาน (Phase 20) — โปรแกรมนวดต้องเลือกคนก่อนใส่ตะกร้า · ว่าง = ร้านไม่ได้เปิดตัวเลือกร้านนวด
+  therapists?: TherapistOption[]
 }) {
   const router = useRouter()
   const canSell = allowed.includes("ADD")
@@ -107,20 +113,31 @@ export function MenuPos({
 
   const total = round2(cart.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0))
 
-  function addLine(item: MenuItemCard, optionIds: string[], optionNames: string[], note: string | undefined, quantity: number, unitPrice: number) {
-    const key = `${item.id}|${[...optionIds].sort().join(",")}|${note ?? ""}`
+  function addLine(
+    item: MenuItemCard,
+    optionIds: string[],
+    optionNames: string[],
+    note: string | undefined,
+    quantity: number,
+    unitPrice: number,
+    therapist?: { id: string; label: string },
+  ) {
+    const key = `${item.id}|${[...optionIds].sort().join(",")}|${note ?? ""}|${therapist?.id ?? ""}`
     setCart((prev) => {
       const existing = prev.find((line) => line.key === key)
       if (existing) {
         return prev.map((line) => (line.key === key ? { ...line, quantity: line.quantity + quantity } : line))
       }
-      return [...prev, { key, menuItemId: item.id, name: item.name, unitPrice, quantity, optionIds, optionNames, note }]
+      return [
+        ...prev,
+        { key, menuItemId: item.id, name: item.name, unitPrice, quantity, optionIds, optionNames, note, therapistId: therapist?.id, therapistLabel: therapist?.label },
+      ]
     })
   }
 
   function pickItem(item: MenuItemCard) {
     // เมนูที่ไม่มีตัวเลือกเสริม กดครั้งเดียวลงตะกร้าเลย — หน้าร้านต้องเร็ว
-    if (item.modifierGroups.length === 0) {
+    if (item.modifierGroups.length === 0 && item.itemType !== "SERVICE") {
       addLine(item, [], [], undefined, 1, item.price)
       return
     }
@@ -157,6 +174,7 @@ export function MenuPos({
             quantity: line.quantity,
             optionIds: line.optionIds,
             note: line.note,
+            therapistId: line.therapistId,
           })),
         ),
       )
@@ -203,6 +221,7 @@ export function MenuPos({
             quantity: line.quantity,
             optionIds: line.optionIds,
             note: line.note,
+            therapistId: line.therapistId,
           })),
         ),
       )
@@ -399,6 +418,12 @@ export function MenuPos({
               <li key={line.key} className="row" style={{ justifyContent: "space-between", gap: 8 }}>
                 <div style={{ flex: 1 }}>
                   <span className="t-body">{line.name}</span>
+                  {line.therapistLabel ? (
+                    <>
+                      <br />
+                      <span className="t-caption">พนง. {line.therapistLabel}</span>
+                    </>
+                  ) : null}
                   {line.optionNames.length > 0 ? (
                     <>
                       <br />
@@ -591,8 +616,9 @@ export function MenuPos({
         <CustomizeDialog
           item={customizing}
           onClose={() => setCustomizing(null)}
-          onAdd={(optionIds, optionNames, note, quantity, unitPrice) => {
-            addLine(customizing, optionIds, optionNames, note, quantity, unitPrice)
+          therapists={therapists}
+          onAdd={(optionIds, optionNames, note, quantity, unitPrice, therapist) => {
+            addLine(customizing, optionIds, optionNames, note, quantity, unitPrice, therapist)
             setCustomizing(null)
           }}
         />
@@ -628,7 +654,11 @@ function MenuGrid({
           )}
           <span className="t-body">{item.name}</span>
           <span className="t-small num">฿{formatBaht(item.price)}</span>
-          {item.modifierGroups.length > 0 ? <span className="t-caption">มีตัวเลือกเสริม</span> : null}
+          {item.itemType === "SERVICE" ? (
+            <span className="t-caption">{item.durationMinutes ? `${item.durationMinutes} นาที · ` : ""}เลือกพนักงานนวด</span>
+          ) : item.modifierGroups.length > 0 ? (
+            <span className="t-caption">มีตัวเลือกเสริม</span>
+          ) : null}
         </button>
       ))}
     </div>
@@ -641,13 +671,27 @@ function CustomizeDialog({
   item,
   onClose,
   onAdd,
+  therapists,
 }: {
   item: MenuItemCard
   onClose: () => void
-  onAdd: (optionIds: string[], optionNames: string[], note: string | undefined, quantity: number, unitPrice: number) => void
+  onAdd: (
+    optionIds: string[],
+    optionNames: string[],
+    note: string | undefined,
+    quantity: number,
+    unitPrice: number,
+    therapist?: { id: string; label: string },
+  ) => void
+  /// Phase 20 — ตัวเลือกพนักงานนวด (เฉพาะโปรแกรมนวด)
+  therapists: TherapistOption[]
 }) {
   const [quantity, setQuantity] = useState(1)
   const [note, setNote] = useState("")
+  // พนักงานนวด (Phase 20) — เฉพาะโปรแกรมนวด · กรองเฉพาะคนที่มีทักษะตรงประเภทบริการของโปรแกรม (ไม่ระบุประเภท = ทุกคน)
+  const isService = item.itemType === "SERVICE"
+  const eligible = therapists.filter((t) => !item.stationId || t.skillIds.includes(item.stationId))
+  const [therapistId, setTherapistId] = useState("")
   const [selected, setSelected] = useState<Record<string, string[]>>(() => {
     const initial: Record<string, string[]> = {}
     for (const group of item.modifierGroups) {
@@ -680,16 +724,61 @@ function CustomizeDialog({
         return
       }
     }
-    onAdd(optionIds, chosenOptions.map((o) => o.name), note.trim() === "" ? undefined : note.trim(), quantity, unitPrice)
+    let therapist: { id: string; label: string } | undefined
+    if (isService) {
+      const picked = eligible.find((t) => t.id === therapistId)
+      if (!picked) {
+        toast.error("กรุณาเลือกพนักงานนวดก่อน")
+        return
+      }
+      therapist = { id: picked.id, label: picked.label }
+    }
+    onAdd(optionIds, chosenOptions.map((o) => o.name), note.trim() === "" ? undefined : note.trim(), quantity, unitPrice, therapist)
   }
 
   return (
     <Dialog open onOpenChange={(open) => (open ? null : onClose())}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{item.name}</DialogTitle>
-          <DialogDescription>เลือกตัวเลือกเสริมและจำนวนก่อนใส่ตะกร้า</DialogDescription>
+          <DialogTitle>
+            {item.name}
+            {isService && item.durationMinutes ? <span className="t-caption num"> · {item.durationMinutes} นาที</span> : null}
+          </DialogTitle>
+          <DialogDescription>
+            {isService ? "เลือกพนักงานนวดและตัวเลือกเสริมก่อนใส่ตะกร้า" : "เลือกตัวเลือกเสริมและจำนวนก่อนใส่ตะกร้า"}
+          </DialogDescription>
         </DialogHeader>
+
+        {isService ? (
+          <div className="field">
+            <span className="t-small">
+              พนักงานนวด <span style={{ color: "var(--danger)" }}>*</span>
+              {item.stationName ? <span className="t-caption"> · เฉพาะคนที่มีทักษะ “{item.stationName}”</span> : null}
+            </span>
+            {eligible.length === 0 ? (
+              <span className="field-hint error">
+                ไม่มีพนักงานนวดที่เลือกได้ — เพิ่มพนักงานหรือติ๊กทักษะให้ตรงประเภทบริการที่หน้า “พนักงานนวด” ก่อน
+              </span>
+            ) : (
+              <div className="row" style={{ gap: 6, flexWrap: "wrap" }} role="radiogroup" aria-label="พนักงานนวด">
+                {eligible.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={therapistId === t.id}
+                    className={`btn btn-sm ${therapistId === t.id ? "btn-primary" : "btn-subtle"}`}
+                    onClick={() => setTherapistId(t.id)}
+                    title={t.busyNow ? "กำลังนวดอยู่ — เลือกได้ถ้าจะให้ต่อคิว" : "ว่าง"}
+                  >
+                    {t.label}
+                    {t.busyNow ? <span className="t-caption"> (ไม่ว่าง)</span> : null}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
 
         {item.modifierGroups.map((group) => (
           <div key={group.id} className="field">

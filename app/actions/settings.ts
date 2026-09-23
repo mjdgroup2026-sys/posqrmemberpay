@@ -45,6 +45,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
     hasKDS: formData.get("hasKDS") === "on" || formData.get("hasKDS") === "true",
     kitchenAlertSound: formData.get("kitchenAlertSound") === "on" || formData.get("kitchenAlertSound") === "true",
     kitchenAutoPrint: formData.get("kitchenAutoPrint") === "on" || formData.get("kitchenAutoPrint") === "true",
+    spaEnabled: formData.get("spaEnabled") === "on" || formData.get("spaEnabled") === "true",
     posDefaultMode: formData.get("posDefaultMode") ?? "TABLE",
     crmEnabled: formData.get("crmEnabled") === "on" || formData.get("crmEnabled") === "true",
   })
@@ -101,6 +102,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
           hasKDS: data.hasKDS,
           kitchenAlertSound: data.kitchenAlertSound,
           kitchenAutoPrint: data.kitchenAutoPrint,
+          spaEnabled: data.spaEnabled,
           posDefaultMode: data.posDefaultMode,
           crmEnabled: data.crmEnabled,
           updatedById: user.id,
@@ -115,6 +117,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
           hasKDS: data.hasKDS,
           kitchenAlertSound: data.kitchenAlertSound,
           kitchenAutoPrint: data.kitchenAutoPrint,
+          spaEnabled: data.spaEnabled,
           posDefaultMode: data.posDefaultMode,
           crmEnabled: data.crmEnabled,
           updatedById: user.id,

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import { getSession, resolveStoreContext } from "@/lib/session"
 import { prisma } from "@/lib/prisma"
-import { getLowStockCount, getPendingNotificationCount } from "@/lib/queries"
+import { getLowStockCount, getPendingNotificationCount, getStoreSettings } from "@/lib/queries"
 import { getCurrentPermissions, type ResourceKey } from "@/lib/permissions"
 import { Sidebar } from "@/components/sidebar"
 import { Topbar } from "@/components/topbar"
@@ -18,13 +18,15 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   const context = result.ok ? result.context : null
   const memberships = result.ok ? result.context.memberships : result.memberships
 
-  const [lowStockCount, pendingNotificationCount, permissions] = context
+  const [lowStockCount, pendingNotificationCount, permissions, settings] = context
     ? await Promise.all([
         getLowStockCount(context.storeId),
         getPendingNotificationCount(context.storeId),
         getCurrentPermissions(),
+        // ตัวเลือกร้านนวด (Phase 20) — คุมว่ากลุ่มเมนู "ร้านนวด" โผล่ไหม
+        getStoreSettings(context.storeId),
       ])
-    : [0, 0, null]
+    : [0, 0, null, null]
 
   const user = context?.user ?? (await requireUserSummary())
 
@@ -44,6 +46,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
         viewableResources={viewableResources}
         isPlatformAdmin={user.isPlatformAdmin}
         isOwner={context?.role === "OWNER"}
+        spaEnabled={settings?.spaEnabled ?? false}
       />
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Topbar

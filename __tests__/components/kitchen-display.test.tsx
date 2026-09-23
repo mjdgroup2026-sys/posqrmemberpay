@@ -41,6 +41,10 @@ function item(id: string, name: string, status: KitchenTicket["items"][number]["
     cancelReason: status === "CANCELLED" ? "หมด" : null,
     stationId: station?.id ?? null,
     stationName: station?.name ?? null,
+    itemType: "FOOD" as const,
+    durationMinutes: null,
+    therapistId: null,
+    therapistLabel: null,
   }
 }
 

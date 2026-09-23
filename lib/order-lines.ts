@@ -8,7 +8,7 @@ import { toNumber } from "@/lib/format"
 ///
 /// ทุกค่าถูกอ่านใหม่จากฐานในทรานแซคชันเดียวกับการเขียนเสมอ ไม่เชื่อราคาที่ client ส่งมา
 
-export type CartLineInput = { menuItemId: string; quantity: number; optionIds: string[]; note?: string }
+export type CartLineInput = { menuItemId: string; quantity: number; optionIds: string[]; note?: string; therapistId?: string }
 
 export type OrderLine = {
   menuItemId: string
@@ -21,6 +21,11 @@ export type OrderLine = {
   /// ประเภทครัวของเมนู ณ ตอนสั่ง (Phase 19) — ให้ทิกเก็ตครัวจัดกลุ่มได้ทันทีหลัง commit ไม่ต้องอ่านซ้ำ
   stationId: string | null
   stationName: string | null
+  /// Phase 20 — ชนิดรายการ + ระยะเวลา (SERVICE) + พนักงานนวดที่เลือก (null = ยังไม่มอบหมาย)
+  itemType: "FOOD" | "SERVICE"
+  durationMinutes: number | null
+  therapistId: string | null
+  therapistLabel: string | null
 }
 
 /// ข้อผิดพลาดที่ "ผู้ใช้ต้องเห็นข้อความไทยตรง ๆ" — ผู้เรียกจับแล้วคืนเป็น ActionResult ของตัวเอง
@@ -30,12 +35,27 @@ export class OrderLineError extends Error {
   }
 }
 
-export async function buildOrderLines(tx: StoreTx, items: CartLineInput[]): Promise<OrderLine[]> {
+export async function buildOrderLines(
+  tx: StoreTx,
+  items: CartLineInput[],
+  /// Phase 20 — บังคับให้บรรทัด SERVICE ต้องมีพนักงานนวด (จอขายพนักงาน) · ฝั่งลูกค้าไม่บังคับ (มอบหมายทีหลัง)
+  options: { requireTherapistForService?: boolean } = {},
+): Promise<OrderLine[]> {
   const menuItems = await tx.menuItem.findMany({
     where: { id: { in: items.map((i) => i.menuItemId) }, isActive: true },
     include: { modifierGroups: { include: { options: true } }, station: { select: { name: true } } },
   })
   const menuById = new Map(menuItems.map((m) => [m.id, m]))
+
+  // พนักงานนวดที่ถูกอ้างถึง — อ่านใต้ร้านเดียวกัน (forStore) id ของร้านอื่นจึงหาไม่เจอ = ปฏิเสธ (กติกาข้อ 5)
+  const therapistIds = [...new Set(items.flatMap((i) => (i.therapistId ? [i.therapistId] : [])))]
+  const therapists = therapistIds.length
+    ? await tx.therapist.findMany({
+        where: { id: { in: therapistIds }, isActive: true },
+        select: { id: true, code: true, name: true, nickname: true, skills: { select: { id: true } } },
+      })
+    : []
+  const therapistById = new Map(therapists.map((t) => [t.id, t]))
 
   return items.map((line) => {
     const menuItem = menuById.get(line.menuItemId)
@@ -65,11 +85,28 @@ export async function buildOrderLines(tx: StoreTx, items: CartLineInput[]): Prom
     const extra = chosen.reduce((sum, c) => sum + toNumber(c.option.priceDelta), 0)
     const unitPrice = Math.round((basePrice + extra + Number.EPSILON) * 100) / 100
 
+    // พนักงานนวด (Phase 20) — ใส่ได้เฉพาะบรรทัดบริการ · ต้องเป็นของร้าน ยังทำงานอยู่ และมีทักษะตรงประเภทบริการ (ถ้าโปรแกรมระบุประเภท)
+    let therapist: (typeof therapists)[number] | null = null
+    if (line.therapistId) {
+      if (menuItem.itemType !== "SERVICE") throw new OrderLineError(`${menuItem.name} ไม่ใช่โปรแกรมนวด ระบุพนักงานนวดไม่ได้`)
+      therapist = therapistById.get(line.therapistId) ?? null
+      if (!therapist) throw new OrderLineError(`ไม่พบพนักงานนวดที่เลือกให้ ${menuItem.name} หรือพนักงานคนนั้นปิดใช้งานแล้ว`)
+      if (menuItem.stationId && !therapist.skills.some((s) => s.id === menuItem.stationId)) {
+        throw new OrderLineError(`พนักงาน ${therapist.code} ไม่มีทักษะ "${menuItem.station?.name ?? ""}" สำหรับ ${menuItem.name}`)
+      }
+    } else if (menuItem.itemType === "SERVICE" && options.requireTherapistForService) {
+      throw new OrderLineError(`กรุณาเลือกพนักงานนวดสำหรับ ${menuItem.name}`)
+    }
+
     return {
       menuItemId: menuItem.id,
       menuItemName: menuItem.name,
       stationId: menuItem.stationId,
       stationName: menuItem.station?.name ?? null,
+      itemType: menuItem.itemType,
+      durationMinutes: menuItem.durationMinutes,
+      therapistId: therapist?.id ?? null,
+      therapistLabel: therapist ? `${therapist.code} ${therapist.nickname ?? therapist.name}` : null,
       quantity: line.quantity,
       unitPrice,
       note: line.note ?? null,

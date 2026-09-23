@@ -43,6 +43,7 @@ export function Receipt({ data, storeName = "MJD Mobile Order" }: { data: Receip
             <tr key={item.productId} style={{ borderBottom: "1px dashed var(--line)" }}>
               <td style={{ padding: "6px 0" }}>
                 {item.name}
+                {item.therapistLabel ? <span className="t-caption"> · พนง. {item.therapistLabel}</span> : null}
                 <br />
                 <span className="t-caption num">
                   {/* บิลอาหาร (Phase 17c) ไม่มี SKU/หน่วยนับ — โชว์เฉพาะราคาต่อหน่วย */}

@@ -31,6 +31,8 @@ export type ReceiptLine = {
   sku?: string
   name: string
   unit?: string
+  /// พนักงานนวดที่ให้บริการ (Phase 20 · เฉพาะบรรทัดโปรแกรมนวด)
+  therapistLabel?: string
   quantity: number
   unitPrice: number
   subtotal: number

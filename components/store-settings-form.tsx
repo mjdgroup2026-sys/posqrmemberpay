@@ -21,6 +21,8 @@ export type StoreSettingsValues = {
   /// จอครัว (Phase 19)
   kitchenAlertSound: boolean
   kitchenAutoPrint: boolean
+  /// ตัวเลือกร้านนวด (Phase 20)
+  spaEnabled: boolean
   crmEnabled: boolean
   /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
   posDefaultMode: "TABLE" | "TAKEAWAY"
@@ -45,6 +47,7 @@ export function StoreSettingsForm({
   const [hasKDS, setHasKDS] = useState(settings.hasKDS)
   const [kitchenAlertSound, setKitchenAlertSound] = useState(settings.kitchenAlertSound)
   const [kitchenAutoPrint, setKitchenAutoPrint] = useState(settings.kitchenAutoPrint)
+  const [spaEnabled, setSpaEnabled] = useState(settings.spaEnabled)
   const [crmEnabled, setCrmEnabled] = useState(settings.crmEnabled)
   const [posDefaultMode, setPosDefaultMode] = useState<"TABLE" | "TAKEAWAY">(settings.posDefaultMode)
 
@@ -65,6 +68,7 @@ export function StoreSettingsForm({
     formData.set("hasKDS", String(hasKDS))
     formData.set("kitchenAlertSound", String(kitchenAlertSound))
     formData.set("kitchenAutoPrint", String(kitchenAutoPrint))
+    formData.set("spaEnabled", String(spaEnabled))
     formData.set("posDefaultMode", posDefaultMode)
     formData.set("crmEnabled", String(crmEnabled))
 
@@ -293,6 +297,19 @@ export function StoreSettingsForm({
                 หน้า “ขายอาหาร” จะเปิดในโหมดนี้ทุกครั้ง — สลับได้ในหน้านั้นเหมือนเดิม · เข้าจากปุ่ม “สั่งเพิ่ม” ของโต๊ะยังเป็นโหมดโต๊ะเสมอ
               </span>
             </div>
+
+            {/* ตัวเลือกร้านนวด (Phase 20) — เพิ่มจากของเดิม ไม่ใช่โหมดสลับ: เมนูอาหาร/โต๊ะ/ครัวยังใช้ร่วมกันได้ */}
+            <label className="checkbox-row">
+              <input type="checkbox" checked={spaEnabled} onChange={(e) => setSpaEnabled(e.target.checked)} />
+              <span>
+                เปิดตัวเลือกร้านนวด / สปา
+                <br />
+                <span className="t-caption">
+                  เพิ่มเมนู “พนักงานนวด” · เมนูสร้างเป็น “โปรแกรมนวด” (มีระยะเวลา ต้องเลือกพนักงาน) · โต๊ะสร้างเป็น “ห้องนวด” ได้ ·
+                  ของเดิมทั้งหมดยังอยู่และใช้ร่วมกันได้ (เช่น สั่งน้ำเข้าห้องนวด) — ปิดแล้วข้อมูลไม่หาย แค่ซ่อนเมนู
+                </span>
+              </span>
+            </label>
 
             <label className="checkbox-row">
               <input type="checkbox" checked={crmEnabled} onChange={(e) => setCrmEnabled(e.target.checked)} />

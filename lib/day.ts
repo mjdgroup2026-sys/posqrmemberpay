@@ -41,3 +41,61 @@ export function parseBusinessDayKey(key: string, now: Date = new Date()): Date |
   if (key > businessDayKey(now)) return null
   return date
 }
+
+// ───────────────────── การจอง/กะ (Phase 20b) ─────────────────────
+// เวลาของคิวนวดถูกกรอกเป็น "วัน + เวลานาฬิกา" ซึ่งเป็นเวลาไทยเสมอ แต่เก็บลงฐานเป็น UTC
+// จึงต้องมีจุดแปลงที่เดียวเหมือน businessDayRange() ไม่ให้แต่ละหน้าคำนวณ offset เอง
+
+/// แปลงคีย์ `YYYY-MM-DD` เป็นเวลากลางวันของวันนั้น (เวลาไทย) — ต่างจาก parseBusinessDayKey ตรงที่ **ยอมให้เป็นวันอนาคต**
+/// เพราะการจองล่วงหน้าเป็นเรื่องของวันข้างหน้าโดยธรรมชาติ · คืน null เมื่อรูปแบบผิดหรือวันที่ไม่มีจริง
+export function parseDayKey(key: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null
+  const date = new Date(`${key}T12:00:00.000+07:00`)
+  if (Number.isNaN(date.getTime())) return null
+  if (businessDayKey(date) !== key) return null
+  return date
+}
+
+/// เวลาจริง (UTC) ของ "วันทางธุรกิจ + นาทีนับจากเที่ยงคืน" ตามเวลาไทย — 2026-09-23 + 510 = 08:30 น. ของวันนั้น
+export function businessDayTime(dayKey: string, minuteOfDay: number): Date {
+  return new Date(new Date(`${dayKey}T00:00:00.000+07:00`).getTime() + minuteOfDay * 60_000)
+}
+
+/// นาทีนับจากเที่ยงคืน (เวลาไทย) ของเวลาที่ให้มา — ใช้วางตำแหน่งบล็อกบนตารางเวลา
+export function minuteOfBusinessDay(date: Date): number {
+  const s = shifted(date)
+  return s.getUTCHours() * 60 + s.getUTCMinutes()
+}
+
+/// "HH:MM" → นาที · คืน null เมื่อรูปแบบผิดหรือเกินขอบเขตของวัน
+export function parseHhMm(text: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(text.trim())
+  if (!match) return null
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours > 23 || minutes > 59) return null
+  return hours * 60 + minutes
+}
+
+/// นาที → "HH:MM" (เกิน 24 ชม. ถูกตัดกลับเข้าในวันเดียวกัน — ตารางเวลาไม่ข้ามเที่ยงคืน)
+export function formatHhMm(minute: number): string {
+  const safe = ((minute % 1440) + 1440) % 1440
+  return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`
+}
+
+/// เลื่อนคีย์วันไป `days` วัน (บวก/ลบ) — ใช้กับตารางกะรายสัปดาห์
+export function addDays(dayKey: string, days: number): string {
+  return new Date(new Date(`${dayKey}T00:00:00.000Z`).getTime() + days * 86_400_000).toISOString().slice(0, 10)
+}
+
+/// วันจันทร์ของสัปดาห์ที่คีย์นี้อยู่ — ร้านนวดตั้งกะกันเป็นสัปดาห์ เริ่มวันจันทร์
+export function weekStartKey(dayKey: string): string {
+  const date = new Date(`${dayKey}T00:00:00.000Z`)
+  const weekday = (date.getUTCDay() + 6) % 7
+  return addDays(dayKey, -weekday)
+}
+
+/// ค่าที่ใช้กับคอลัมน์ชนิด DATE จากคีย์วัน (TherapistShift.workDate)
+export function dateOnlyFromKey(dayKey: string): Date {
+  return new Date(`${dayKey}T00:00:00.000Z`)
+}
