@@ -231,6 +231,10 @@ export const submitOrderSchema = z.object({
 /// พนักงานกดสั่งแทนลูกค้าจากจอขาย (Phase 17b) — ตะกร้าชุดเดียวกับฝั่งลูกค้า ต่างกันแค่ตัวระบุโต๊ะ
 export const staffTableOrderSchema = z.object({
   tableId: requiredId("กรุณาเลือกโต๊ะ"),
+  /// ห้องสปาที่มีบิลเปิดอยู่ (2026-09-23): ส่งเข้าบิลไหน — `sessionId` = บิลเดิมที่เลือก · `newCustomer` = เปิดบิลใหม่แยก
+  sessionId: z.string().trim().max(64).optional().transform((value) => value || undefined),
+  newCustomer: z.coerce.boolean().default(false),
+  billLabel: z.string().trim().max(60, "ชื่อลูกค้ายาวเกินไป (ไม่เกิน 60 ตัวอักษร)").optional().transform((value) => value || undefined),
   items: z
     .array(cartLineSchema, { error: "ตะกร้าไม่ถูกต้อง" })
     .min(1, "กรุณาเลือกเมนูก่อนส่งออร์เดอร์")

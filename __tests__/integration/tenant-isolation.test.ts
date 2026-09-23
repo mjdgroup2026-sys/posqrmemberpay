@@ -445,6 +445,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["countPaymentsAwaitingCallback", (q, a) => q.countPaymentsAwaitingCallback(a.storeId)],
     ["listCustomerPaidBills", (q, a) => q.listCustomerPaidBills(a.storeId)],
     ["getTableDetail", (q, a, b) => q.getTableDetail(a.storeId, b.tableId)],
+    // ?session= จากผู้ใช้ (ห้องสปาหลายบิล · 2026-09-23) — session ของร้านอื่นต้องไม่เปิดอะไรในร้านนี้
+    ["getTableDetail", (q, a, b) => q.getTableDetail(a.storeId, a.tableId, b.sessionId)],
+    ["getBillingView", (q, a, b) => q.getBillingView(a.storeId, a.tableId, b.sessionId)],
     ["listKitchenTickets", (q, a) => q.listKitchenTickets(a.storeId)],
     ["getStoreSettings", (q, a) => q.getStoreSettings(a.storeId)],
     ["listMenu", (q, a) => q.listMenu(a.storeId)],

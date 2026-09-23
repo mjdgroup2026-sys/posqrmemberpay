@@ -55,6 +55,7 @@ function table(id: string, code: string, kind: "TABLE" | "ROOM"): TableCard {
     pendingNotification: null,
     kind,
     stationName: null,
+    bills: [],
   }
 }
 

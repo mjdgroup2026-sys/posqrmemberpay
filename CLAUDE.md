@@ -316,6 +316,7 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (8 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`),
   `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
   `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
+  `lib/table-session.ts` (1 จุด — `lockTableRow()` `SELECT … FOR UPDATE` แถว `restaurant_table` ก่อนคืนห้อง/เปิดบิลแยก, 2026-09-23)
   และ `lib/booking.ts` (2 จุด — advisory lock กันจองซ้อน namespace 720_003 ต่อพนักงาน / 720_004 ต่อห้อง, Phase 20b
   · **ลำดับการจับต้องคงที่เสมอ**: พนักงานก่อน แล้วค่อยห้อง ไม่งั้น deadlock)
   · ทุกจุดต้องมี `WHERE "storeId" = ${storeId}` (Phase 13)
@@ -577,7 +578,9 @@ resource `SPA_THERAPISTS` (หน้า `/spa/therapists`) + `SPA_BOOKINGS` (จ
 เตือนคิวใกล้ถึงเวลา 15 นาทีในหน้าแจ้งเตือน + badge (คำนวณสด ไม่มีปุ่มรับทราบ) · เทส `booking.test.ts` 12 + `therapist-shift.test.ts` 4 +
 tenant-isolation +6 query +6 action (651 ทั้งชุด) · **20c (รายงานต่อพนักงานนวด) ยังไม่เริ่ม** — แผนใน spec §8
 · **20d (2026-09-23)** ปรับหน้าจอสปาหลังเจ้าของทดลองใช้: ชื่อหน้า "…/ร้านสปา" (`NavItem.spaLabel` · `lib/spa-title.ts`) · แท็บอาหาร/นวดสปา · โต๊ะ/ห้อง
-(`components/segment-tabs.tsx`) · ช่องตั้ง "พักระหว่างคิวนวด" + ข้อความคิวชนบอกเวลาที่เริ่มได้ (`clashMessage()` ใน `lib/booking.ts`) · ข้อ 7 แยกบิลต่อลูกค้า = PR ถัดไป
+(`components/segment-tabs.tsx`) · ช่องตั้ง "พักระหว่างคิวนวด" + ข้อความคิวชนบอกเวลาที่เริ่มได้ (`clashMessage()` ใน `lib/booking.ts`) · **ข้อ 7 แยกบิลต่อลูกค้า**: ห้องสปา (`Table.kind = ROOM`) มีได้หลาย session เปิดพร้อมกัน 1 ใบต่อลูกค้า (`TableSession.customerLabel`) —
+**คืนห้องเป็นว่างต้องผ่าน `releaseTableIfIdle()` ใน `lib/table-session.ts` เท่านั้น** (ล็อกแถวห้องแล้วนับบิลที่ยังเปิด) ห้ามเขียน `status: EMPTY` ตรง ๆ ตอนปิด/ยกเลิก ·
+เข้าบิลเฉพาะใบด้วย `openOrReuseSession({ sessionId })` / เปิดบิลแยกด้วย `{ newCustomer }` · หน้าออร์เดอร์/ปิดบิลรับ `?session=`
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

@@ -17,6 +17,7 @@ import {
 import { Receipt } from "@/components/receipt"
 import { IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTherapist, IconTrash, IconTable, IconWallet } from "@/components/icons"
 import { SegmentTabs } from "@/components/segment-tabs"
+import { billLabel } from "@/components/bill-switcher"
 import {
   Dialog,
   DialogContent,
@@ -59,6 +60,7 @@ export function MenuPos({
   dateLabel,
   therapists = [],
   spaEnabled = false,
+  initialSessionId,
 }: {
   menu: { featured: MenuItemCard[]; all: MenuItemCard[] }
   tables: PosTableOption[]
@@ -74,6 +76,8 @@ export function MenuPos({
   therapists?: TherapistOption[]
   /// ร้านเปิดตัวเลือกร้านนวด — แยกแท็บ อาหาร / นวดสปา (2026-09-23) · ตะกร้าใช้ร่วมกัน บิลเดียวมีทั้งสองอย่างได้
   spaEnabled?: boolean
+  /// บิลที่เลือกไว้ล่วงหน้า (?session= จากปุ่ม "สั่งเพิ่ม" ของบิลในห้องสปา · 2026-09-23)
+  initialSessionId?: string
 }) {
   const router = useRouter()
   const canSell = allowed.includes("ADD")
@@ -81,6 +85,9 @@ export function MenuPos({
   const [search, setSearch] = useState("")
   const [cart, setCart] = useState<CartLine[]>([])
   const [tableId, setTableId] = useState(initialTableId ?? "")
+  /// ห้องสปาที่มีบิลเปิดอยู่: ส่งเข้าบิลไหน — sessionId ของบิลเดิม · "new" = ลูกค้าใหม่เปิดบิลแยก · "" = ยังไม่เลือก (2026-09-23)
+  const [billChoice, setBillChoice] = useState(initialSessionId ?? "")
+  const [billName, setBillName] = useState("")
   const [pending, setPending] = useState(false)
   const [customizing, setCustomizing] = useState<MenuItemCard | null>(null)
 
@@ -121,6 +128,15 @@ export function MenuPos({
   // โต๊ะที่ถูกรวมเข้าโต๊ะอื่นไม่ต้องโชว์ — ทุกอย่างวิ่งไปที่โต๊ะหลักอยู่แล้ว
   const selectableTables = useMemo(() => tables.filter((t) => t.mergedIntoCode === null), [tables])
   const selectedTable = selectableTables.find((t) => t.id === tableId) ?? null
+  // ห้องสปาที่มีบิลเปิดอยู่ต้องเลือกบิลก่อนส่ง — ลูกค้าคนละคนต้องไม่ถูกรวมบิล (server ก็ปฏิเสธซ้ำ)
+  const roomHasBills = selectedTable?.kind === "ROOM" && selectedTable.bills.length > 0
+  const isEmptyRoom = selectedTable?.kind === "ROOM" && selectedTable.bills.length === 0
+
+  function chooseTable(nextId: string) {
+    setTableId(nextId)
+    setBillChoice("")
+    setBillName("")
+  }
 
   const total = round2(cart.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0))
 
@@ -175,8 +191,21 @@ export function MenuPos({
 
     setPending(true)
     try {
+      if (roomHasBills && billChoice === "") {
+        toast.error("ห้องนี้มีบิลเปิดอยู่ — เลือกว่าจะเพิ่มในบิลเดิม หรือเปิดบิลใหม่ให้ลูกค้าคนใหม่")
+        return
+      }
+      if (roomHasBills && billChoice === "new" && billName.trim() === "") {
+        toast.error("กรุณากรอกชื่อลูกค้าของบิลใหม่")
+        return
+      }
       const fd = new FormData()
       fd.set("tableId", tableId)
+      if (roomHasBills && billChoice !== "new") fd.set("sessionId", billChoice)
+      if (isEmptyRoom || (roomHasBills && billChoice === "new")) {
+        fd.set("newCustomer", "true")
+        fd.set("billLabel", billName.trim())
+      }
       fd.set(
         "items",
         JSON.stringify(
@@ -198,6 +227,11 @@ export function MenuPos({
 
       toast.success(result.message ?? "ส่งออร์เดอร์เรียบร้อยแล้ว")
       setCart([])
+      // สั่งต่อรอบถัดไปให้เข้าบิลเดิมของลูกค้าคนนี้ ไม่ต้องเลือกใหม่
+      if (selectedTable?.kind === "ROOM" && result.data) {
+        setBillChoice(result.data.sessionId)
+        setBillName("")
+      }
       router.refresh()
     } catch {
       toast.error("ส่งออร์เดอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
@@ -420,18 +454,21 @@ export function MenuPos({
 
         <div className="field" style={{ marginTop: 12, display: mode === "TABLE" ? undefined : "none" }}>
           <label className="t-small" htmlFor="posTable">
-            โต๊ะ
+            {spaEnabled ? "โต๊ะ / ห้อง" : "โต๊ะ"}
           </label>
-          <select id="posTable" className="select" value={tableId} onChange={(e) => setTableId(e.target.value)}>
-            <option value="">— เลือกโต๊ะ —</option>
+          <select id="posTable" className="select" value={tableId} onChange={(e) => chooseTable(e.target.value)}>
+            <option value="">{spaEnabled ? "— เลือกโต๊ะหรือห้อง —" : "— เลือกโต๊ะ —"}</option>
             {selectableTables.map((table) => (
-              <option key={table.id} value={table.id} disabled={table.awaitingBill}>
-                โต๊ะ {table.code}
-                {table.awaitingBill
-                  ? " (ขอเช็กบิลแล้ว)"
-                  : table.hasOpenSession
-                    ? ` (บิลเปิดอยู่ ฿${formatBaht(table.currentTotal)})`
-                    : " (ว่าง)"}
+              // ห้องสปาเปิดบิลใหม่ให้ลูกค้าคนอื่นได้เสมอ จึงไม่ปิดตัวเลือกแม้บิลหนึ่งขอเช็กบิลแล้ว
+              <option key={table.id} value={table.id} disabled={table.kind !== "ROOM" && table.awaitingBill}>
+                {table.kind === "ROOM" ? "ห้อง" : "โต๊ะ"} {table.code}
+                {table.kind === "ROOM" && table.bills.length > 0
+                  ? ` (บิลเปิดอยู่ ${table.bills.length} ใบ)`
+                  : table.awaitingBill
+                    ? " (ขอเช็กบิลแล้ว)"
+                    : table.hasOpenSession
+                      ? ` (บิลเปิดอยู่ ฿${formatBaht(table.currentTotal)})`
+                      : " (ว่าง)"}
               </option>
             ))}
           </select>
@@ -439,6 +476,58 @@ export function MenuPos({
             <IconTable size={14} aria-hidden /> โต๊ะว่างจะถูกเปิดให้อัตโนมัติเมื่อส่งออร์เดอร์
           </span>
         </div>
+
+        {/* ห้องสปา: 1 ลูกค้า = 1 บิล (2026-09-23) — ห้องที่มีบิลอยู่แล้วต้องเลือกว่าส่งเข้าบิลไหน */}
+        {mode === "TABLE" && roomHasBills && selectedTable ? (
+          <fieldset className="field" style={{ marginTop: 12, border: 0, padding: 0 }}>
+            <legend className="t-small">ส่งเข้าบิลของใคร</legend>
+            {selectedTable.bills.map((bill, index) => (
+              <label key={bill.sessionId} className="checkbox-row">
+                <input
+                  type="radio"
+                  name="posBill"
+                  checked={billChoice === bill.sessionId}
+                  disabled={bill.status === "AWAITING_BILL"}
+                  onChange={() => setBillChoice(bill.sessionId)}
+                />
+                <span>
+                  เพิ่มในบิล: {billLabel(bill, index)} <span className="num">฿{formatBaht(bill.total)}</span>
+                  {bill.status === "AWAITING_BILL" ? <span className="t-caption"> · ขอเช็กบิลแล้ว สั่งเพิ่มไม่ได้</span> : null}
+                </span>
+              </label>
+            ))}
+            <label className="checkbox-row">
+              <input type="radio" name="posBill" checked={billChoice === "new"} onChange={() => setBillChoice("new")} />
+              <span>ลูกค้าใหม่ — เปิดบิลแยก</span>
+            </label>
+            {billChoice === "new" ? (
+              <input
+                className="input"
+                maxLength={60}
+                value={billName}
+                onChange={(e) => setBillName(e.target.value)}
+                placeholder="ชื่อลูกค้า เช่น คุณบี"
+                aria-label="ชื่อลูกค้าของบิลใหม่"
+              />
+            ) : null}
+          </fieldset>
+        ) : null}
+
+        {mode === "TABLE" && isEmptyRoom ? (
+          <div className="field" style={{ marginTop: 12 }}>
+            <label className="t-small" htmlFor="posBillName">
+              ชื่อลูกค้า (ไม่บังคับ)
+            </label>
+            <input
+              id="posBillName"
+              className="input"
+              maxLength={60}
+              value={billName}
+              onChange={(e) => setBillName(e.target.value)}
+              placeholder="ใช้แยกบิลเมื่อมีลูกค้าคนอื่นเข้าห้องนี้ต่อ"
+            />
+          </div>
+        ) : null}
 
         {cart.length === 0 ? (
           <p className="t-body" style={{ marginTop: 12 }}>
@@ -553,9 +642,9 @@ export function MenuPos({
           <a
             className="btn btn-subtle btn-block"
             style={{ marginTop: 8 }}
-            href={`/mobile-order/tables/${selectedTable.id}/billing`}
+            href={`/mobile-order/tables/${selectedTable.id}/billing${billChoice && billChoice !== "new" ? `?session=${billChoice}` : ""}`}
           >
-            ไปหน้าปิดบิลของโต๊ะ {selectedTable.code}
+            ไปหน้าปิดบิลของ{selectedTable.kind === "ROOM" ? "ห้อง" : "โต๊ะ"} {selectedTable.code}
           </a>
         ) : null}
       </section>

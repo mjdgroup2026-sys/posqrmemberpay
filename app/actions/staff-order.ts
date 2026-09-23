@@ -6,7 +6,7 @@ import { requireSellingStore, storeErrorMessage, type StoreContext } from "@/lib
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { buildOrderLines, OrderLineError, type OrderLine } from "@/lib/order-lines"
-import { openOrReuseSession, SessionError } from "@/lib/table-session"
+import { LIVE_SESSION_STATUS, openOrReuseSession, SessionError } from "@/lib/table-session"
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
 import { nextSaleNumber } from "@/lib/sale-number"
 import { businessDayRange } from "@/lib/day"
@@ -75,6 +75,9 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
 
   const parsed = staffTableOrderSchema.safeParse({
     tableId: formData.get("tableId") ?? "",
+    sessionId: formData.get("sessionId") ?? undefined,
+    newCustomer: formData.get("newCustomer") === "true",
+    billLabel: formData.get("billLabel") ?? undefined,
     items: parseCartJson(formData.get("items")),
   })
   if (!parsed.success) {
@@ -85,11 +88,31 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
     }
   }
 
-  const { tableId, items } = parsed.data
+  const { tableId, items, sessionId, newCustomer, billLabel } = parsed.data
 
   try {
     const created = await db.$transaction(async (tx) => {
-      const session = await openOrReuseSession(tx, storeId, { tableId })
+      // ห้องสปาที่มีบิลเปิดอยู่แล้ว ต้องบอกให้ชัดว่าส่งเข้าบิลไหน (2026-09-23) — เดิมเข้าบิลล่าสุดเสมอ
+      // ลูกค้าคนใหม่จึงถูกรวมบิลกับคนก่อนที่ยังไม่จ่าย · โต๊ะอาหารยังเป็นบิลเดียวต่อโต๊ะเหมือนเดิม
+      if (!sessionId && !newCustomer) {
+        const room = await tx.table.findUnique({ where: { id: tableId }, select: { kind: true, code: true } })
+        const openBills = room?.kind === "ROOM"
+          ? await tx.tableSession.count({ where: { tableId, status: { in: LIVE_SESSION_STATUS } } })
+          : 0
+        if (openBills > 0) {
+          throw new StaffOrderAbort(`ห้อง ${room?.code ?? ""} มีบิลเปิดอยู่ — เลือกว่าจะเพิ่มในบิลเดิม หรือเปิดบิลใหม่ให้ลูกค้าคนใหม่`)
+        }
+      }
+      if (newCustomer && !billLabel) {
+        const openBills = await tx.tableSession.count({ where: { tableId, status: { in: LIVE_SESSION_STATUS } } })
+        if (openBills > 0) throw new StaffOrderAbort("กรุณากรอกชื่อลูกค้าของบิลใหม่ เพื่อแยกกับบิลที่เปิดอยู่ในห้องนี้")
+      }
+
+      const session = await openOrReuseSession(
+        tx,
+        storeId,
+        sessionId ? { tableId, sessionId } : newCustomer ? { tableId, newCustomer: { label: billLabel ?? null } } : { tableId },
+      )
 
       // โต๊ะที่ลูกค้าขอเช็กบิลแล้ว สั่งเพิ่มไม่ได้ — กติกาเดียวกับฝั่งลูกค้า (ยอดถูกล็อกไว้รอจ่าย)
       if (session.status === "AWAITING_BILL") {

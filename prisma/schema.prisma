@@ -448,17 +448,20 @@ enum TableKind {
 }
 
 model TableSession {
-  id           String             @id @default(cuid())
-  storeId      String
-  tableId      String
-  qrCodeId     String?
-  openedAt     DateTime           @default(now())
-  status       TableSessionStatus @default(OPEN)
-  closedAt     DateTime?
-  closedById   String?
-  cancelReason String?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  id            String             @id @default(cuid())
+  storeId       String
+  tableId       String
+  qrCodeId      String?
+  openedAt      DateTime           @default(now())
+  status        TableSessionStatus @default(OPEN)
+  closedAt      DateTime?
+  closedById    String?
+  cancelReason  String?
+  /// ชื่อลูกค้าของบิลนี้ (2026-09-23 · ร้านสปา) — ห้องนวดเดียวเปิดได้หลายบิลพร้อมกัน 1 บิลต่อลูกค้า
+  /// ป้ายนี้ใช้แยกบิลบนผังห้อง/หน้าปิดบิล · null = บิลปกติของโต๊ะอาหาร หรือไม่ได้ระบุชื่อ
+  customerLabel String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 
   store          Store                 @relation(fields: [storeId], references: [id])
   table          Table                 @relation(fields: [tableId], references: [id])

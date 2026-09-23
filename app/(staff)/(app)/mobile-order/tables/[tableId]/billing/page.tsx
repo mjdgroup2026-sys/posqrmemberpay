@@ -6,13 +6,15 @@ import { BillingForm } from "@/components/billing-form"
 
 export const metadata = { title: "ปิดบิล" }
 
-export default async function BillingPage({ params }: PageProps<"/mobile-order/tables/[tableId]/billing">) {
+export default async function BillingPage({ params, searchParams }: PageProps<"/mobile-order/tables/[tableId]/billing">) {
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
   const { storeId, granted } = await requirePageAccess("MO_TABLES")
   // ปิดบิล = MO_TABLES:EDIT — มีแค่ VIEW ให้ดูยอดได้แต่กดยืนยันไม่ได้ (action ก็ปฏิเสธซ้ำ)
   if (!granted.MO_TABLES?.includes("EDIT")) redirect("/access-denied?resource=MO_TABLES")
   const { tableId } = await params
-  const bill = await getBillingView(storeId, tableId)
+  // ?session= = บิลของลูกค้าคนไหนในห้องสปาที่มีหลายบิล (2026-09-23)
+  const { session } = await searchParams
+  const bill = await getBillingView(storeId, tableId, typeof session === "string" && session ? session : undefined)
 
   if (!bill) {
     return (
@@ -31,11 +33,14 @@ export default async function BillingPage({ params }: PageProps<"/mobile-order/t
   if (bill.lines.length === 0) {
     return (
       <section className="card-ui card-pad">
-        <h1 className="t-h2">โต๊ะ {bill.tableCode} ยังไม่มีรายการที่ต้องชำระ</h1>
+        <h1 className="t-h2">
+          โต๊ะ {bill.tableCode}
+          {bill.customerLabel ? ` · ${bill.customerLabel}` : ""} ยังไม่มีรายการที่ต้องชำระ
+        </h1>
         <p className="t-body" style={{ marginTop: 8 }}>
           ปิดบิลได้เมื่อมีรายการอาหารอย่างน้อย 1 รายการ — ถ้าลูกค้าไม่สั่งแล้วให้ใช้ปุ่มยกเลิกโต๊ะแทน
         </p>
-        <Link href={`/mobile-order/tables/${bill.tableId}`} className="btn btn-primary" style={{ marginTop: 16 }}>
+        <Link href={`/mobile-order/tables/${bill.tableId}?session=${bill.sessionId}`} className="btn btn-primary" style={{ marginTop: 16 }}>
           กลับไปรายละเอียดออร์เดอร์
         </Link>
       </section>

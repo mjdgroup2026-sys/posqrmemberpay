@@ -601,6 +601,41 @@ export type TableCard = {
   /// Phase 20 — โต๊ะอาหาร/ห้องนวด (ผังแยกกลุ่ม) + ประเภทห้อง
   kind: "TABLE" | "ROOM"
   stationName: string | null
+  /// บิลที่เปิดอยู่ทั้งหมดของโต๊ะ/ห้องนี้ เรียงตามเวลาเปิด (2026-09-23) — โต๊ะอาหารมีไม่เกิน 1 ·
+  /// ห้องสปามีได้หลายใบ 1 ใบต่อลูกค้า · `sessionId`/`total` ด้านบนยังเป็นของบิลล่าสุด/ยอดรวมทุกใบเพื่อให้ของเดิมใช้ต่อได้
+  bills: OpenBill[]
+}
+
+/// บิลที่ยังเปิดอยู่ของโต๊ะ/ห้อง (2026-09-23 · ร้านสปาแยกบิลต่อลูกค้า)
+export type OpenBill = {
+  sessionId: string
+  /// ชื่อลูกค้าของบิล — null = ไม่ได้ระบุ (บิลปกติของโต๊ะอาหาร)
+  label: string | null
+  openedAt: Date
+  status: "OPEN" | "AWAITING_BILL"
+  total: number
+  itemCount: number
+}
+
+/// จัดกลุ่ม session ที่เปิดอยู่ตามโต๊ะ เรียงเก่า → ใหม่ (ตัวสุดท้าย = บิลล่าสุด)
+function groupOpenBills(
+  sessions: { id: string; tableId: string; openedAt: Date; status: string; customerLabel: string | null }[],
+  totals: Map<string, { total: number; items: number }>,
+): Map<string, OpenBill[]> {
+  const byTable = new Map<string, OpenBill[]>()
+  for (const s of [...sessions].sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime())) {
+    const row = totals.get(s.id)
+    const bill: OpenBill = {
+      sessionId: s.id,
+      label: s.customerLabel,
+      openedAt: s.openedAt,
+      status: s.status === "AWAITING_BILL" ? "AWAITING_BILL" : "OPEN",
+      total: row?.total ?? 0,
+      itemCount: row?.items ?? 0,
+    }
+    byTable.set(s.tableId, [...(byTable.get(s.tableId) ?? []), bill])
+  }
+  return byTable
 }
 
 /// ยอดสดต่อ session (ไม่รวมรายการที่ยกเลิก) — ใช้ raw SQL เพราะ Prisma groupBy ข้ามความสัมพันธ์ไม่ได้
@@ -626,7 +661,7 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
     db.tableSession.findMany({
       where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
       orderBy: { openedAt: "desc" },
-      select: { id: true, tableId: true, openedAt: true, status: true },
+      select: { id: true, tableId: true, openedAt: true, status: true, customerLabel: true },
     }),
     liveSessionTotals(storeId),
     db.notification.findMany({
@@ -636,7 +671,7 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
     }),
   ])
 
-  const sessionByTable = new Map(sessions.map((s) => [s.tableId, s]))
+  const billsByTable = groupOpenBills(sessions, totals)
   const notificationBySession = new Map<string, (typeof notifications)[number]>()
   for (const n of notifications) {
     if (!notificationBySession.has(n.tableSessionId)) notificationBySession.set(n.tableSessionId, n)
@@ -649,18 +684,20 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
   }
 
   return tables.map<TableCard>((t) => {
-    const session = sessionByTable.get(t.id) ?? null
-    const totalsRow = session ? totals.get(session.id) : undefined
-    const notification = session ? (notificationBySession.get(session.id) ?? null) : null
+    const bills = billsByTable.get(t.id) ?? []
+    const session = bills.at(-1) ?? null
+    // แจ้งเตือนของบิลใดก็ได้ในห้อง (ห้องสปาหลายบิล) — ใบที่เก่าสุดก่อน
+    const notification = bills.map((b) => notificationBySession.get(b.sessionId)).find(Boolean) ?? null
 
     return {
       id: t.id,
       code: t.code,
       status: t.status,
-      sessionId: session?.id ?? null,
-      openedAt: session?.openedAt ?? null,
-      total: totalsRow?.total ?? 0,
-      itemCount: totalsRow?.items ?? 0,
+      sessionId: session?.sessionId ?? null,
+      // เวลาเปิด = บิลแรกที่ยังเปิดอยู่ (ห้องถูกใช้มาตั้งแต่ตอนนั้น) · ยอด = รวมทุกบิลในห้อง
+      openedAt: bills[0]?.openedAt ?? null,
+      total: Math.round(bills.reduce((sum, b) => sum + b.total, 0) * 100) / 100,
+      itemCount: bills.reduce((sum, b) => sum + b.itemCount, 0),
       primaryTableId: t.primaryTableId,
       primaryTableCode: t.primaryTableId ? (codeById.get(t.primaryTableId) ?? null) : null,
       mergedTableCodes: mergedByPrimary.get(t.id) ?? [],
@@ -669,6 +706,7 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
         : null,
       kind: t.kind,
       stationName: t.station?.name ?? null,
+      bills,
     }
   })
 }
@@ -918,6 +956,23 @@ export type TableDetail = {
     items: OrderItemRow[]
   }[]
   notifications: { id: string; type: "CALL_STAFF" | "CHECK_BILL"; reason: string | null; createdAt: Date }[]
+  /// ชื่อลูกค้าของบิลที่กำลังดู (ห้องสปา · 2026-09-23)
+  customerLabel: string | null
+  /// บิลที่เปิดอยู่ทั้งหมดของโต๊ะ/ห้องนี้ — มากกว่า 1 = ห้องสปาที่มีลูกค้าหลายคน หน้าจอโชว์ตัวสลับบิล
+  bills: OpenBill[]
+}
+
+/// บิลที่เปิดอยู่ทั้งหมดของโต๊ะ (ห้องสปามีได้หลายใบ) — ใช้ทำตัวสลับบิลบนหน้ารายละเอียด/ปิดบิล
+async function openBillsOfTable(storeId: string, tableId: string): Promise<OpenBill[]> {
+  const db = forStore(storeId)
+  const [sessions, totals] = await Promise.all([
+    db.tableSession.findMany({
+      where: { tableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+      select: { id: true, tableId: true, openedAt: true, status: true, customerLabel: true },
+    }),
+    liveSessionTotals(storeId),
+  ])
+  return groupOpenBills(sessions, totals).get(tableId) ?? []
 }
 
 /// แปลง JSON snapshot ของ modifier ให้เป็นรูปแบบที่หน้าจอใช้ได้ — ข้อมูลเก่าอาจว่างหรือผิดรูป
@@ -937,7 +992,9 @@ function parseOptions(raw: unknown): { groupName: string; optionName: string; pr
   })
 }
 
-export async function getTableDetail(storeId: string, tableId: string): Promise<TableDetail | null> {
+/// `sessionId` = บิลที่ต้องการดู (ห้องสปาหลายบิล · 2026-09-23) — ต้องเป็นบิลที่ยังเปิดของโต๊ะ/ห้องนี้ ไม่งั้นได้ null ·
+/// ไม่ส่ง = บิลล่าสุดเหมือนเดิม
+export async function getTableDetail(storeId: string, tableId: string, sessionId?: string): Promise<TableDetail | null> {
   const db = forStore(storeId)
   const table = await db.table.findUnique({
     where: { id: tableId },
@@ -948,9 +1005,9 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
   // โต๊ะรองไม่มี session ของตัวเอง — ทุกอย่างอยู่ที่โต๊ะหลัก
   const targetId = table.primaryTableId ?? table.id
 
-  const [session, settings, merged] = await Promise.all([
+  const [session, settings, merged, bills] = await Promise.all([
     db.tableSession.findFirst({
-      where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+      where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] }, ...(sessionId ? { id: sessionId } : {}) },
       orderBy: { openedAt: "desc" },
       include: {
         table: { select: { id: true, code: true, status: true } },
@@ -973,6 +1030,7 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
     }),
     db.storeSettings.findUnique({ where: { storeId }, select: { hasKDS: true } }),
     db.table.findMany({ where: { primaryTableId: targetId }, select: { code: true } }),
+    openBillsOfTable(storeId, targetId),
   ])
 
   if (!session) return null
@@ -1018,7 +1076,9 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
     total: Math.round((total + Number.EPSILON) * 100) / 100,
     hasKDS: settings?.hasKDS ?? false,
     orders,
-  notifications: session.notifications,
+    notifications: session.notifications,
+    customerLabel: session.customerLabel,
+    bills,
   }
 }
 
@@ -1383,6 +1443,10 @@ export type BillingView = {
   sessionStatus: "OPEN" | "AWAITING_BILL"
   openedAt: Date
   mergedTableCodes: string[]
+  /// ชื่อลูกค้าของบิล (ห้องสปา · 2026-09-23)
+  customerLabel: string | null
+  /// บิลที่เปิดอยู่ทั้งหมดของห้องนี้ — หน้าปิดบิลโชว์ตัวสลับเมื่อมีมากกว่า 1
+  bills: OpenBill[]
   storeName: string
   lines: BillingLine[]
   itemsTotal: number
@@ -1393,7 +1457,8 @@ export type BillingView = {
 
 /// ใบเสร็จของโต๊ะสำหรับหน้าปิดบิลฝั่งพนักงาน (F17) — ยอดคิดจาก `computeBillTotals` ตัวเดียวกับที่ปิดบิลจริง
 /// รายการที่ถูกยกเลิกไม่เข้าบิล และรายการซ้ำ (ชื่อ+ตัวเลือก+ราคาเดียวกัน) ถูกยุบเป็นบรรทัดเดียว
-export async function getBillingView(storeId: string, tableId: string): Promise<BillingView | null> {
+/// `sessionId` = บิลที่จะปิด (ห้องสปาหลายบิล) — ต้องเป็นบิลที่ยังเปิดของห้องนี้ · ไม่ส่ง = บิลล่าสุด
+export async function getBillingView(storeId: string, tableId: string, sessionId?: string): Promise<BillingView | null> {
   const db = forStore(storeId)
   const table = await db.table.findUnique({
     where: { id: tableId },
@@ -1404,14 +1469,15 @@ export async function getBillingView(storeId: string, tableId: string): Promise<
   // โต๊ะรองไม่มีบิลของตัวเอง — ปิดบิลที่โต๊ะหลักเสมอ
   const targetId = table.primaryTableId ?? table.id
 
-  const [session, settings, merged] = await Promise.all([
+  const [session, settings, merged, bills] = await Promise.all([
     db.tableSession.findFirst({
-      where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+      where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] }, ...(sessionId ? { id: sessionId } : {}) },
       orderBy: { openedAt: "desc" },
       select: {
         id: true,
         status: true,
         openedAt: true,
+        customerLabel: true,
         table: { select: { id: true, code: true } },
         orders: {
           orderBy: { orderNumber: "asc" },
@@ -1436,6 +1502,7 @@ export async function getBillingView(storeId: string, tableId: string): Promise<
       select: { storeName: true, serviceChargePercent: true },
     }),
     db.table.findMany({ where: { primaryTableId: targetId }, select: { code: true } }),
+    openBillsOfTable(storeId, targetId),
   ])
 
   if (!session) return null
@@ -1475,6 +1542,8 @@ export async function getBillingView(storeId: string, tableId: string): Promise<
     sessionStatus: session.status as "OPEN" | "AWAITING_BILL",
     openedAt: session.openedAt,
     mergedTableCodes: merged.map((m) => m.code),
+    customerLabel: session.customerLabel,
+    bills,
     storeName: settings?.storeName ?? "MJD Mobile Order",
     lines,
     itemsTotal: totals.itemsTotal,
@@ -2173,6 +2242,10 @@ export type PosTableOption = {
   mergedIntoCode: string | null
   /// ยอดปัจจุบันของบิลที่เปิดอยู่ (0 ถ้ายังไม่มีรายการ)
   currentTotal: number
+  /// โต๊ะอาหาร/ห้องสปา — ห้องที่มีบิลเปิดอยู่ต้องเลือกบิลก่อนส่ง (2026-09-23)
+  kind: "TABLE" | "ROOM"
+  /// บิลที่เปิดอยู่ทั้งหมด (ห้องสปามีได้หลายใบ)
+  bills: OpenBill[]
 }
 
 /// รายชื่อโต๊ะสำหรับจอขาย `/mobile-order/pos` — พนักงานเลือกโต๊ะก่อนส่งออร์เดอร์เข้าครัว
@@ -2181,20 +2254,21 @@ export async function listTablesForPos(storeId: string): Promise<PosTableOption[
   const [tables, sessions, totals] = await Promise.all([
     db.table.findMany({
       orderBy: { code: "asc" },
-      select: { id: true, code: true, status: true, primaryTable: { select: { code: true } } },
+      select: { id: true, code: true, status: true, kind: true, primaryTable: { select: { code: true } } },
     }),
     db.tableSession.findMany({
       where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
       orderBy: { openedAt: "desc" },
-      select: { id: true, tableId: true, status: true },
+      select: { id: true, tableId: true, status: true, openedAt: true, customerLabel: true },
     }),
     liveSessionTotals(storeId),
   ])
 
-  const sessionByTable = new Map(sessions.map((s) => [s.tableId, s]))
+  const billsByTable = groupOpenBills(sessions, totals)
 
   return tables.map((table) => {
-    const session = sessionByTable.get(table.id)
+    const bills = billsByTable.get(table.id) ?? []
+    const session = bills.at(-1)
     return {
       id: table.id,
       code: table.code,
@@ -2202,7 +2276,9 @@ export async function listTablesForPos(storeId: string): Promise<PosTableOption[
       hasOpenSession: Boolean(session),
       awaitingBill: session?.status === "AWAITING_BILL",
       mergedIntoCode: table.primaryTable?.code ?? null,
-      currentTotal: session ? (totals.get(session.id)?.total ?? 0) : 0,
+      currentTotal: session?.total ?? 0,
+      kind: table.kind,
+      bills,
     }
   })
 }

@@ -18,6 +18,7 @@ import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { IconBell, IconMerge, IconReceipt, IconRoom, IconSpinner, IconTable } from "@/components/icons"
 import { SegmentTabs } from "@/components/segment-tabs"
+import { billLabel } from "@/components/bill-switcher"
 import { AwaitingCallbackBadge, CustomerPaidBadge } from "@/components/payment-alerts"
 import {
   Dialog,
@@ -323,9 +324,32 @@ export function TableOverview({
                 </span>
               ) : null}
 
-              {table.sessionId ? (
+              {/* ห้องสปาที่มีลูกค้าหลายคน = หลายบิล (2026-09-23) — แยกแถวต่อบิล แต่ละคนจ่ายแยก */}
+              {table.bills.length > 1 ? (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {table.bills.map((bill, index) => (
+                    <li key={bill.sessionId} className="row" style={{ justifyContent: "space-between", gap: 6, borderTop: "1px solid var(--line)", paddingTop: 6 }}>
+                      <Link href={`/mobile-order/tables/${table.id}?session=${bill.sessionId}`} className="t-small" style={{ fontWeight: 600 }}>
+                        {billLabel(bill, index)}
+                        {bill.status === "AWAITING_BILL" ? <span className="t-caption"> · ขอเช็กบิล</span> : null}
+                      </Link>
+                      <span className="row" style={{ gap: 6 }}>
+                        <span className="num" style={{ fontWeight: 700 }}>฿{formatBaht(bill.total)}</span>
+                        {allowed.includes("EDIT") ? (
+                          <Link href={`/mobile-order/tables/${table.id}/billing?session=${bill.sessionId}`} className="btn btn-accent btn-sm">
+                            ปิดบิล
+                          </Link>
+                        ) : null}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : table.sessionId ? (
                 <span className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="t-caption num">{formatNumber(table.itemCount)} รายการ</span>
+                  <span className="t-caption num">
+                    {table.bills[0]?.label ? `${table.bills[0].label} · ` : ""}
+                    {formatNumber(table.itemCount)} รายการ
+                  </span>
                   <span className="num" style={{ fontWeight: 700 }}>
                     ฿{formatBaht(table.total)}
                   </span>
@@ -371,7 +395,7 @@ export function TableOverview({
                   </button>
                 ) : null}
 
-                {table.sessionId ? (
+                {table.sessionId && table.bills.length <= 1 ? (
                   <>
                     <Link href={`/mobile-order/tables/${table.id}`} className="btn btn-primary btn-sm">
                       ดูออร์เดอร์

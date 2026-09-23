@@ -4,6 +4,7 @@ import { nextSaleNumber } from "@/lib/sale-number"
 import { toNumber } from "@/lib/format"
 import type { PaymentMethodValue } from "@/lib/types"
 import { publishStoreEvent } from "@/lib/realtime"
+import { releaseTableIfIdle } from "@/lib/table-session"
 
 /// ปิดบิลของโต๊ะ (MJD Mobile Order) — ใช้ร่วมกันระหว่างพนักงานกดยืนยันกับ webhook ของธนาคาร
 ///
@@ -198,18 +199,17 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
       })
       if (closed.count === 0) throw new CloseAbort("โต๊ะนี้เพิ่งถูกปิดบิลจากอีกหน้าจอ")
 
-      // DYNAMIC QR ใช้ต่อไม่ได้อีกหลังปิดบิล · STATIC ไม่ถูกแตะต้อง (§3 QR Code วงจรชีวิต)
-      await tx.qRCode.updateMany({
-        where: { tableId: session.tableId, type: "DYNAMIC", status: "ACTIVE" },
-        data: { status: "INVALIDATED", invalidatedAt: new Date() },
-      })
+      // คืนโต๊ะเป็นว่าง (พร้อมโต๊ะที่รวมอยู่) — ห้องสปาที่ยังมีบิลของลูกค้าคนอื่นเปิดค้างไม่ถูกคืน (2026-09-23)
+      const released = await releaseTableIfIdle(tx, input.storeId, session.tableId)
 
-      // โต๊ะหลักและโต๊ะที่รวมอยู่กลับเป็นว่างพร้อมกันในทรานแซคชันเดียว
-      await tx.table.updateMany({
-        where: { primaryTableId: session.tableId },
-        data: { primaryTableId: null, status: "EMPTY" },
-      })
-      await tx.table.update({ where: { id: session.tableId }, data: { status: "EMPTY" } })
+      // DYNAMIC QR ใช้ต่อไม่ได้อีกหลังปิดบิล · STATIC ไม่ถูกแตะต้อง (§3 QR Code วงจรชีวิต)
+      // ห้องที่ยังมีบิลอื่นเปิดอยู่ = QR ยังเป็นของลูกค้าที่ยังอยู่ในห้อง จึงยังไม่ตัด
+      if (released) {
+        await tx.qRCode.updateMany({
+          where: { tableId: session.tableId, type: "DYNAMIC", status: "ACTIVE" },
+          data: { status: "INVALIDATED", invalidatedAt: new Date() },
+        })
+      }
 
       // คิวนวดที่เช็กอินเข้ามาเป็น session นี้ถือว่าจบพร้อมบิล (Phase 20b) — ไม่งั้นกระดานจะค้างว่ายังนวดอยู่
       await tx.booking.updateMany({
