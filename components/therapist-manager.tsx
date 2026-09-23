@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { saveTherapist, deleteTherapist, toggleTherapistActive } from "@/app/actions/therapists"
@@ -247,6 +248,10 @@ export function TherapistManager({
                     </td>
                     <td style={{ padding: "12px 24px", textAlign: "right" }}>
                       <span className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
+                        {/* ประวัติ/ยอดของคนนี้ (Phase 20c) — ดูได้ทุกคนที่เข้าหน้านี้ได้ ไม่ต้องมีสิทธิ์แก้ */}
+                        <Link href={`/spa/therapists/${t.id}`} className="btn btn-ghost btn-sm">
+                          ประวัติ
+                        </Link>
                         {allowed.includes("EDIT") ? (
                           <>
                             <button type="button" className="btn btn-subtle btn-sm" disabled={pending} onClick={() => toggleActive(t)}>

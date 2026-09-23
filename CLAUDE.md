@@ -312,7 +312,7 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   ```bash
   grep -rn '\$queryRaw\|\$executeRaw' --include='*.ts' . --exclude-dir=node_modules --exclude-dir=generated
   ```
-  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (8 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`),
+  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (10 จุด — รวมรายงานพนักงานนวด Phase 20c 2 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`),
   `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
   `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
   และ `lib/booking.ts` (2 จุด — advisory lock กันจองซ้อน namespace 720_003 ต่อพนักงาน / 720_004 ต่อห้อง, Phase 20b
@@ -574,7 +574,8 @@ tenant-isolation +6 query +6 action (651 ทั้งชุด)
 `docker exec posmobileorder-app-green ls .next/server/app/(staff)/(app)/spa` → board/bookings/shifts/therapists ครบ (ไม่ใช่แค่ `/api/health`)
 · ⚠️ **กับดักใหม่ที่เจอจริง**: Prisma 7 ถอด `migrate diff --from-url` ออกแล้ว — ใส่ไปมันพ่นหน้า help แล้ว **exit 0 เหมือนผ่าน** ต้องใช้ `--from-config-datasource`
 (ตั้ง `DATABASE_URL` ของฐานที่จะตรวจเป็น env นำหน้าคำสั่ง — `prisma7.config.ts` โหลด dotenv ซึ่งไม่ override env ที่ตั้งมาก่อน)
-· **20c (รายงานต่อพนักงานนวด) ยังไม่เริ่ม** — แผนใน spec §8
+· **20c รายงานต่อพนักงานนวด เสร็จในเครื่องแล้ว (รอ PR · ไม่มี migration/env)**: `getTherapistSalesReport`/`getTherapistHistory` ใน `lib/queries.ts` (raw SQL อ่าน `SaleItem.therapistId` ของบิล COMPLETED · กรอง storeId เอง) ·
+`/spa/reports?from=&to=` (สิทธิ์ `SPA_THERAPISTS` หรือ `REPORTS`) + `/spa/therapists/[therapistId]` ประวัติรายคน · `resolveDayRange()` ใน `lib/day.ts` · เทส `therapist-report.test.ts` 6
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

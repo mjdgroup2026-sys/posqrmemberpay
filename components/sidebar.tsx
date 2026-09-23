@@ -76,6 +76,7 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
       { href: "/spa/shifts", label: "ตารางกะ", Icon: IconCalendar, resource: "SPA_THERAPISTS", spaOnly: true },
       { href: "/spa/bookings", label: "ตารางจอง", Icon: IconCalendar, resource: "SPA_BOOKINGS", spaOnly: true },
       { href: "/spa/board", label: "กระดานห้องนวด", Icon: IconRoom, resource: "SPA_BOOKINGS", spaOnly: true },
+      { href: "/spa/reports", label: "รายงานพนักงานนวด", Icon: IconReports, resource: "SPA_THERAPISTS", spaOnly: true },
     ],
   },
   {
