@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
+import { authErrorMessage } from "@/lib/auth-errors"
 import { IconSpinner } from "@/components/icons"
 
 export function LoginForm() {
@@ -49,12 +50,9 @@ export function LoginForm() {
     if (authError) {
       setPending(false)
       // บัญชีถูกต้องแต่ยังไม่ยืนยันอีเมล — ต้องบอกให้ตรงจุด ไม่งั้นผู้ใช้ไล่แก้รหัสผ่านไปเรื่อย
-      if (authError.code === "EMAIL_NOT_VERIFIED" || authError.status === 403) {
-        setUnverifiedEmail(email)
-        setError("บัญชีนี้ยังไม่ได้ยืนยันอีเมล กรุณากดลิงก์ในอีเมลที่ส่งไปให้ก่อนเข้าสู่ระบบ")
-        return
-      }
-      setError("อีเมลหรือรหัสผ่านไม่ถูกต้อง")
+      // ⚠️ เช็คด้วย code เท่านั้น — 403 อื่น (เช่น INVALID_ORIGIN) เคยถูกบอกผิดว่ายังไม่ยืนยันอีเมล
+      if (authError.code === "EMAIL_NOT_VERIFIED") setUnverifiedEmail(email)
+      setError(authErrorMessage(authError, "sign-in"))
       return
     }
 

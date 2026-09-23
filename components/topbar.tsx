@@ -5,12 +5,14 @@ import { useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
+import { authErrorMessage } from "@/lib/auth-errors"
 import { IconBell, IconLogout, IconSettings, IconUser, IconWarning } from "@/components/icons"
 import { StoreSwitcher, type StoreOption } from "@/components/store-switcher"
 import { MobileNavToggle } from "@/components/mobile-nav"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -32,13 +34,19 @@ export function Topbar({ user, lowStockCount, pendingNotificationCount = 0, acti
 
   async function handleSignOut() {
     setBusy(true)
+    // ★ Better Auth client ไม่ throw เมื่อเซิร์ฟเวอร์ตอบ error — คืน `{ error }` แทน
+    //   เดิมเช็คแค่ try/catch จึงขึ้น "ออกจากระบบแล้ว" ทั้งที่ cookie ยังอยู่ (เช่น 403 INVALID_ORIGIN / 429)
+    //   แล้วถูกพาไป /login ซึ่งเด้งกลับหน้าแรกเพราะยังล็อกอินอยู่ = ผู้ใช้เห็นว่า "กดออกจากระบบไม่ได้"
+    //   try/catch ยังต้องมีสำหรับเน็ตหลุด (fetch throw) ไม่งั้น busy ค้างและปุ่มถูก disable ถาวร
+    let failure: string | null = null
     try {
-      await authClient.signOut()
+      const { error } = await authClient.signOut()
+      if (error) failure = authErrorMessage(error, "sign-out")
     } catch {
-      // ★ ไม่มี try/catch มาก่อน — พอ signOut ล้ม ฟังก์ชันก็ throw ทิ้งไว้เฉย ๆ
-      //   busy ค้างเป็น true ตลอด ปุ่มเมนูผู้ใช้เลยถูก disable ถาวรจนกว่าจะรีเฟรชหน้า
-      //   ผู้ใช้เห็นเป็น "กดออกจากระบบไม่ได้" โดยไม่มีข้อความบอกอะไรเลย
-      toast.error("ออกจากระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+      failure = authErrorMessage(null, "sign-out")
+    }
+    if (failure) {
+      toast.error(failure)
       setBusy(false)
       return
     }
@@ -88,10 +96,14 @@ export function Topbar({ user, lowStockCount, pendingNotificationCount = 0, acti
           <span className="hide-mobile">{user.name}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel>
-            <span style={{ display: "block", fontWeight: 600 }}>{user.name}</span>
-            <span className="t-caption">{user.email}</span>
-          </DropdownMenuLabel>
+          {/* ★ Label ของ base-ui ต้องอยู่ใน Group เสมอ — เดิมวางลอย ๆ แล้วเปิดเมนูไม่ได้เลย
+              ("MenuGroupContext is missing") ผู้ใช้จึงหาปุ่มออกจากระบบไม่เจอ */}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>
+              <span style={{ display: "block", fontWeight: 600 }}>{user.name}</span>
+              <span className="t-caption">{user.email}</span>
+            </DropdownMenuLabel>
+          </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem render={<Link href="/settings" />}>
             <IconSettings size={16} aria-hidden /> ตั้งค่าโปรไฟล์

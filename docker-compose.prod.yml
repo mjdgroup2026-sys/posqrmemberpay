@@ -37,6 +37,8 @@ x-app-base: &app-base
     # ต้องตรงกับ origin ที่เปิดใช้จริงเป๊ะ ๆ (รวม https) ไม่งั้น Better Auth
     # ตอบ INVALID_ORIGIN ตอน sign-in ทั้งที่แอปขึ้นปกติ
     BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://posqr.jayjayservices.com}
+    # origin เพิ่มเติมที่ยอมให้ล็อกอินได้ (คั่นด้วย comma) — ว่าง = เฉพาะ BETTER_AUTH_URL (ค่าปลอดภัยที่สุด)
+    BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-}
     BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?ยังไม่ได้ตั้ง BETTER_AUTH_SECRET — สร้างด้วย openssl rand -base64 32}"
     # URL ที่ฝังลง QR Code ของโต๊ะ — ต้องเป็นโดเมนที่มือถือลูกค้าเปิดได้จริง (Phase 9)
     APP_BASE_URL: ${APP_BASE_URL:-}
