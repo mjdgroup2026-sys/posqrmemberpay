@@ -112,15 +112,42 @@ describe.skipIf(!dbReady)("ร้านนวด — จองล่วงหน
       // 13:30 อยู่กลางคิวเดิม (13:00–14:00)
       const overlap = await saveBooking(bookingForm({ menuItemId: program.id, therapistId: t1.id, startTime: "13:30", customerName: "คุณบี" }))
       expect(overlap.ok).toBe(false)
-      expect(overlap.ok === false && overlap.error).toContain("มีคิวอยู่แล้ว")
+      expect(overlap.ok === false && overlap.error).toContain("มีคิวช่วง 13:00–14:00 น.")
 
       // 14:00 ติดกันพอดี — buffer 10 นาที (ค่าเริ่มต้น) ยังกันอยู่
       const tooClose = await saveBooking(bookingForm({ menuItemId: program.id, therapistId: t1.id, startTime: "14:00", customerName: "คุณบี" }))
       expect(tooClose.ok).toBe(false)
+      // ต้องบอกเวลาที่เริ่มได้จริง ไม่ใช่แค่ช่วงที่ชน (2026-09-23)
+      expect(tooClose.ok === false && tooClose.error).toContain("เริ่มคิวใหม่ได้ตั้งแต่ 14:10 น. (พักระหว่างคิว 10 นาที)")
 
       const afterBuffer = await saveBooking(bookingForm({ menuItemId: program.id, therapistId: t1.id, startTime: "14:10", customerName: "คุณบี" }))
       expect(afterBuffer.ok).toBe(true)
       expect(await testPrisma().booking.count({ where: { storeId: TEST_STORE_ID } })).toBe(2)
+    })
+
+    it("กรณีเจ้าของร้านเจอ: 90 นาที 16:00–17:30 · 17:31 ไม่ผ่านเพราะพัก 10 นาที · 17:40 ผ่าน · ตั้งพัก 0 แล้ว 17:30 ผ่าน", async () => {
+      const db = testPrisma()
+      const { thai, t1, t2 } = await seedSpa()
+      const program90 = await db.menuItem.create({
+        data: { storeId: TEST_STORE_ID, name: "นวดไทย 90", price: "450.00", itemType: "SERVICE", durationMinutes: 90, stationId: thai.id },
+      })
+      await db.therapist.update({ where: { id: t2.id }, data: { skills: { connect: [{ id: thai.id }] } } })
+
+      expect((await saveBooking(bookingForm({ menuItemId: program90.id, therapistId: t1.id, startTime: "16:00" }))).ok).toBe(true)
+
+      const at1731 = await saveBooking(bookingForm({ menuItemId: program90.id, therapistId: t1.id, startTime: "17:31", customerName: "คุณบี" }))
+      expect(at1731.ok).toBe(false)
+      expect(at1731.ok === false && at1731.error).toContain("เริ่มคิวใหม่ได้ตั้งแต่ 17:40 น.")
+      // เศษนาทีรับได้ปกติ — 17:40 ผ่าน
+      expect((await saveBooking(bookingForm({ menuItemId: program90.id, therapistId: t1.id, startTime: "17:40", customerName: "คุณบี" }))).ok).toBe(true)
+
+      // ร้านตั้งพักระหว่างคิวเป็น 0 → ต่อคิวได้ทันทีที่ 17:30 (ใช้พนักงานอีกคนที่มีคิว 16:00 เหมือนกัน)
+      await db.storeSettings.update({ where: { storeId: TEST_STORE_ID }, data: { bookingBufferMinutes: 0 } })
+      expect((await saveBooking(bookingForm({ menuItemId: program90.id, therapistId: t2.id, startTime: "16:00", customerName: "คุณซี" }))).ok).toBe(true)
+      const at1729 = await saveBooking(bookingForm({ menuItemId: program90.id, therapistId: t2.id, startTime: "17:29", customerName: "คุณดี" }))
+      expect(at1729.ok === false && at1729.error).toContain("เริ่มคิวใหม่ได้ตั้งแต่ 17:30 น.")
+      expect(at1729.ok === false && at1729.error).not.toContain("พักระหว่างคิว")
+      expect((await saveBooking(bookingForm({ menuItemId: program90.id, therapistId: t2.id, startTime: "17:30", customerName: "คุณดี" }))).ok).toBe(true)
     })
 
     it("ห้องเดียวกันชนกันถูกปฏิเสธแม้เป็นคนละพนักงาน", async () => {

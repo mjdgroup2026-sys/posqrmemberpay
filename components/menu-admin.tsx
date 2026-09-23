@@ -8,7 +8,8 @@ import { formatBaht, formatNumber } from "@/lib/format"
 import type { KitchenStationRow, ManagedMenuItem } from "@/lib/queries"
 import { UNASSIGNED_STATION_LABEL } from "@/lib/ticket-lines"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
-import { IconPlus, IconSpinner, IconTrash } from "@/components/icons"
+import { IconMenu, IconPlus, IconSpinner, IconTherapist, IconTrash } from "@/components/icons"
+import { SegmentTabs } from "@/components/segment-tabs"
 import { ImagePicker } from "@/components/image-picker"
 import { isSampleMenuName } from "@/lib/sample-menu"
 import {
@@ -55,6 +56,10 @@ export function MenuAdmin({
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(EMPTY_DRAFT)
   const [removing, setRemoving] = useState<ManagedMenuItem | null>(null)
+  // ร้านสปา (2026-09-23 เจ้าของสั่ง): แยกแท็บรายการอาหาร / รายการนวดสปา · ร้านอาหารล้วนไม่มีแท็บ เห็นทุกรายการเหมือนเดิม
+  const [tab, setTab] = useState<"FOOD" | "SERVICE">("FOOD")
+  const shown = spaEnabled ? items.filter((item) => item.itemType === tab) : items
+  const isServiceTab = spaEnabled && tab === "SERVICE"
 
   async function run(
     action: () => Promise<{ ok: boolean; message?: string; error?: string; fieldErrors?: FieldErrors }>,
@@ -81,7 +86,8 @@ export function MenuAdmin({
 
   function startCreate() {
     setEditingId(null)
-    setDraft(EMPTY_DRAFT)
+    // เพิ่มจากแท็บไหนก็เป็นชนิดของแท็บนั้นไว้ก่อน (ยังสลับในฟอร์มได้)
+    setDraft({ ...EMPTY_DRAFT, itemType: isServiceTab ? "SERVICE" : "FOOD" })
     setFieldErrors({})
     setOpen(true)
   }
@@ -156,7 +162,7 @@ export function MenuAdmin({
     <>
       <div className="page-head">
         <div>
-          <h1 className="t-h1">จัดการเมนูอาหาร</h1>
+          <h1 className="t-h1">{spaEnabled ? "จัดการเมนูอาหาร/ร้านสปา" : "จัดการเมนูอาหาร"}</h1>
           <p className="t-body" style={{ marginTop: 4 }}>
             เมนูที่ลูกค้าเห็นตอนสแกน QR — ปิดใช้งานเพื่อซ่อนชั่วคราวโดยไม่เสียประวัติการขาย
           </p>
@@ -164,7 +170,7 @@ export function MenuAdmin({
         {allowed.includes("ADD") ? (
         <button type="button" className="btn btn-primary" onClick={startCreate}>
           <IconPlus size={17} aria-hidden />
-          เพิ่มเมนู
+          {isServiceTab ? "เพิ่มรายการนวดสปา" : "เพิ่มเมนู"}
         </button>
         ) : null}
       </div>
@@ -177,16 +183,30 @@ export function MenuAdmin({
         </div>
       ) : null}
 
+      {spaEnabled ? (
+        <SegmentTabs
+          label="ชนิดรายการ"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: "FOOD", label: "รายการอาหาร", Icon: IconMenu, count: items.filter((i) => i.itemType === "FOOD").length },
+            { key: "SERVICE", label: "รายการนวดสปา", Icon: IconTherapist, count: items.filter((i) => i.itemType === "SERVICE").length },
+          ]}
+        />
+      ) : null}
+
       <section className="card-ui">
         <div className="panel-head">
           <h2 className="t-h2">
-            ทั้งหมด <span className="num">{items.length}</span> รายการ
+            {spaEnabled ? (isServiceTab ? "รายการนวดสปา" : "รายการอาหาร") : "ทั้งหมด"} <span className="num">{shown.length}</span> รายการ
           </h2>
         </div>
 
-        {items.length === 0 ? (
+        {shown.length === 0 ? (
           <p className="t-body" style={{ padding: 24 }}>
-            ยังไม่มีเมนูในระบบ — เพิ่มเมนูก่อน ลูกค้าถึงจะสั่งอาหารผ่าน QR ได้
+            {isServiceTab
+              ? "ยังไม่มีรายการนวดสปา — กด “เพิ่มรายการนวดสปา” แล้วตั้งระยะเวลา (นาที) ของโปรแกรม"
+              : "ยังไม่มีเมนูในระบบ — เพิ่มเมนูก่อน ลูกค้าถึงจะสั่งอาหารผ่าน QR ได้"}
           </p>
         ) : (
           <div className="datatable-wrap">
@@ -201,7 +221,7 @@ export function MenuAdmin({
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {shown.map((item) => (
                   <tr key={item.id} style={{ borderTop: "1px solid var(--line)", opacity: item.isActive ? 1 : 0.6 }}>
                     <td style={{ padding: "12px 24px" }}>
                       <span style={{ fontWeight: 600 }}>{item.name}</span>

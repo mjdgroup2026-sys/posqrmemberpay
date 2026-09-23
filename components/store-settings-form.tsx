@@ -23,6 +23,8 @@ export type StoreSettingsValues = {
   kitchenAutoPrint: boolean
   /// ตัวเลือกร้านนวด (Phase 20)
   spaEnabled: boolean
+  /// พักระหว่างคิวนวด (นาที) — StoreSettings.bookingBufferMinutes
+  bookingBufferMinutes: number
   crmEnabled: boolean
   /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
   posDefaultMode: "TABLE" | "TAKEAWAY"
@@ -310,6 +312,32 @@ export function StoreSettingsForm({
                 </span>
               </span>
             </label>
+
+            {/* พักระหว่างคิว (2026-09-23) — เดิมตั้งไว้ 10 นาทีโดยไม่มีที่ให้เปลี่ยน เจ้าของร้านจองต่อคิวที่ 17:31 ไม่ได้แล้วงงว่าทำไม */}
+            {spaEnabled ? (
+              <div className="field" style={{ maxWidth: 320 }}>
+                <label className="t-small" htmlFor="bookingBufferMinutes">
+                  พักระหว่างคิวนวด (นาที)
+                </label>
+                <input
+                  id="bookingBufferMinutes"
+                  name="bookingBufferMinutes"
+                  type="number"
+                  min={0}
+                  max={120}
+                  step={1}
+                  className="input num"
+                  defaultValue={settings.bookingBufferMinutes}
+                />
+                {fieldErrors.bookingBufferMinutes ? (
+                  <span className="field-hint error">{fieldErrors.bookingBufferMinutes}</span>
+                ) : (
+                  <span className="field-hint">
+                    เวลาเว้นว่างก่อนเริ่มคิวถัดไปของพนักงาน/ห้องเดียวกัน เช่น 10 = คิวจบ 17:30 เริ่มคิวถัดไปได้ตั้งแต่ 17:40 · ใส่ 0 = ต่อคิวได้ทันที
+                  </span>
+                )}
+              </div>
+            ) : null}
 
             <label className="checkbox-row">
               <input type="checkbox" checked={crmEnabled} onChange={(e) => setCrmEnabled(e.target.checked)} />

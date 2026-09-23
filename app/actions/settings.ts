@@ -46,6 +46,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
     kitchenAlertSound: formData.get("kitchenAlertSound") === "on" || formData.get("kitchenAlertSound") === "true",
     kitchenAutoPrint: formData.get("kitchenAutoPrint") === "on" || formData.get("kitchenAutoPrint") === "true",
     spaEnabled: formData.get("spaEnabled") === "on" || formData.get("spaEnabled") === "true",
+    bookingBufferMinutes: formData.has("bookingBufferMinutes") ? formData.get("bookingBufferMinutes") : undefined,
     posDefaultMode: formData.get("posDefaultMode") ?? "TABLE",
     crmEnabled: formData.get("crmEnabled") === "on" || formData.get("crmEnabled") === "true",
   })
@@ -103,6 +104,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
           kitchenAlertSound: data.kitchenAlertSound,
           kitchenAutoPrint: data.kitchenAutoPrint,
           spaEnabled: data.spaEnabled,
+          ...(data.bookingBufferMinutes === undefined ? {} : { bookingBufferMinutes: data.bookingBufferMinutes }),
           posDefaultMode: data.posDefaultMode,
           crmEnabled: data.crmEnabled,
           updatedById: user.id,
@@ -118,6 +120,7 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
           kitchenAlertSound: data.kitchenAlertSound,
           kitchenAutoPrint: data.kitchenAutoPrint,
           spaEnabled: data.spaEnabled,
+          ...(data.bookingBufferMinutes === undefined ? {} : { bookingBufferMinutes: data.bookingBufferMinutes }),
           posDefaultMode: data.posDefaultMode,
           crmEnabled: data.crmEnabled,
           updatedById: user.id,

@@ -15,7 +15,8 @@ import {
   type ReceiptData,
 } from "@/lib/types"
 import { Receipt } from "@/components/receipt"
-import { IconCalendar, IconPlus, IconSearch, IconSpinner, IconTrash, IconTable, IconWallet } from "@/components/icons"
+import { IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTherapist, IconTrash, IconTable, IconWallet } from "@/components/icons"
+import { SegmentTabs } from "@/components/segment-tabs"
 import {
   Dialog,
   DialogContent,
@@ -57,6 +58,7 @@ export function MenuPos({
   defaultMode = "TABLE",
   dateLabel,
   therapists = [],
+  spaEnabled = false,
 }: {
   menu: { featured: MenuItemCard[]; all: MenuItemCard[] }
   tables: PosTableOption[]
@@ -70,6 +72,8 @@ export function MenuPos({
   dateLabel?: string
   /// พนักงานนวดที่เปิดใช้งาน (Phase 20) — โปรแกรมนวดต้องเลือกคนก่อนใส่ตะกร้า · ว่าง = ร้านไม่ได้เปิดตัวเลือกร้านนวด
   therapists?: TherapistOption[]
+  /// ร้านเปิดตัวเลือกร้านนวด — แยกแท็บ อาหาร / นวดสปา (2026-09-23) · ตะกร้าใช้ร่วมกัน บิลเดียวมีทั้งสองอย่างได้
+  spaEnabled?: boolean
 }) {
   const router = useRouter()
   const canSell = allowed.includes("ADD")
@@ -93,19 +97,26 @@ export function MenuPos({
 
   // ชิปกรองตามประเภทครัว (Phase 19) — "" = ทุกครัว · ช่วยพนักงานหาเมนูเร็วขึ้นบนจอเล็ก
   const [stationFilter, setStationFilter] = useState("")
+  const [kindTab, setKindTab] = useState<"FOOD" | "SERVICE">("FOOD")
+  const ofKind = (item: MenuItemCard) => !spaEnabled || item.itemType === kindTab
   const stationChips = useMemo(() => {
     const seen = new Map<string, string>()
-    for (const item of menu.all) if (item.stationId && item.stationName) seen.set(item.stationId, item.stationName)
+    for (const item of menu.all) {
+      if (spaEnabled && item.itemType !== kindTab) continue
+      if (item.stationId && item.stationName) seen.set(item.stationId, item.stationName)
+    }
     return [...seen.entries()].map(([id, name]) => ({ id, name }))
-  }, [menu.all])
+  }, [menu.all, spaEnabled, kindTab])
+  const featured = menu.featured.filter(ofKind)
 
   const visibleMenu = useMemo(() => {
     const keyword = search.trim().toLowerCase()
     return menu.all.filter((item) => {
+      if (spaEnabled && item.itemType !== kindTab) return false
       if (stationFilter && item.stationId !== stationFilter) return false
       return !keyword || item.name.toLowerCase().includes(keyword)
     })
-  }, [menu.all, search, stationFilter])
+  }, [menu.all, search, stationFilter, spaEnabled, kindTab])
 
   // โต๊ะที่ถูกรวมเข้าโต๊ะอื่นไม่ต้องโชว์ — ทุกอย่างวิ่งไปที่โต๊ะหลักอยู่แล้ว
   const selectableTables = useMemo(() => tables.filter((t) => t.mergedIntoCode === null), [tables])
@@ -280,8 +291,12 @@ export function MenuPos({
       <section className="card-ui card-pad">
         <div className="panel-head" style={{ flexWrap: "wrap", gap: 8 }}>
           <div>
-            <h1 className="t-h2">ขายอาหาร</h1>
-            <span className="t-caption">เลือกเมนูใส่ตะกร้า แล้วเลือกโต๊ะเพื่อส่งเข้าครัว</span>
+            <h1 className="t-h2">{spaEnabled ? "ขายอาหาร/ร้านสปา" : "ขายอาหาร"}</h1>
+            <span className="t-caption">
+              {spaEnabled
+                ? "เลือกเมนูหรือโปรแกรมนวดใส่ตะกร้า แล้วเลือกโต๊ะ/ห้อง — ตะกร้าเดียวใส่ได้ทั้งอาหารและนวด"
+                : "เลือกเมนูใส่ตะกร้า แล้วเลือกโต๊ะเพื่อส่งเข้าครัว"}
+            </span>
           </div>
           {dateLabel ? (
             <span className="chip chip-neutral" title="วันที่ขาย (เวลาไทย) — บิลที่ออกตอนนี้จะลงรอบวันนี้">
@@ -291,12 +306,29 @@ export function MenuPos({
           ) : null}
         </div>
 
+        {spaEnabled ? (
+          <div style={{ marginTop: 12 }}>
+            <SegmentTabs
+              label="ชนิดรายการ"
+              value={kindTab}
+              onChange={(key) => {
+                setKindTab(key)
+                setStationFilter("")
+              }}
+              tabs={[
+                { key: "FOOD", label: "อาหาร", Icon: IconMenu, count: menu.all.filter((i) => i.itemType === "FOOD").length },
+                { key: "SERVICE", label: "นวดสปา", Icon: IconTherapist, count: menu.all.filter((i) => i.itemType === "SERVICE").length },
+              ]}
+            />
+          </div>
+        ) : null}
+
         <div className="field" style={{ marginTop: 12 }}>
           <div className="row" style={{ gap: 8 }}>
             <IconSearch size={18} aria-hidden />
             <input
               className="input"
-              placeholder="ค้นหาเมนู…"
+              placeholder={spaEnabled && kindTab === "SERVICE" ? "ค้นหาโปรแกรมนวด…" : "ค้นหาเมนู…"}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -325,17 +357,17 @@ export function MenuPos({
           </div>
         ) : null}
 
-        {menu.featured.length > 0 && search.trim() === "" && stationFilter === "" ? (
+        {featured.length > 0 && search.trim() === "" && stationFilter === "" ? (
           <>
             <h2 className="t-h3" style={{ marginTop: 16 }}>
               เมนูแนะนำ
             </h2>
-            <MenuGrid items={menu.featured} onPick={pickItem} disabled={!canSell} />
+            <MenuGrid items={featured} onPick={pickItem} disabled={!canSell} />
           </>
         ) : null}
 
         <h2 className="t-h3" style={{ marginTop: 16 }}>
-          เมนูทั้งหมด
+          {spaEnabled && kindTab === "SERVICE" ? "โปรแกรมนวดทั้งหมด" : "เมนูทั้งหมด"}
         </h2>
         {visibleMenu.length === 0 ? (
           <p className="t-body" style={{ marginTop: 8 }}>

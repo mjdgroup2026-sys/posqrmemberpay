@@ -45,6 +45,8 @@ type NavItem = {
   ownerOnly?: true
   /// เมนูของร้านนวด (Phase 20) — โผล่เมื่อร้านเปิด StoreSettings.spaEnabled (ยังต้องมีสิทธิ์ VIEW ของ resource ด้วย)
   spaOnly?: true
+  /// ชื่อเมนูเมื่อร้านเปิดตัวเลือกร้านนวด (2026-09-23 เจ้าของสั่ง) — หน้าเดียวกันดูแลทั้งอาหารและสปา
+  spaLabel?: string
 }
 
 const GROUPS: { title?: string; items: NavItem[] }[] = [
@@ -59,11 +61,11 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
   {
     title: "MJD Mobile Order",
     items: [
-      { href: "/mobile-order/pos", label: "ขายอาหาร", Icon: IconPos, resource: "MO_POS" },
-      { href: "/mobile-order/tables", label: "ผังโต๊ะ", Icon: IconTable, resource: "MO_TABLES" },
+      { href: "/mobile-order/pos", label: "ขายอาหาร", spaLabel: "ขายอาหาร/ร้านสปา", Icon: IconPos, resource: "MO_POS" },
+      { href: "/mobile-order/tables", label: "ผังโต๊ะ", spaLabel: "ผังโต๊ะอาหาร/ห้องสปา", Icon: IconTable, resource: "MO_TABLES" },
       { href: "/mobile-order/notifications", label: "การแจ้งเตือน", Icon: IconBell, badge: "pending", resource: "MO_NOTIFICATIONS" },
       { href: "/mobile-order/kitchen", label: "หน้าจอครัว (KDS)", Icon: IconKitchen, resource: "MO_KITCHEN" },
-      { href: "/mobile-order/menu", label: "จัดการเมนูอาหาร", Icon: IconMenu, resource: "MO_MENU" },
+      { href: "/mobile-order/menu", label: "จัดการเมนูอาหาร", spaLabel: "จัดการเมนูอาหาร/ร้านสปา", Icon: IconMenu, resource: "MO_MENU" },
       { href: "/mobile-order/tables/manage", label: "จัดการโต๊ะ", Icon: IconTable, resource: "MO_SETUP" },
       { href: "/mobile-order/qr-codes", label: "จัดการ QR Code", Icon: IconQr, resource: "MO_SETUP" },
       { href: "/mobile-order/settings", label: "ตั้งค่าร้าน", Icon: IconStore, ownerOnly: true },
@@ -186,7 +188,8 @@ export function Sidebar({
               </span>
             ) : null}
 
-            {items.map(({ href, label, Icon, badge }) => {
+            {items.map(({ href, label: baseLabel, spaLabel, Icon, badge }) => {
+              const label = spaEnabled && spaLabel ? spaLabel : baseLabel
               const active = EXACT_MATCH.has(href) ? pathname === href : pathname.startsWith(href)
               const count = badgeCount({ href, label, Icon, badge })
               return (

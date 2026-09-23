@@ -1,9 +1,12 @@
 import { getStoreSettings, listKitchenStations, listMenuForManage } from "@/lib/queries"
+import { spaAwareMetadata } from "@/lib/spa-title"
 import { requirePageAccess } from "@/lib/permissions"
 import { MenuAdmin } from "@/components/menu-admin"
 import { StationManager } from "@/components/station-manager"
 
-export const metadata = { title: "จัดการเมนูอาหาร" }
+export function generateMetadata() {
+  return spaAwareMetadata("จัดการเมนูอาหาร", "จัดการเมนูอาหาร/ร้านสปา")
+}
 
 export default async function ManageMenuPage() {
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
