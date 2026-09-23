@@ -5,6 +5,7 @@ import { nextCookies } from "better-auth/next-js"
 import { prisma } from "@/lib/prisma"
 import { sendResetPasswordMail, sendVerificationMail } from "@/lib/mail"
 import { isSignupAllowed, readSignupPolicy } from "@/lib/signup-allowlist"
+import { resolveTrustedOrigins } from "@/lib/auth-origins"
 
 /// Better Auth ตั้ง callbackURL ปลายทางเป็น "/" มาให้ — เปลี่ยนเป็น /verify-email เพื่อให้ผู้ใช้
 /// เห็นผลลัพธ์การยืนยัน (สำเร็จ/ลิงก์หมดอายุ) แทนที่จะถูกโยนไปหน้าแรกแล้วเดาเอาเอง
@@ -19,6 +20,18 @@ function withVerifyCallback(rawUrl: string): string {
 }
 
 export const auth = betterAuth({
+  trustedOrigins: resolveTrustedOrigins(process.env),
+  advanced: {
+    ipAddress: {
+      // IP ของผู้ใช้สำหรับ rate limit (ล็อกอินได้ 3 ครั้ง/10 วิ ต่อ IP) — nginx ต่อท้าย X-Forwarded-For ด้วย
+      // $proxy_add_x_forwarded_for ถ้าเบราว์เซอร์/proxy ของเครือข่ายส่ง header นี้มาเอง ค่าจะมีหลายตัว
+      // ซึ่งค่าเริ่มต้นของ Better Auth อ่านไม่ออก → ทุกคนกลุ่มนี้ตกไป "ถังรวม" ถังเดียวทั้งระบบ
+      // (ทดสอบจริงบน production 2026-09-23: ส่ง XFF ปลอมสองค่าต่างกัน โดน 429 ร่วมกัน)
+      // · ตั้ง trustedProxies ให้ Better Auth ไล่จากขวาสุด = ค่าที่ nginx เติมจาก $remote_addr ซึ่งปลอมไม่ได้
+      //   (127.0.0.1 ไม่เคยเป็นผู้ใช้จริง จึงมีไว้แค่เปิดโหมดไล่จากขวา)
+      trustedProxies: ["127.0.0.1/32", "::1/128"],
+    },
+  },
   database: prismaAdapter(prisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,

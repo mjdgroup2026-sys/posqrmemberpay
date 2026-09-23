@@ -44,6 +44,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 | `PAYMENT_CONFIG_KEY` | (Phase 15c) กุญแจ AES-256-GCM เข้ารหัส credential SCB ที่ร้านกรอกเอง — 32 ไบต์ base64url · ไม่ตั้ง = ร้านผูก SCB เองไม่ได้ (fail closed) แต่ร้าน `default` ยังใช้ `SCB_*` env เป็น fallback · **เปลี่ยนกุญแจ = credential ทุกร้านถอดไม่ออก** ห้าม rotate โดยไม่มีแผน |
 | `PLATFORM_PROMPTPAY_ID` | พร้อมเพย์ของ "แพลตฟอร์ม" ที่ร้านโอนค่าใช้งานเข้า (Phase 14b) — **คนละเรื่องกับเลขพร้อมเพย์รับเงินลูกค้าของร้าน ซึ่งตั้งแต่ Phase 15a อยู่ในฐานข้อมูล (`StorePaymentConfig`) ไม่ใช่ env** (env `PROMPTPAY_ID` เดิมถอดออกแล้ว) · เว้นว่าง = หน้า `/billing` ไม่มี QR ให้สแกน |
 | `CRON_SECRET` | secret ใน path `GET /api/cron/plan-expiry/<secret>` ที่ `ops/plan-expiry-cron.sh` ยิงวันละครั้ง (09:10) ส่งอีเมลเตือน 7/3/1 วัน · ≥ 16 ตัว · เว้นว่าง = 401 (แบนเนอร์ในแอปยังขึ้น) |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | origin เพิ่มเติมที่ยอมให้ล็อกอิน/ออกจากระบบ (คั่น comma · `lib/auth-origins.ts`) — production ไม่ตั้ง = เฉพาะ `BETTER_AUTH_URL` (ค่าที่ควรเป็น) · dev ยอม `localhost`/`127.0.0.1` พอร์ตเดียวกันให้เอง · IP ในวง LAN ต้องใส่เอง |
 | `SIGNUP_OPEN` | `true` = ใครก็สมัครได้ (Phase 14a) · ไม่ตั้ง = allowlist `SIGNUP_ALLOWED_*` เดิม / ปิดสมัคร (fail closed) — **production ต้องตั้งเป็น `true` ตอน deploy 14a** · 🔥 **env ใหม่ทุกตัวต้องประกาศใน `environment:` ของ `docker-compose.prod.yml` ด้วย** ตั้งใน `.env` บน VPS อย่างเดียวไม่ถึงคอนเทนเนอร์ (compose ไม่ใช้ `env_file`) |
 
 - **ห้ามพิมพ์ลิงก์ยืนยัน/รีเซ็ตรหัสผ่านลง log บน production** — ลิงก์คือ credential ชั่วคราว
@@ -318,6 +319,13 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   และ `lib/booking.ts` (2 จุด — advisory lock กันจองซ้อน namespace 720_003 ต่อพนักงาน / 720_004 ต่อห้อง, Phase 20b
   · **ลำดับการจับต้องคงที่เสมอ**: พนักงานก่อน แล้วค่อยห้อง ไม่งั้น deadlock)
   · ทุกจุดต้องมี `WHERE "storeId" = ${storeId}` (Phase 13)
+- 🔥 **`DropdownMenuLabel` (base-ui `Menu.GroupLabel`) ต้องอยู่ใน `DropdownMenuGroup` เสมอ** — วางลอย ๆ แล้วเปิดเมนู = throw
+  `MenuGroupContext is missing` **ทั้ง dev และ production** · เจอจริง 2026-09-23: เมนูผู้ใช้บน topbar เปิดไม่ได้ ผู้ใช้หาปุ่มออกจากระบบไม่เจอ
+  (เทส `__tests__/components/topbar-signout.test.tsx` ล็อกไว้) · และ **Better Auth client ไม่ throw เมื่อเซิร์ฟเวอร์ตอบ error** คืน `{ error }` —
+  ต้องเช็คเองทุกครั้ง แปลข้อความด้วย `authErrorMessage()` ใน `lib/auth-errors.ts` (ห้ามเดาจาก status: 403 ไม่ได้แปลว่ายังไม่ยืนยันอีเมลเสมอ)
+- 🔥 **rate limit ล็อกอินของ Better Auth (3 ครั้ง/10 วิ ต่อ IP) อ่าน IP จาก `X-Forwarded-For`** — nginx ใช้ `$proxy_add_x_forwarded_for`
+  ถ้าผู้ใช้/proxy ส่ง header มาเองค่าจะมีหลายตัว ค่าเริ่มต้นอ่านไม่ออกแล้วโยนทุกคนลง "ถังรวม" ถังเดียวทั้งระบบ (ทดสอบจริงบน production)
+  → `lib/auth.ts` ตั้ง `advanced.ipAddress.trustedProxies` ให้ไล่จากขวาสุด (ค่าที่ nginx เติม ปลอมไม่ได้) ห้ามถอด
 - **Client Component ที่ใช้ `useSearchParams()` ต้องมี `<Suspense>` ครอบ** ถ้าหน้านั้นถูก prerender แบบ static
   (หน้า auth ทั้งหมดเข้าข่าย) ไม่งั้น `pnpm build` จะพัง
 - **Next.js 16** `params`/`searchParams`/`cookies()`/`headers()` เป็น Promise ต้อง `await` ทุกครั้ง
