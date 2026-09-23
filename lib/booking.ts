@@ -153,9 +153,7 @@ export async function assertSlotFree(tx: StoreTx, storeId: string, input: SlotIn
     select: { startAt: true, endAt: true },
   })
   if (clashTherapist) {
-    throw new BookingError(
-      `พนักงาน ${input.therapistLabel} มีคิวอยู่แล้วช่วง ${formatHhMm(minuteOfBusinessDay(clashTherapist.startAt))}–${formatHhMm(minuteOfBusinessDay(clashTherapist.endAt))} น.`,
-    )
+    throw new BookingError(clashMessage(`พนักงาน ${input.therapistLabel} มีคิว`, clashTherapist, input))
   }
 
   if (!input.tableId) return
@@ -171,10 +169,29 @@ export async function assertSlotFree(tx: StoreTx, storeId: string, input: SlotIn
     select: { startAt: true, endAt: true },
   })
   if (clashRoom) {
-    throw new BookingError(
-      `ห้อง ${input.tableCode ?? ""} ไม่ว่างช่วง ${formatHhMm(minuteOfBusinessDay(clashRoom.startAt))}–${formatHhMm(minuteOfBusinessDay(clashRoom.endAt))} น.`,
-    )
+    throw new BookingError(clashMessage(`ห้อง ${input.tableCode ?? ""} ไม่ว่าง`, clashRoom, input))
   }
+}
+
+/// ข้อความตอนคิวชน — ต้องบอก "เวลาที่ใช้ได้จริง" รวมช่วงพักด้วย (2026-09-23)
+///
+/// เดิมบอกแค่ช่วงของคิวที่ชน (16:00–17:30) เจ้าของร้านเลยลอง 17:31 แล้วไม่ผ่านโดยไม่รู้ว่ามีพักระหว่างคิวอีก 10 นาที
+/// คิดว่าระบบรับเศษนาทีไม่ได้ · ตอนนี้บอกเวลาเริ่ม/จบที่ใช้ได้พร้อมจำนวนนาทีพัก
+export function clashMessage(
+  subject: string,
+  clash: { startAt: Date; endAt: Date },
+  input: { startAt: Date; bufferMinutes: number },
+): string {
+  const buffer = Math.max(0, input.bufferMinutes)
+  const range = `${formatHhMm(minuteOfBusinessDay(clash.startAt))}–${formatHhMm(minuteOfBusinessDay(clash.endAt))} น.`
+  const bufferNote = buffer > 0 ? ` (พักระหว่างคิว ${buffer} นาที)` : ""
+  // คิวใหม่เริ่มหลังคิวที่ชนเริ่ม = ต่อท้าย → บอกเวลาเริ่มเร็วสุด · ไม่งั้นคือแทรกข้างหน้า → บอกเวลาที่ต้องจบก่อน
+  if (input.startAt.getTime() >= clash.startAt.getTime()) {
+    const earliest = new Date(clash.endAt.getTime() + buffer * 60_000)
+    return `${subject}ช่วง ${range} — เริ่มคิวใหม่ได้ตั้งแต่ ${formatHhMm(minuteOfBusinessDay(earliest))} น.${bufferNote}`
+  }
+  const latestEnd = new Date(clash.startAt.getTime() - buffer * 60_000)
+  return `${subject}ช่วง ${range} — คิวนี้ต้องจบไม่เกิน ${formatHhMm(minuteOfBusinessDay(latestEnd))} น.${bufferNote}`
 }
 
 /// กะของพนักงานวันนั้นครอบช่วงเวลาที่จองไหม

@@ -1104,6 +1104,7 @@ export async function getStoreSettings(storeId: string) {
     kitchenAlertSound: settings.kitchenAlertSound,
     kitchenAutoPrint: settings.kitchenAutoPrint,
     spaEnabled: settings.spaEnabled,
+    bookingBufferMinutes: settings.bookingBufferMinutes,
   }
 }
 

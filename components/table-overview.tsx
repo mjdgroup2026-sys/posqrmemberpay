@@ -17,6 +17,7 @@ import type { CustomerPaidBill, PaymentAwaitingCallback, TableCard } from "@/lib
 import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { IconBell, IconMerge, IconReceipt, IconRoom, IconSpinner, IconTable } from "@/components/icons"
+import { SegmentTabs } from "@/components/segment-tabs"
 import { AwaitingCallbackBadge, CustomerPaidBadge } from "@/components/payment-alerts"
 import {
   Dialog,
@@ -74,6 +75,7 @@ export function TableOverview({
   awaitingCallback = [],
   allowed = FULL_ACCESS,
   canAcknowledge = true,
+  spaEnabled = false,
 }: {
   tables: TableCard[]
   paidBills?: CustomerPaidBill[]
@@ -82,6 +84,8 @@ export function TableOverview({
   allowed?: AllowedActions
   /// MO_NOTIFICATIONS:EDIT — กดรับทราบได้
   canAcknowledge?: boolean
+  /// ร้านเปิดตัวเลือกร้านนวด — แยกแท็บ โต๊ะอาหาร / ห้องสปา (2026-09-23 เจ้าของสั่ง)
+  spaEnabled?: boolean
 }) {
   const router = useRouter()
   const [filter, setFilter] = useState<Filter>("all")
@@ -91,21 +95,22 @@ export function TableOverview({
   const [cancelling, setCancelling] = useState<TableCard | null>(null)
   const [cancelReason, setCancelReason] = useState("")
 
-  const counts = useMemo(
-    () => ({
-      all: tables.length,
-      empty: tables.filter((t) => matchesFilter(t, "empty")).length,
-      active: tables.filter((t) => matchesFilter(t, "active")).length,
-      awaiting: tables.filter((t) => matchesFilter(t, "awaiting")).length,
-      help: tables.filter((t) => matchesFilter(t, "help")).length,
-    }),
-    [tables],
-  )
+  // ร้านสปา: แท็บ โต๊ะอาหาร / ห้องสปา — ชิปกรองสถานะและตัวเลขนับเฉพาะของแท็บที่เลือก
+  const [kindTab, setKindTab] = useState<"TABLE" | "ROOM">("TABLE")
+  const inTab = spaEnabled ? tables.filter((t) => (kindTab === "ROOM" ? t.kind === "ROOM" : t.kind !== "ROOM")) : tables
 
-  const visible = tables.filter((t) => matchesFilter(t, filter))
-  // ร้านนวด (Phase 20): ห้องนวดขึ้นเป็นกลุ่มแรก โต๊ะอาหารกลุ่มถัดไป · ไม่มีห้องเลย = ผังเดิมไม่มีหัวกลุ่ม
+  const counts = {
+      all: inTab.length,
+      empty: inTab.filter((t) => matchesFilter(t, "empty")).length,
+      active: inTab.filter((t) => matchesFilter(t, "active")).length,
+      awaiting: inTab.filter((t) => matchesFilter(t, "awaiting")).length,
+      help: inTab.filter((t) => matchesFilter(t, "help")).length,
+  }
+
+  const visible = inTab.filter((t) => matchesFilter(t, filter))
+  // ร้านที่ปิดตัวเลือกสปาแต่ยังมีห้องค้างอยู่ (Phase 20): ห้องนวดขึ้นเป็นกลุ่มแรก โต๊ะกลุ่มถัดไป · ร้านสปาใช้แท็บแทนหัวกลุ่ม
   const rooms = visible.filter((t) => t.kind === "ROOM")
-  const showGroupTitles = tables.some((t) => t.kind === "ROOM")
+  const showGroupTitles = !spaEnabled && tables.some((t) => t.kind === "ROOM")
   const groups = showGroupTitles
     ? [
         { key: "ROOM", title: "ห้องนวด", items: rooms },
@@ -202,7 +207,7 @@ export function TableOverview({
       <div className="page-head">
         <div>
           <p className="t-eyebrow">MJD Mobile Order</p>
-          <h1 className="t-h1">ผังโต๊ะ</h1>
+          <h1 className="t-h1">{spaEnabled ? "ผังโต๊ะอาหาร/ห้องสปา" : "ผังโต๊ะ"}</h1>
           <p className="t-body" style={{ marginTop: 4 }}>
             เวลาเปิดโต๊ะและระยะเวลาที่เปิดคำนวณสดทุกนาทีจากเวลาที่ลูกค้าเริ่มใช้โต๊ะ
           </p>
@@ -220,6 +225,18 @@ export function TableOverview({
         </div>
       ) : null}
 
+      {spaEnabled ? (
+        <SegmentTabs
+          label="โต๊ะหรือห้อง"
+          value={kindTab}
+          onChange={setKindTab}
+          tabs={[
+            { key: "TABLE", label: "โต๊ะอาหาร", Icon: IconTable, count: tables.filter((t) => t.kind !== "ROOM").length },
+            { key: "ROOM", label: "ห้องสปา", Icon: IconRoom, count: tables.filter((t) => t.kind === "ROOM").length },
+          ]}
+        />
+      ) : null}
+
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         {FILTERS.map((f) => (
           <button
@@ -235,7 +252,13 @@ export function TableOverview({
 
       {visible.length === 0 ? (
         <section className="card-ui card-pad">
-          <p className="t-body">ไม่มีโต๊ะตามเงื่อนไขที่เลือก</p>
+          <p className="t-body">
+            {spaEnabled && kindTab === "ROOM"
+              ? inTab.length === 0
+                ? "ยังไม่มีห้องสปา — เพิ่มที่ “จัดการโต๊ะ” แล้วเลือกชนิดเป็นห้องนวด"
+                : "ไม่มีห้องตามเงื่อนไขที่เลือก"
+              : "ไม่มีโต๊ะตามเงื่อนไขที่เลือก"}
+          </p>
         </section>
       ) : (
         <>

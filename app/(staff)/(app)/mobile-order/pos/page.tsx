@@ -1,9 +1,12 @@
 import { formatBusinessDate } from "@/lib/format"
+import { spaAwareMetadata } from "@/lib/spa-title"
 import { getStoreSettings, listMenu, listTablesForPos, listTherapistOptions } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { MenuPos } from "@/components/menu-pos"
 
-export const metadata = { title: "ขายอาหาร (หน้าร้าน)" }
+export function generateMetadata() {
+  return spaAwareMetadata("ขายอาหาร (หน้าร้าน)", "ขายอาหาร/ร้านสปา")
+}
 
 export default async function MobileOrderPosPage({ searchParams }: PageProps<"/mobile-order/pos">) {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้ (Phase 17b)
@@ -25,6 +28,7 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
       defaultMode={settings?.posDefaultMode ?? "TABLE"}
       dateLabel={formatBusinessDate(new Date())}
       therapists={therapists}
+      spaEnabled={settings?.spaEnabled ?? false}
     />
   )
 }

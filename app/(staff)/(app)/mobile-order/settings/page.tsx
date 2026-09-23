@@ -44,6 +44,7 @@ export default async function StoreSettingsPage() {
           kitchenAlertSound: settings?.kitchenAlertSound ?? true,
           kitchenAutoPrint: settings?.kitchenAutoPrint ?? false,
           spaEnabled: settings?.spaEnabled ?? false,
+          bookingBufferMinutes: settings?.bookingBufferMinutes ?? 10,
           crmEnabled: settings?.crmEnabled ?? false,
           posDefaultMode: settings?.posDefaultMode ?? "TABLE",
         }}

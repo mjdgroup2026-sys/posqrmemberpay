@@ -514,7 +514,14 @@ export function BookingSchedule({
                   onChange={(e) => setDraft((d) => ({ ...d, startTime: e.target.value }))}
                   required
                 />
-                {fieldErrors.startTime ? <span className="field-hint error">{fieldErrors.startTime}</span> : null}
+                {fieldErrors.startTime ? (
+                  <span className="field-hint error">{fieldErrors.startTime}</span>
+                ) : bufferMinutes > 0 ? (
+                  // บอกตรงที่กรอกเวลาเลย — เจ้าของร้านเคยลองต่อคิวที่ 17:31 แล้วไม่ผ่านโดยไม่รู้ว่ามีพัก (2026-09-23)
+                  <span className="field-hint">
+                    กรอกได้ทุกนาที · ต้องเว้นพักระหว่างคิว {bufferMinutes} นาที (ตั้งค่าได้ที่ตั้งค่าร้าน)
+                  </span>
+                ) : null}
               </label>
 
               <label className="field">

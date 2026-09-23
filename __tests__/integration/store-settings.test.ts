@@ -88,6 +88,25 @@ describe.skipIf(!dbReady)("ตั้งค่าร้านและสมา�
       expect((await db.storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } }))?.posDefaultMode).toBe("TAKEAWAY")
     })
 
+    it("พักระหว่างคิวนวด: ตั้ง 0–120 ได้ · ไม่ส่งช่องมา = ค่าเดิมไม่ถูกแตะ · นอกช่วง/ทศนิยมถูกปฏิเสธ", async () => {
+      const db = testPrisma()
+      const buffer = async () => (await db.storeSettings.findUnique({ where: { storeId: TEST_STORE_ID } }))?.bookingBufferMinutes
+      expect(await buffer()).toBe(10)
+
+      expect((await updateStoreSettings(settingsForm({ bookingBufferMinutes: "0" }))).ok).toBe(true)
+      expect(await buffer()).toBe(0)
+
+      // ร้านที่ปิดตัวเลือกร้านนวดไม่มีช่องนี้ในฟอร์ม — บันทึกอย่างอื่นต้องไม่รีเซ็ตค่าที่ตั้งไว้
+      expect((await updateStoreSettings(settingsForm({ storeName: "ร้านใหม่" }))).ok).toBe(true)
+      expect(await buffer()).toBe(0)
+
+      for (const bad of ["-5", "121", "7.5", "abc"]) {
+        const result = await updateStoreSettings(settingsForm({ bookingBufferMinutes: bad }))
+        expect(result.ok).toBe(false)
+      }
+      expect(await buffer()).toBe(0)
+    })
+
     it("สีธีมที่ไม่ใช่ hex 6 หลักต้องถูกปฏิเสธ — ค่านี้ถูกยัดลง inline style ของหน้าลูกค้า", async () => {
       for (const bad of ["red", "#FFF", "#12345G", "javascript:alert(1)"]) {
         const result = await updateStoreSettings(settingsForm({ themeColor: bad }))

@@ -345,6 +345,13 @@ export const storeSettingsSchema = z.object({
   kitchenAutoPrint: z.coerce.boolean(),
   /// ตัวเลือกร้านนวด (Phase 20)
   spaEnabled: z.coerce.boolean(),
+  /// พักระหว่างคิวนวด (นาที · 2026-09-23) — ไม่ส่งมา = ไม่แตะค่าเดิม (ช่องนี้โผล่เฉพาะร้านที่เปิดตัวเลือกร้านนวด)
+  bookingBufferMinutes: z.coerce
+    .number({ error: "เวลาพักระหว่างคิวต้องเป็นตัวเลข" })
+    .int("เวลาพักระหว่างคิวต้องเป็นจำนวนเต็ม (นาที)")
+    .min(0, "เวลาพักระหว่างคิวต้องไม่ติดลบ")
+    .max(120, "เวลาพักระหว่างคิวต้องไม่เกิน 120 นาที")
+    .optional(),
   /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
   posDefaultMode: z.enum(["TABLE", "TAKEAWAY"], { error: "โหมดเริ่มต้นของจอขายไม่ถูกต้อง" }).default("TABLE"),
   crmEnabled: z.coerce.boolean(),
