@@ -477,6 +477,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getSpaBoard", (q, a) => q.getSpaBoard(a.storeId)],
     ["listUpcomingBookings", (q, a) => q.listUpcomingBookings(a.storeId)],
     ["countUpcomingBookings", (q, a) => q.countUpcomingBookings(a.storeId)],
+    ["listServicesAwaitingStart", (q, a) => q.listServicesAwaitingStart(a.storeId)],
+    ["countServicesAwaitingStart", (q, a) => q.countServicesAwaitingStart(a.storeId)],
     ["getTherapistSalesReport", (q, a) => q.getTherapistSalesReport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getTherapistHistory", (q, a, b) => q.getTherapistHistory(a.storeId, b.therapistId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getTherapistById", (q, a, b) => q.getTherapistById(a.storeId, b.therapistId)],

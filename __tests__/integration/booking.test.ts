@@ -5,6 +5,7 @@ import { businessDayKey, businessDayTime } from "@/lib/day"
 import {
   disconnectTestDb,
   ensureTestUser,
+  createFullDayShifts,
   isTestDbReachable,
   resetDb,
   setStoreSettings,
@@ -77,6 +78,8 @@ describe.skipIf(!dbReady)("ร้านนวด — จองล่วงหน
     const roomThai = await db.table.create({ data: { storeId: TEST_STORE_ID, code: "3/1", kind: "ROOM", stationId: thai.id } })
     const roomAny = await db.table.create({ data: { storeId: TEST_STORE_ID, code: "3/2", kind: "ROOM" } })
     const diningTable = await db.table.create({ data: { storeId: TEST_STORE_ID, code: "A1" } })
+    // ไม่มีกะ = จองไม่ได้ (2026-09-24) — ปูกะเต็มวันไว้ เทสเรื่องกะลบทิ้งเองก่อน
+    await createFullDayShifts([t1.id, t2.id], [today])
     return { thai, foot, program, food, t1, t2, roomThai, roomAny, diningTable }
   }
 
@@ -239,13 +242,15 @@ describe.skipIf(!dbReady)("ร้านนวด — จองล่วงหน
   })
 
   describe("กะทำงาน", () => {
-    it("ไม่มีแถวกะ = จองได้ · วันหยุด = จองไม่ได้ · นอกเวลากะ = จองไม่ได้", async () => {
+    it("ไม่มีแถวกะ = จองไม่ได้ · วันหยุด = จองไม่ได้ · นอกเวลากะ = จองไม่ได้", async () => {
       const { program, t1 } = await seedSpa()
+      await testPrisma().therapistShift.deleteMany({ where: { storeId: TEST_STORE_ID } })
 
-      // ยังไม่ตั้งกะ — จองได้ตามปกติ
+      // ยังไม่ตั้งกะ — จองไม่ได้ (เจ้าของสั่ง 2026-09-24 · เดิม 20b ปล่อยให้จองได้)
       const noShift = await saveBooking(bookingForm({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" }))
-      expect(noShift.ok).toBe(true)
-      await cancelBooking(makeFormData({ id: noShift.ok ? noShift.data?.id ?? "" : "" }))
+      expect(noShift.ok).toBe(false)
+      expect(noShift.ok === false && noShift.error).toContain("ยังไม่ได้ลงกะ")
+      expect(await testPrisma().booking.count({ where: { storeId: TEST_STORE_ID } })).toBe(0)
 
       // ตั้งกะ 09:00–14:00 → 13:30 ล้นออกนอกกะ
       expect(
@@ -265,6 +270,22 @@ describe.skipIf(!dbReady)("ร้านนวด — จองล่วงหน
       const offDay = await saveBooking(bookingForm({ menuItemId: program.id, therapistId: t1.id, startTime: "11:00", customerName: "คุณบี" }))
       expect(offDay.ok).toBe(false)
       expect(offDay.ok === false && offDay.error).toContain("หยุด")
+    })
+
+    it("กะถูกลบหลังจองไปแล้ว → เช็กอินไม่ได้ และไม่มีออร์เดอร์/บิลเกิดขึ้น", async () => {
+      const db = testPrisma()
+      const { program, t1, roomThai } = await seedSpa()
+      const created = await saveBooking(bookingForm({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" }))
+      const bookingId = created.ok ? created.data?.id ?? "" : ""
+      await db.therapistShift.deleteMany({ where: { therapistId: t1.id } })
+
+      const result = await checkInBooking(makeFormData({ id: bookingId, tableId: roomThai.id }))
+      expect(result.ok).toBe(false)
+      expect(result.ok === false && result.error).toContain("ยังไม่ได้ลงกะ")
+      // ทรานแซคชันถอยทั้งก้อน — การจองยังเป็น BOOKED ห้องยังว่าง
+      expect((await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe("BOOKED")
+      expect(await db.mobileOrder.count({ where: { storeId: TEST_STORE_ID } })).toBe(0)
+      expect((await db.table.findUniqueOrThrow({ where: { id: roomThai.id } })).status).toBe("EMPTY")
     })
   })
 
@@ -317,8 +338,17 @@ describe.skipIf(!dbReady)("ร้านนวด — จองล่วงหน
       const sessionId = checkedIn.ok ? checkedIn.data?.sessionId ?? "" : ""
       const item = await db.mobileOrderItem.findFirstOrThrow({ where: { order: { tableSessionId: sessionId } } })
 
+      // 20e: เช็กอินแล้ว → ห้องขึ้นเป็น "รอเริ่มนวด" บนผังโต๊ะ + นับเข้า badge
+      const waiting = await queries.listServicesAwaitingStart(TEST_STORE_ID)
+      expect(waiting).toHaveLength(1)
+      expect(waiting[0]).toMatchObject({ itemId: item.id, tableCode: "3/1", therapistId: t1.id, customerLabel: "คุณเอ" })
+      const badgeBefore = await queries.getPendingNotificationCount(TEST_STORE_ID)
+
       expect((await startServiceItem(makeFormData({ id: item.id }))).ok).toBe(true)
       expect((await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe("IN_SERVICE")
+      // กดเริ่มนวดแล้วหายเอง ไม่ต้องรับทราบ
+      expect(await queries.listServicesAwaitingStart(TEST_STORE_ID)).toHaveLength(0)
+      expect(await queries.getPendingNotificationCount(TEST_STORE_ID)).toBe(badgeBefore - 1)
 
       expect((await markItemServed(makeFormData({ id: item.id }))).ok).toBe(true)
       expect((await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe("DONE")
@@ -345,7 +375,8 @@ describe.skipIf(!dbReady)("ร้านนวด — จองล่วงหน
 
   describe("ชั้นอ่าน", () => {
     it("ตารางวัน · กระดาน · เตือนคิวใกล้ถึงเวลา อ่านค่าตรงกับของจริง", async () => {
-      const { program, t1, roomThai } = await seedSpa()
+      const { program, t1, t2, roomThai } = await seedSpa()
+      await testPrisma().therapistShift.deleteMany({ where: { therapistId: t2.id } })
       await saveShift(makeFormData({ therapistId: t1.id, workDate: today, startTime: "09:00", endTime: "20:00", isOff: "false" }))
       const created = await saveBooking(bookingForm({ menuItemId: program.id, therapistId: t1.id, tableId: roomThai.id, startTime: "13:00" }))
       expect(created.ok).toBe(true)

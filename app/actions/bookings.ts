@@ -250,6 +250,13 @@ export async function checkInBooking(formData: FormData): Promise<ActionResult<C
         therapistLabel: target.therapistLabel,
         tableCode: target.tableCode,
       })
+      // ตรวจกะซ้ำตอนเช็กอิน (2026-09-24) — คิวที่จองไว้ก่อนบังคับกะ หรือกะถูกลบ/ตั้งหยุดหลังจอง ต้องไม่เข้าห้องได้เงียบ ๆ
+      await assertWithinShift(tx, {
+        therapistId: target.therapistId,
+        therapistLabel: target.therapistLabel,
+        startAt: booking.startAt,
+        endAt: booking.endAt,
+      })
 
       // 1 ลูกค้า = 1 บิล (2026-09-23): ห้องมีบิลของลูกค้าคนเดิมเปิดอยู่ → เข้าบิลนั้น · คนอื่น/ห้องว่าง → เปิดบิลใหม่ของลูกค้าคนนี้
       // เดิม reuse session ของห้องเสมอ ลูกค้าคนถัดไปในห้องเดียวกันจึงถูกรวมบิลกับคนก่อนที่ยังไม่จ่าย

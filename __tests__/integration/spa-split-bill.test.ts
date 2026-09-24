@@ -6,6 +6,7 @@ import { businessDayKey } from "@/lib/day"
 import {
   disconnectTestDb,
   ensureTestUser,
+  createFullDayShifts,
   isTestDbReachable,
   resetDb,
   setStoreSettings,
@@ -74,6 +75,7 @@ describe.skipIf(!dbReady)("ร้านสปา — แยกบิลต่อ
     const room = await db.table.create({ data: { storeId: TEST_STORE_ID, code: "3/1", kind: "ROOM" } })
     const room2 = await db.table.create({ data: { storeId: TEST_STORE_ID, code: "3/2", kind: "ROOM" } })
     const diningTable = await db.table.create({ data: { storeId: TEST_STORE_ID, code: "A1" } })
+    await createFullDayShifts([t1.id, t2.id], [today])
     return { program, drink, t1, t2, room, room2, diningTable }
   }
 

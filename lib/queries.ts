@@ -763,14 +763,16 @@ export async function listNotifications(storeId: string, limit = 60): Promise<No
 
 export async function getPendingNotificationCount(storeId: string) {
   const db = forStore(storeId)
-  const [notifications, awaitingCallback, upcomingBookings] = await Promise.all([
+  const [notifications, awaitingCallback, upcomingBookings, servicesAwaitingStart] = await Promise.all([
     db.notification.count({ where: { status: "PENDING" } }),
     countPaymentsAwaitingCallback(storeId),
     // คิวนวดที่ใกล้ถึงเวลา (Phase 20b) — ร้านที่ไม่ได้เปิดตัวเลือกร้านนวดจะไม่มีแถว booking เลย ค่าจึงเป็น 0 เสมอ
     countUpcomingBookings(storeId),
+    // ห้องที่รอกดเริ่มนวด (20e) — ร้านอาหารล้วนไม่มีเมนู SERVICE ค่าจึงเป็น 0 เสมอ
+    countServicesAwaitingStart(storeId),
   ])
   // รวมเข้า badge เดียวกัน — ถ้าไม่รวม พนักงานจะไม่มีวันรู้ว่ามีเรื่องต้องดู จนกว่าจะบังเอิญเปิดหน้านี้
-  return notifications + awaitingCallback + upcomingBookings
+  return notifications + awaitingCallback + upcomingBookings + servicesAwaitingStart
 }
 
 /// เวลาที่ยอมให้ callback ของธนาคารมาช้าได้ ก่อนจะเตือนพนักงานให้ไปตรวจเอง
@@ -2683,6 +2685,75 @@ export async function listUpcomingBookings(storeId: string, now: Date = new Date
 
 export async function countUpcomingBookings(storeId: string, now: Date = new Date()): Promise<number> {
   return (await listUpcomingBookings(storeId, now)).length
+}
+
+export type ServiceAwaitingStart = {
+  itemId: string
+  tableId: string
+  tableCode: string
+  sessionId: string
+  /// ชื่อลูกค้าของบิลนั้น (ห้องสปาที่มีหลายบิล) — null = บิลเดียวของห้อง
+  customerLabel: string | null
+  menuItemName: string
+  therapistId: string | null
+  therapistLabel: string | null
+  /// เวลาที่รายการเข้าห้อง (เช็กอิน/สั่ง) — ใช้เรียงคิวใครรอนานสุดขึ้นก่อน
+  orderedAt: Date
+}
+
+/// รายการนวดที่ลูกค้าเข้าห้องแล้วแต่ยังไม่มีใครกด "เริ่มนวด" (20e — เจ้าของสั่ง 2026-09-24)
+///
+/// นับจากบรรทัด SERVICE ที่ยัง `AWAITING_KITCHEN` ในบิลที่เปิดอยู่ ไม่ใช่จากสถานะคิวจอง —
+/// ลูกค้า walk-in จากจอขายก็ต้องขึ้นด้วย · คำนวณสด ไม่ใช่แถวใน Notification จึงหายเองเมื่อกดเริ่มนวด/ยกเลิก
+/// ไม่ต้องมีปุ่มรับทราบ (หลักเดียวกับ listUpcomingBookings)
+export async function listServicesAwaitingStart(storeId: string): Promise<ServiceAwaitingStart[]> {
+  const rows = await forStore(storeId).mobileOrderItem.findMany({
+    where: {
+      status: "AWAITING_KITCHEN",
+      menuItem: { itemType: "SERVICE" },
+      order: { storeId, session: { status: { in: ["OPEN", "AWAITING_BILL"] } } },
+    },
+    orderBy: [{ createdAt: "asc" }],
+    select: {
+      id: true,
+      createdAt: true,
+      therapistId: true,
+      menuItem: { select: { name: true } },
+      therapist: { select: { code: true, name: true, nickname: true } },
+      order: {
+        select: {
+          session: { select: { id: true, customerLabel: true, table: { select: { id: true, code: true } } } },
+        },
+      },
+    },
+  })
+  return rows.flatMap((row) => {
+    const session = row.order.session
+    if (!session) return []
+    return [
+      {
+        itemId: row.id,
+        tableId: session.table.id,
+        tableCode: session.table.code,
+        sessionId: session.id,
+        customerLabel: session.customerLabel,
+        menuItemName: row.menuItem.name,
+        therapistId: row.therapistId,
+        therapistLabel: row.therapist ? `${row.therapist.code} ${row.therapist.nickname ?? row.therapist.name}` : null,
+        orderedAt: row.createdAt,
+      },
+    ]
+  })
+}
+
+export async function countServicesAwaitingStart(storeId: string): Promise<number> {
+  return forStore(storeId).mobileOrderItem.count({
+    where: {
+      status: "AWAITING_KITCHEN",
+      menuItem: { itemType: "SERVICE" },
+      order: { storeId, session: { status: { in: ["OPEN", "AWAITING_BILL"] } } },
+    },
+  })
 }
 
 // ───────────────────── ร้านนวด — รายงานต่อพนักงานนวด (Phase 20c) ─────────────────────

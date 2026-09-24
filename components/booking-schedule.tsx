@@ -47,6 +47,19 @@ const STATUS_CHIP: Record<BookingRow["status"], string> = {
 }
 
 const LIVE_STATUS: BookingRow["status"][] = ["BOOKED", "CHECKED_IN", "IN_SERVICE"]
+/// คิวที่วาดบนไทม์ไลน์ — คิวที่เสร็จแล้วยังโชว์แบบจาง ให้เห็นว่าวันนั้นใครทำไปแล้วบ้าง (20e) · ยกเลิก/ไม่มาไม่วาด
+const TIMELINE_STATUS: BookingRow["status"][] = [...LIVE_STATUS, "DONE"]
+
+/// สีแท่งคิวบนไทม์ไลน์ (20e) — คู่กับ STATUS_CHIP ด้านบน สีเดียวกันทั้งแท่งและ chip
+const STATUS_BAR: Partial<Record<BookingRow["status"], string>> = {
+  BOOKED: "is-booked",
+  CHECKED_IN: "is-checked-in",
+  IN_SERVICE: "is-in-service",
+  DONE: "is-done",
+}
+
+/// ความละเอียดของช่องจองบนไทม์ไลน์ — ครึ่งชั่วโมง ตรงกับขีดจางที่วาดไว้ (20e)
+const SLOT_MINUTES = 30
 
 function hhmm(minute: number): string {
   const safe = ((minute % 1440) + 1440) % 1440
@@ -72,6 +85,7 @@ export function BookingSchedule({
   shifts,
   bookings,
   bufferMinutes,
+  nowMinute = null,
   allowed = FULL_ACCESS,
 }: {
   dayKey: string
@@ -81,6 +95,8 @@ export function BookingSchedule({
   shifts: ShiftRow[]
   bookings: BookingRow[]
   bufferMinutes: number
+  /// นาทีปัจจุบันตามเวลาไทย เฉพาะเมื่อดูตารางของวันนี้ (null = วันอื่น ไม่วาดเส้น "ตอนนี้")
+  nowMinute?: number | null
   allowed?: AllowedActions
 }) {
   const router = useRouter()
@@ -93,21 +109,26 @@ export function BookingSchedule({
 
   const shiftByTherapist = useMemo(() => new Map(shifts.map((s) => [s.therapistId, s])), [shifts])
   const live = useMemo(() => bookings.filter((b) => LIVE_STATUS.includes(b.status)), [bookings])
+  const onTimeline = useMemo(() => bookings.filter((b) => TIMELINE_STATUS.includes(b.status)), [bookings])
 
   // ขอบเขตเวลาบนตาราง — ครอบทั้งกะและคิวที่มีจริง เผื่อคิวที่จองไว้นอกกะ (จากตอนที่ยังไม่ได้ตั้งกะ)
   const range = useMemo(() => {
-    const starts = [DEFAULT_START, ...shifts.filter((s) => !s.isOff).map((s) => s.startMinute), ...live.map((b) => b.startMinute)]
-    const ends = [DEFAULT_END, ...shifts.filter((s) => !s.isOff).map((s) => s.endMinute), ...live.map((b) => b.endMinute)]
+    const starts = [DEFAULT_START, ...shifts.filter((s) => !s.isOff).map((s) => s.startMinute), ...onTimeline.map((b) => b.startMinute)]
+    const ends = [DEFAULT_END, ...shifts.filter((s) => !s.isOff).map((s) => s.endMinute), ...onTimeline.map((b) => b.endMinute)]
     const start = Math.floor(Math.min(...starts) / 60) * 60
     const end = Math.ceil(Math.max(...ends) / 60) * 60
     return { start, end, width: ((end - start) / 60) * HOUR_WIDTH }
-  }, [shifts, live])
+  }, [shifts, onTimeline])
 
-  const hours = useMemo(() => {
+  /// ช่องจองทุกครึ่งชั่วโมง (ไม่รวมขอบขวาสุด) — ใช้ทั้งปุ่มจองและขีดแนวตั้ง
+  const slots = useMemo(() => {
     const list: number[] = []
-    for (let minute = range.start; minute <= range.end; minute += 60) list.push(minute)
+    for (let minute = range.start; minute < range.end; minute += SLOT_MINUTES) list.push(minute)
     return list
   }, [range])
+
+  const xOf = (minute: number) => ((minute - range.start) / 60) * HOUR_WIDTH
+  const nowX = nowMinute !== null && nowMinute >= range.start && nowMinute <= range.end ? xOf(nowMinute) : null
 
   const selectedProgram = programs.find((p) => p.id === draft.menuItemId) ?? null
 
@@ -129,12 +150,16 @@ export function BookingSchedule({
               b.startMinute < startMinute + duration + bufferMinutes &&
               b.endMinute + bufferMinutes > startMinute,
           )
+        // ไม่มีกะ / วันหยุด = จองไม่ได้แน่นอน (2026-09-24) — ปิดตัวเลือกไว้เลย ไม่ต้องรอ server ปฏิเสธ
+        const noShift = shift === undefined
+        const dayOff = shift?.isOff === true
         const offDuty =
           startMinute !== null &&
           duration > 0 &&
           shift !== undefined &&
-          (shift.isOff || startMinute < shift.startMinute || startMinute + duration > shift.endMinute)
-        return { ...t, clash, offDuty }
+          !shift.isOff &&
+          (startMinute < shift.startMinute || startMinute + duration > shift.endMinute)
+        return { ...t, clash, offDuty, noShift, dayOff }
       })
   }, [therapists, selectedProgram, draft.startTime, draft.id, live, shiftByTherapist, bufferMinutes])
 
@@ -162,6 +187,19 @@ export function BookingSchedule({
     } finally {
       setPending(false)
     }
+  }
+
+  /// กดช่องว่างบนไทม์ไลน์ — แถวที่ไม่มีกะ/หยุด บอกเหตุผลพร้อมทางไปตั้งกะ แทนการเปิดฟอร์มที่ยังไงก็บันทึกไม่ผ่าน
+  function startCreateAt(therapist: TherapistOption, startMinute: number) {
+    const shift = shiftByTherapist.get(therapist.id)
+    if (!shift || shift.isOff) {
+      toast.error(shift ? `${therapist.label} หยุดวันที่ ${dayKey}` : `${therapist.label} ยังไม่ได้ลงกะวันที่ ${dayKey}`, {
+        description: "ตั้งกะก่อนจึงจะจองคิวได้",
+        action: { label: "ไปตารางกะ", onClick: () => router.push("/spa/shifts") },
+      })
+      return
+    }
+    startCreate(therapist.id, startMinute)
   }
 
   function startCreate(therapistId?: string, startMinute?: number) {
@@ -279,6 +317,22 @@ export function BookingSchedule({
           <span className="t-caption">เลื่อนตารางไปทางขวาเพื่อดูเวลาถัดไป</span>
         </div>
 
+        {/* คำอธิบายสี — ดูสถานะคิวได้จากสีโดยไม่ต้องกดเข้าไป (20e) */}
+        <div className="row" style={{ gap: 16, flexWrap: "wrap", padding: "0 24px 12px" }}>
+          {(Object.keys(STATUS_BAR) as BookingRow["status"][]).map((status) => (
+            <span key={status} className="booking-legend t-caption">
+              <span className={`swatch booking-bar ${STATUS_BAR[status]}`} aria-hidden />
+              {STATUS_LABEL[status]}
+            </span>
+          ))}
+          {nowMinute !== null ? (
+            <span className="booking-legend t-caption">
+              <span className="swatch" style={{ borderLeftColor: "var(--danger)" }} aria-hidden />
+              เวลาปัจจุบัน
+            </span>
+          ) : null}
+        </div>
+
         <div style={{ overflowX: "auto" }}>
           <div style={{ minWidth: range.width + 160 }}>
             {/* แถบเวลา */}
@@ -286,33 +340,56 @@ export function BookingSchedule({
               <div style={{ width: 160, flex: "none", padding: "8px 12px" }} className="t-caption">
                 พนักงาน
               </div>
-              <div style={{ position: "relative", height: 32, width: range.width }}>
-                {hours.map((minute) => (
-                  <span
-                    key={minute}
-                    className="t-caption num"
-                    style={{ position: "absolute", left: ((minute - range.start) / 60) * HOUR_WIDTH, top: 8 }}
-                  >
-                    {hhmm(minute)}
-                  </span>
-                ))}
+              <div style={{ position: "relative", height: 36, width: range.width }}>
+                {/* ขีดเต็มชั่วโมง (ตัวเลขเข้ม) + ขีดครึ่งชั่วโมง (เส้นประ ":30" จาง) — 20e */}
+                {slots.map((minute) =>
+                  minute % 60 === 0 ? (
+                    <span key={minute}>
+                      <span className="timeline-tick" style={{ left: xOf(minute), top: 20 }} aria-hidden />
+                      <span
+                        className="t-caption num"
+                        style={{ position: "absolute", left: xOf(minute) + 4, top: 4, fontWeight: 600, color: "var(--ink-2)" }}
+                      >
+                        {hhmm(minute)}
+                      </span>
+                    </span>
+                  ) : (
+                    <span key={minute}>
+                      <span className="timeline-tick is-half" style={{ left: xOf(minute), top: 24 }} aria-hidden />
+                      <span className="t-caption num" style={{ position: "absolute", left: xOf(minute) + 3, top: 6, opacity: 0.6 }}>
+                        :30
+                      </span>
+                    </span>
+                  ),
+                )}
+                {nowX !== null ? <span className="timeline-now" style={{ left: nowX }} aria-hidden /> : null}
               </div>
             </div>
 
             {therapists.map((therapist) => {
               const shift = shiftByTherapist.get(therapist.id)
-              const rows = live.filter((b) => b.therapistId === therapist.id)
+              const rows = onTimeline.filter((b) => b.therapistId === therapist.id)
+              // ไม่มีกะ/หยุด = จองไม่ได้ (2026-09-24) — ทำแถวจางให้เห็นก่อนกด
+              const unavailable = !shift || shift.isOff
               return (
-                <div key={therapist.id} className="row" style={{ gap: 0, borderTop: "1px solid var(--line)", alignItems: "stretch" }}>
+                <div
+                  key={therapist.id}
+                  className="row"
+                  style={{ gap: 0, borderTop: "1px solid var(--line)", alignItems: "stretch", background: unavailable ? "var(--surface-2)" : undefined }}
+                >
                   <div style={{ width: 160, flex: "none", padding: "10px 12px" }}>
                     <span className="num" style={{ fontWeight: 700 }}>
                       {therapist.code}
                     </span>{" "}
                     {therapist.label.replace(`${therapist.code} `, "")}
                     <br />
-                    <span className="t-caption">
-                      {shift ? (shift.isOff ? "หยุด" : `${hhmm(shift.startMinute)}–${hhmm(shift.endMinute)}`) : "ยังไม่ตั้งกะ"}
-                    </span>
+                    {shift && !shift.isOff ? (
+                      <span className="t-caption num">{`${hhmm(shift.startMinute)}–${hhmm(shift.endMinute)}`}</span>
+                    ) : (
+                      <span className="t-caption" style={{ color: "var(--danger)", fontWeight: 600 }}>
+                        {shift ? "หยุด · จองไม่ได้" : "ยังไม่ลงกะ · จองไม่ได้"}
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ position: "relative", width: range.width, minHeight: 56 }}>
@@ -322,7 +399,7 @@ export function BookingSchedule({
                         aria-hidden
                         style={{
                           position: "absolute",
-                          left: ((shift.startMinute - range.start) / 60) * HOUR_WIDTH,
+                          left: xOf(shift.startMinute),
                           width: ((shift.endMinute - shift.startMinute) / 60) * HOUR_WIDTH,
                           top: 0,
                           bottom: 0,
@@ -331,19 +408,25 @@ export function BookingSchedule({
                       />
                     ) : null}
 
-                    {/* ปุ่มจองตามช่วงชั่วโมง — กดแล้วเปิดฟอร์มพร้อมเวลานั้น */}
+                    {/* ขีดชั่วโมง/ครึ่งชั่วโมงลากลงทุกแถว (20e) */}
+                    {slots.map((minute) => (
+                      <span key={minute} className={`timeline-tick${minute % 60 === 0 ? "" : " is-half"}`} style={{ left: xOf(minute) }} aria-hidden />
+                    ))}
+                    {nowX !== null ? <span className="timeline-now" style={{ left: nowX }} aria-hidden /> : null}
+
+                    {/* ปุ่มจองทุกครึ่งชั่วโมง — กดแล้วเปิดฟอร์มพร้อมเวลานั้น */}
                     {allowed.includes("ADD") && programs.length > 0
-                      ? hours.slice(0, -1).map((minute) => (
+                      ? slots.map((minute) => (
                           <button
                             key={minute}
                             type="button"
                             className="btn btn-ghost"
-                            title={`จองคิว ${hhmm(minute)} น.`}
-                            onClick={() => startCreate(therapist.id, minute)}
+                            title={unavailable ? "ยังไม่ลงกะ/หยุด — จองไม่ได้" : `จองคิว ${hhmm(minute)} น.`}
+                            onClick={() => startCreateAt(therapist, minute)}
                             style={{
                               position: "absolute",
-                              left: ((minute - range.start) / 60) * HOUR_WIDTH,
-                              width: HOUR_WIDTH,
+                              left: xOf(minute),
+                              width: (SLOT_MINUTES / 60) * HOUR_WIDTH,
                               top: 0,
                               bottom: 0,
                               borderRadius: 0,
@@ -361,25 +444,29 @@ export function BookingSchedule({
                       <button
                         key={booking.id}
                         type="button"
-                        className="btn btn-subtle"
+                        className={`booking-bar ${STATUS_BAR[booking.status] ?? ""}`}
+                        title={`${STATUS_LABEL[booking.status]} · ${booking.customerName} · ${booking.menuItemName}`}
                         onClick={() => {
                           setDetail(booking)
                           setCheckInRoom(booking.tableId ?? "")
                         }}
                         style={{
                           position: "absolute",
-                          left: ((booking.startMinute - range.start) / 60) * HOUR_WIDTH,
+                          left: xOf(booking.startMinute),
                           width: Math.max(((booking.endMinute - booking.startMinute) / 60) * HOUR_WIDTH, 52),
                           top: 6,
                           bottom: 6,
-                          justifyContent: "flex-start",
                           overflow: "hidden",
                           textAlign: "left",
-                          padding: "4px 8px",
+                          padding: "3px 8px",
+                          zIndex: 1,
                         }}
                       >
-                        <span style={{ display: "block", lineHeight: 1.25 }}>
-                          <span className="t-caption num">{hhmm(booking.startMinute)}</span>
+                        <span style={{ display: "block", lineHeight: 1.25, whiteSpace: "nowrap" }}>
+                          <span className="num" style={{ fontWeight: 600 }}>
+                            {hhmm(booking.startMinute)}
+                          </span>
+                          <span className="t-caption"> · {STATUS_LABEL[booking.status]}</span>
                           <br />
                           {booking.customerName}
                         </span>
@@ -534,13 +621,17 @@ export function BookingSchedule({
                 >
                   <option value="">— เลือกพนักงาน —</option>
                   {therapistChoices.map((t) => (
-                    <option key={t.id} value={t.id}>
+                    <option key={t.id} value={t.id} disabled={t.noShift || t.dayOff}>
                       {t.label}
-                      {t.clash ? " (คิวชน)" : t.offDuty ? " (นอกกะ)" : ""}
+                      {t.noShift ? " (ยังไม่ลงกะ)" : t.dayOff ? " (หยุด)" : t.clash ? " (คิวชน)" : t.offDuty ? " (นอกกะ)" : ""}
                     </option>
                   ))}
                 </select>
-                {fieldErrors.therapistId ? <span className="field-hint error">{fieldErrors.therapistId}</span> : null}
+                {fieldErrors.therapistId ? (
+                  <span className="field-hint error">{fieldErrors.therapistId}</span>
+                ) : therapistChoices.length > 0 && therapistChoices.every((t) => t.noShift || t.dayOff) ? (
+                  <span className="field-hint error">วันนี้ยังไม่มีพนักงานที่ลงกะ — ตั้งกะที่หน้า “ตารางกะ” ก่อน</span>
+                ) : null}
               </label>
 
               <label className="field">
