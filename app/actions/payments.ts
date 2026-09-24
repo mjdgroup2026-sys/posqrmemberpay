@@ -10,6 +10,7 @@ import { slipPaymentReference, verifySlipAndSettle } from "@/lib/slip-settle"
 import { parseSlipQr } from "@/lib/slip-qr"
 import { closeSessionWithPayment, computeBillTotals } from "@/lib/close-session"
 import { toNumber } from "@/lib/format"
+import { hasMultipleOpenBills, SHARED_ROOM_PAYMENT_MESSAGE } from "@/lib/table-session"
 import {
   confirmPaymentSchema,
   startPaymentSchema,
@@ -129,6 +130,8 @@ export async function startCustomerPayment(
       }
 
       const tableId = qr.table.primaryTableId ?? qr.tableId
+      // ห้องสปาที่มีหลายบิล — QR ของห้องไม่รู้ว่าเป็นลูกค้าคนไหน ห้ามออก QR จ่ายให้บิลที่เดาเอา (20e)
+      if (await hasMultipleOpenBills(tx, tableId)) throw new PaymentAbort(SHARED_ROOM_PAYMENT_MESSAGE)
       const session = await tx.tableSession.findFirst({
         where: { tableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
         orderBy: { openedAt: "desc" },
@@ -203,6 +206,8 @@ export async function submitPaymentSlip(formData: FormData): Promise<ActionResul
   })
   if (!qr) return { ok: false, error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" }
   const tableId = qr.table.primaryTableId ?? qr.tableId
+  // เหตุผลเดียวกับ startCustomerPayment — สลิปจากห้องที่มีหลายบิลไม่รู้ว่าจะปิดบิลของใคร (20e)
+  if (await hasMultipleOpenBills(forStore(store.storeId), tableId)) return { ok: false, error: SHARED_ROOM_PAYMENT_MESSAGE }
   const session = await forStore(store.storeId).tableSession.findFirst({
     where: { tableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
     orderBy: { openedAt: "desc" },

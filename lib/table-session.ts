@@ -200,3 +200,14 @@ export async function findCustomerSession(
   )
   return hit?.id ?? null
 }
+
+/// ข้อความเมื่อลูกค้าพยายามจ่ายเองผ่าน QR ของห้องที่มีหลายบิล (20e)
+export const SHARED_ROOM_PAYMENT_MESSAGE = "ห้องนี้มีลูกค้าหลายคน แต่ละคนชำระแยกบิล — กรุณาแจ้งพนักงานเพื่อชำระเงินของคุณ"
+
+/// ห้อง/โต๊ะนี้มีบิลเปิดมากกว่า 1 ใบไหม (ห้องสปาที่มีลูกค้าหลายคน · 20e)
+///
+/// QR ของห้องไม่รู้ว่าคนสแกนเป็นลูกค้าคนไหน — ถ้าปล่อยให้จ่ายเอง จะจ่ายเข้าบิลล่าสุดซึ่งอาจเป็นของคนอื่น
+/// ทางจ่ายเองของลูกค้า (ออก QR พร้อมเพย์/ส่งสลิป) จึงต้องถามตัวนี้ก่อน แล้วให้ไปจ่ายที่พนักงานแทน
+export async function hasMultipleOpenBills(tx: Pick<StoreTx, "tableSession">, tableId: string): Promise<boolean> {
+  return (await tx.tableSession.count({ where: { tableId, status: { in: LIVE_SESSION_STATUS } } })) > 1
+}

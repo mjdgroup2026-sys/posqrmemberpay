@@ -146,6 +146,28 @@ describe.skipIf(!dbReady)("ร้านสปา — แยกบิลต่อ
       expect(otherPerson).not.toBe(first)
     })
 
+    it("20e: ห้องหลายบิล — ลูกค้าจ่ายเองผ่าน QR ห้องไม่ได้ (ไม่เดาบิล) · เหลือบิลเดียวแล้วจ่ายเองได้ตามเดิม", async () => {
+      const db = testPrisma()
+      const { program, t1, t2, room } = await seed()
+      const qr = await db.qRCode.create({ data: { storeId: TEST_STORE_ID, tableId: room.id, token: "qr-shared-room", type: "STATIC" } })
+      const { startCustomerPayment } = await import("@/app/actions/payments")
+
+      const sessionA = await checkIn(await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00", name: "คุณเอ" }), room.id)
+      await checkIn(await book({ menuItemId: program.id, therapistId: t2.id, startTime: "14:00", name: "คุณบี" }), room.id)
+
+      const status = await queries.getCustomerPaymentStatus(qr.token)
+      expect(status.state === "UNPAID" && status.sharedRoom).toBe(true)
+      const blocked = await startCustomerPayment(makeFormData({ qrToken: qr.token, method: "PROMPTPAY" }))
+      expect(blocked.ok).toBe(false)
+      expect(blocked.ok === false && blocked.error).toContain("กรุณาแจ้งพนักงาน")
+      expect(await db.notification.count({ where: { storeId: TEST_STORE_ID } })).toBe(0)
+
+      // พนักงานปิดบิลคุณเอ → เหลือบิลคุณบีใบเดียว ลูกค้าจ่ายเองได้เหมือนโต๊ะปกติ
+      expect((await close(sessionA)).ok).toBe(true)
+      const after = await queries.getCustomerPaymentStatus(qr.token)
+      expect(after.state === "UNPAID" && after.sharedRoom).toBe(false)
+    })
+
     it("หน้ารายละเอียด/ปิดบิลรับ session ของห้องอื่นไม่ได้", async () => {
       const { program, t1, t2, room, room2 } = await seed()
       await checkIn(await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00", name: "คุณเอ" }), room.id)

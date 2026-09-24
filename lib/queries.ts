@@ -1566,6 +1566,8 @@ export type CustomerPaymentStatus =
       serviceCharge: number
       total: number
       awaitingBill: boolean
+      /// ห้องมีบิลเปิดมากกว่า 1 ใบ (ห้องสปาหลายลูกค้า · 20e) — ลูกค้าจ่ายเองผ่าน QR ไม่ได้ ต้องจ่ายที่พนักงาน
+      sharedRoom: boolean
     }
   | { state: "PAID"; tableCode: string; saleNumber: string; total: number; paidAt: Date }
   | { state: "UNKNOWN" }
@@ -1641,6 +1643,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
     serviceCharge: totals.serviceCharge,
     total: totals.total,
     awaitingBill: session.status === "AWAITING_BILL",
+    sharedRoom: (await db.tableSession.count({ where: { tableId: targetTableId, status: { in: ["OPEN", "AWAITING_BILL"] } } })) > 1,
   }
 }
 

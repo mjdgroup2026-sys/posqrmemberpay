@@ -33,6 +33,17 @@ export default async function PayPage({ params }: PageProps<"/order/[qrToken]/pa
     )
   }
 
+  // ห้องสปาที่มีลูกค้าหลายคน = หลายบิล (20e) — QR ของห้องไม่รู้ว่าคนสแกนเป็นใคร จึงไม่ให้จ่ายเองเลย
+  // (ไม่งั้นจะจ่ายเข้าบิลล่าสุดซึ่งอาจเป็นของคนอื่น) · startCustomerPayment/submitPaymentSlip ปฏิเสธซ้ำฝั่ง server
+  if (status.sharedRoom) {
+    return (
+      <CustomerNotice
+        title="กรุณาชำระเงินกับพนักงาน"
+        description="ห้องนี้มีลูกค้าหลายคน แต่ละคนชำระแยกบิล — แจ้งพนักงานเพื่อชำระบิลของคุณ"
+      />
+    )
+  }
+
   // วิธีรับเงินเป็นของร้านนี้ (Phase 15a) — ไม่ใช่ env กลางที่ทุกร้านใช้ร่วมกันอีกแล้ว
   const payment = await getStorePaymentProfile(status.storeId)
 
