@@ -2791,6 +2791,22 @@ export type TherapistReportRow = {
   minutes: number
 }
 
+/// ตัวกรองรายงานสปา (20f) — ค่ามาจาก URL ของผู้ใช้ · id ของร้านอื่นไม่ต้องตรวจแยก เพราะทุก SQL กรอง storeId อยู่แล้ว (ได้ผลว่าง)
+/// `stationId` = ประเภทบริการ (KitchenStation) อ่านจาก `MenuItem.stationId` **ปัจจุบัน** ไม่ใช่ snapshot ในบิล
+export type SpaReportFilter = { therapistId?: string | null; stationId?: string | null }
+
+/// ชิ้น SQL ของตัวกรอง — `stationJoin` ต้องวางต่อท้าย JOIN ที่มี alias `i` = sale_item · `therapistWhere` ใช้ alias `t` = therapist
+/// `lineWhere` ใช้กับ query ที่ไม่มี alias `t` (กรองที่ `i."therapistId"` แทน)
+function spaFilterSql(filter: SpaReportFilter) {
+  return {
+    stationJoin: filter.stationId
+      ? Prisma.sql`JOIN "menu_item" fm ON fm."id" = i."menuItemId" AND fm."stationId" = ${filter.stationId}`
+      : Prisma.empty,
+    therapistWhere: filter.therapistId ? Prisma.sql`AND t."id" = ${filter.therapistId}` : Prisma.empty,
+    lineWhere: filter.therapistId ? Prisma.sql`AND i."therapistId" = ${filter.therapistId}` : Prisma.empty,
+  }
+}
+
 /// ยอด/จำนวนครั้ง/นาทีรวม ต่อพนักงานนวด ในช่วงวันที่เลือก (Phase 20c)
 ///
 /// อ่านจาก `SaleItem.therapistId` ที่ snapshot ไว้ตอนปิดบิล — **ไม่ใช่** `MobileOrderItem` ที่ยังเปลี่ยนได้
@@ -2799,9 +2815,11 @@ export type TherapistReportRow = {
 export async function getTherapistSalesReport(
   storeId: string,
   range: { from: string; to: string },
+  filter: SpaReportFilter = {},
 ): Promise<TherapistReportRow[]> {
   const db = forStore(storeId)
   const { start, end } = reportRange(range.from, range.to)
+  const { stationJoin, therapistWhere } = spaFilterSql(filter)
 
   const rows = await db.$queryRaw<
     { id: string; code: string; name: string; nickname: string | null; isActive: boolean; services: bigint | null; bills: bigint | null; revenue: string | null; minutes: bigint | null }[]
@@ -2823,10 +2841,12 @@ export async function getTherapistSalesReport(
                             AND s."storeId" = ${storeId}
                             AND s."status" = 'COMPLETED'
                             AND s."createdAt" >= ${start}
-                            AND s."createdAt" < ${end})
+                            AND s."createdAt" < ${end}
+               ${stationJoin})
            ON i."therapistId" = t."id"
     LEFT JOIN "menu_item" m ON m."id" = i."menuItemId"
     WHERE t."storeId" = ${storeId}
+      ${therapistWhere}
     GROUP BY t."id", t."code", t."name", t."nickname", t."isActive"
     ORDER BY COALESCE(SUM(i."subtotal"), 0) DESC, t."code" ASC
   `
@@ -2929,12 +2949,18 @@ export type TherapistMatrix = {
 ///
 /// อ่าน snapshot เดียวกับ getTherapistSalesReport (`SaleItem.therapistId` ของบิล COMPLETED) — ตัวเลขรวมจึงตรงกัน
 /// ⚠️ raw SQL ไม่ผ่าน forStore() — กรอง `s."storeId"` เอง
-export async function getTherapistDailyMatrix(storeId: string, range: { from: string; to: string }): Promise<TherapistMatrix> {
+export async function getTherapistDailyMatrix(
+  storeId: string,
+  range: { from: string; to: string },
+  filter: SpaReportFilter = {},
+): Promise<TherapistMatrix> {
   const db = forStore(storeId)
   const { start, end } = reportRange(range.from, range.to)
+  const { stationJoin, lineWhere } = spaFilterSql(filter)
 
   const [therapists, rows] = await Promise.all([
     db.therapist.findMany({
+      where: filter.therapistId ? { id: filter.therapistId } : {},
       orderBy: [{ isActive: "desc" }, { code: "asc" }],
       select: { id: true, code: true, name: true, nickname: true, isActive: true },
     }),
@@ -2946,11 +2972,13 @@ export async function getTherapistDailyMatrix(storeId: string, range: { from: st
              SUM(i."subtotal")::text  AS revenue
       FROM "sale_item" i
       JOIN "sale" s ON s."id" = i."saleId"
+      ${stationJoin}
       WHERE s."storeId" = ${storeId}
         AND s."status" = 'COMPLETED'
         AND s."createdAt" >= ${start}
         AND s."createdAt" < ${end}
         AND i."therapistId" IS NOT NULL
+        ${lineWhere}
       GROUP BY 1, 2, 3
     `,
   ])
@@ -3145,10 +3173,12 @@ export async function listSalesForExport(
   storeId: string,
   range: { from: string; to: string },
   kind: SaleKind | null,
+  filter: SpaReportFilter = {},
 ): Promise<SalesExportRow[]> {
   const db = forStore(storeId)
   const { start, end } = reportRange(range.from, range.to)
   const kindFilter = kind ? Prisma.sql`AND i."kind"::text = ${kind}` : Prisma.empty
+  const { stationJoin, lineWhere } = spaFilterSql(filter)
   const rows = await db.$queryRaw<
     {
       soldAt: Date
@@ -3181,6 +3211,7 @@ export async function listSalesForExport(
            s."paymentMethod"::text AS "paymentMethod"
     FROM "sale_item" i
     JOIN "sale" s ON s."id" = i."saleId"
+    ${stationJoin}
     LEFT JOIN "therapist" t ON t."id" = i."therapistId"
     LEFT JOIN "table_session" ts ON ts."id" = s."tableSessionId"
     LEFT JOIN "restaurant_table" rt ON rt."id" = ts."tableId"
@@ -3189,6 +3220,7 @@ export async function listSalesForExport(
       AND s."createdAt" >= ${start}
       AND s."createdAt" < ${end}
       ${kindFilter}
+      ${lineWhere}
     ORDER BY s."createdAt" ASC, s."saleNumber" ASC, i."id" ASC
   `
   return rows.map((row) => ({

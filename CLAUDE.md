@@ -590,13 +590,18 @@ tenant-isolation +6 query +6 action (651 ทั้งชุด)
 · **20c รายงานต่อพนักงานนวด เสร็จในเครื่องแล้ว (รอ PR · ไม่มี migration/env)**: `getTherapistSalesReport`/`getTherapistHistory` ใน `lib/queries.ts` (raw SQL อ่าน `SaleItem.therapistId` ของบิล COMPLETED · กรอง storeId เอง) ·
 `/spa/reports?from=&to=` (สิทธิ์ `SPA_THERAPISTS` หรือ `REPORTS`) + `/spa/therapists/[therapistId]` ประวัติรายคน · `resolveDayRange()` ใน `lib/day.ts` · เทส `therapist-report.test.ts` 6
 
-**🔧 20e ปรับร้านสปารอบ 2 + แยกรายงานอาหาร/นวด — โค้ดเสร็จ 2026-09-24 (branch `feat/spa-20e-owner-feedback` รวม #28 + #31 · รอ backup + ซ้อม migration 2 ไฟล์ก่อน merge)**:
+**✅ 20e ปรับร้านสปารอบ 2 + แยกรายงานอาหาร/นวด — ขึ้น production แล้ว 2026-09-24 (PR #32 รวม #28 + #31 · CI run 35960037250 · backup `posmobileorderdb-20260924-121414.dump` · ซ้อมบนสำเนาแล้ว · `_prisma_migrations` = 31 · สลับ green → blue · ยืนยัน `sales-csv` ในคอนเทนเนอร์ blue)**:
 **ไม่มีกะ = จองคิว/เช็กอินไม่ได้** (`assertWithinShift` · จอขาย/walk-in ไม่ต้องมีกะ · เทสที่จองคิวต้องปูกะด้วย `createFullDayShifts()`) · ตารางจองสีตามสถานะ + ขีดชั่วโมง/ครึ่ง ·
 **ห้องรอเริ่มนวด** `listServicesAwaitingStart()` (แถบผังโต๊ะ + ปุ่มเริ่มนวดบนการ์ด + หน้าแจ้งเตือน + badge · คำนวณสด) · ห้องหลายบิล: `/billing` ต้องเลือกลูกค้า ·
 ลูกค้าจ่ายเองผ่าน QR ห้องไม่ได้ (`hasMultipleOpenBills()` ใน `lib/table-session.ts` — ทางจ่ายเองของลูกค้าใหม่ ๆ ต้องเรียกตัวนี้ด้วย) ·
 **`SaleItem.kind` (PRODUCT/FOOD/SERVICE) snapshot ไม่มี default — ทางออกบิลใหม่ต้องระบุเอง** (migration `20260924090000_add_sale_item_kind` เติมค่าบิลเก่า) ·
 `/reports` ช่วงวัน + แยก 3 ประเภท + แถว "ค่าบริการ − ส่วนลด" (ท้ายบิลไม่กระจายเข้าประเภท) · `getSalesByKind` ตัวเดียวใช้ทั้ง `/reports` และ `/spa/reports` ·
 CSV `GET /api/reports/sales-csv` (`lib/sales-csv.ts` · BOM + กันสูตร Excel) · สีกราฟ `--chart-1..3` ใน theme staff (ลำดับตายตัว อาหาร/นวด/สินค้า) · 704 เทสผ่าน
+
+**🔧 20f — โค้ดเสร็จ 2026-09-24 (รอ deploy · ไม่มี migration/env)**: **ปิดบิลพร้อมเพย์ที่หน้าพนักงานต้องแสดง QR ก่อนเสมอ** (เดิมกดแล้วปิดบิลเลยไม่มี QR —
+เจ้าของเจอหลัง 20e) · `prepareStaffPromptPay` ใน `app/actions/payments.ts` คิดยอดที่ server ตามโหมดร้าน: SCB = QR ธนาคารพก ref1 (`issuePaymentIntent` เดิม) แล้วบิลปิดเองจาก callback
+(หน้าจอฟัง SSE + `getStaffBillStatus` อ่านอย่างเดียว **ห้ามยิงถามธนาคาร** ตามกติกา callback-only) · ร้านอื่น = QR พร้อมเพย์ของร้าน + พนักงานกดยืนยัน ·
+`/spa/reports` ตัวกรอง ช่วงวัน/พนักงาน/ประเภทบริการ (`SpaReportFilter` + `spaFilterSql()` · ประเภทบริการอ่านจากเมนูปัจจุบัน ไม่ snapshot) · hover ตารางจองบอกเวลาสิ้นสุด/ว่างถึงกี่โมง · 712 เทสผ่าน
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

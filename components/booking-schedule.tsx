@@ -189,6 +189,36 @@ export function BookingSchedule({
     }
   }
 
+  /// ข้อความเมื่อเอาเมาส์วางบนแท่งคิว (20f) — ครบในกล่องเดียว รวมเวลาสิ้นสุด
+  function bookingHint(booking: BookingRow): string {
+    return [
+      `${booking.customerName} · ${booking.menuItemName}`,
+      `${hhmm(booking.startMinute)}–${hhmm(booking.endMinute)} น. (${booking.durationMinutes} นาที)`,
+      `${booking.therapistLabel}${booking.tableCode ? ` · ห้อง ${booking.tableCode}` : " · ยังไม่เลือกห้อง"}`,
+      `สถานะ: ${STATUS_LABEL[booking.status]}`,
+    ].join("\n")
+  }
+
+  /// ข้อความเมื่อเอาเมาส์วางบนช่องว่าง (20f) — จองได้กี่โมง และว่างต่อเนื่องถึงกี่โมง
+  /// ว่างถึง = คิวถัดไปของคนนี้ลบพักระหว่างคิว หรือหมดกะ แล้วแต่อะไรถึงก่อน · คำนวณแบบเดียวกับที่ server ตรวจ (ช่วยดูเท่านั้น)
+  function slotHint(therapistId: string, minute: number): string {
+    const shift = shiftByTherapist.get(therapistId)
+    if (!shift) return "ยังไม่ลงกะ — จองไม่ได้"
+    if (shift.isOff) return "วันหยุด — จองไม่ได้"
+    if (minute < shift.startMinute || minute >= shift.endMinute) {
+      return `นอกเวลากะ (${hhmm(shift.startMinute)}–${hhmm(shift.endMinute)} น.)`
+    }
+    const mine = live.filter((b) => b.therapistId === therapistId)
+    const blocking = mine.find((b) => b.startMinute - bufferMinutes < minute + 1 && b.endMinute + bufferMinutes > minute)
+    if (blocking) {
+      return `ไม่ว่าง — มีคิว ${hhmm(blocking.startMinute)}–${hhmm(blocking.endMinute)} น. (${blocking.customerName})`
+    }
+    const next = mine.filter((b) => b.startMinute > minute).sort((a, b) => a.startMinute - b.startMinute)[0]
+    const freeUntil = Math.min(shift.endMinute, next ? next.startMinute - bufferMinutes : shift.endMinute)
+    const reason = next && next.startMinute - bufferMinutes < shift.endMinute ? `คิวถัดไป ${hhmm(next.startMinute)} น.` : "หมดกะ"
+    return `จองได้ ${hhmm(minute)} น.\nว่างถึง ${hhmm(freeUntil)} น. (${freeUntil - minute} นาที · ${reason})`
+  }
+
   /// กดช่องว่างบนไทม์ไลน์ — แถวที่ไม่มีกะ/หยุด บอกเหตุผลพร้อมทางไปตั้งกะ แทนการเปิดฟอร์มที่ยังไงก็บันทึกไม่ผ่าน
   function startCreateAt(therapist: TherapistOption, startMinute: number) {
     const shift = shiftByTherapist.get(therapist.id)
@@ -421,7 +451,7 @@ export function BookingSchedule({
                             key={minute}
                             type="button"
                             className="btn btn-ghost"
-                            title={unavailable ? "ยังไม่ลงกะ/หยุด — จองไม่ได้" : `จองคิว ${hhmm(minute)} น.`}
+                            title={slotHint(therapist.id, minute)}
                             onClick={() => startCreateAt(therapist, minute)}
                             style={{
                               position: "absolute",
@@ -445,7 +475,8 @@ export function BookingSchedule({
                         key={booking.id}
                         type="button"
                         className={`booking-bar ${STATUS_BAR[booking.status] ?? ""}`}
-                        title={`${STATUS_LABEL[booking.status]} · ${booking.customerName} · ${booking.menuItemName}`}
+                        // เอาเมาส์วางแล้วเห็นครบ รวมเวลาสิ้นสุด (20f — เจ้าของสั่ง)
+                        title={bookingHint(booking)}
                         onClick={() => {
                           setDetail(booking)
                           setCheckInRoom(booking.tableId ?? "")

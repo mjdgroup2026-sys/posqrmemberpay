@@ -196,4 +196,60 @@ describe.skipIf(!dbReady)("รายงานยอดขายแยกปร�
     expect(onlySpa.trim().split("\r\n")).toHaveLength(2)
     expect(onlySpa).not.toContain("น้ำขิง")
   })
+
+  /// 20f — ตัวกรองรายงานสปา: พนักงาน / ประเภทบริการ · id ของร้านอื่น = ผลว่าง
+  it("ตัวกรองพนักงานนวดและประเภทบริการ ใช้ได้ทั้งตารางรายคน ตารางรายวัน และ CSV", async () => {
+    const db = testPrisma()
+    const thai = await db.kitchenStation.create({ data: { storeId: TEST_STORE_ID, name: "นวดไทย" } })
+    const foot = await db.kitchenStation.create({ data: { storeId: TEST_STORE_ID, name: "นวดเท้า" } })
+    const thaiProgram = await db.menuItem.create({
+      data: { storeId: TEST_STORE_ID, name: "นวดไทย 60", price: "300.00", itemType: "SERVICE", durationMinutes: 60, stationId: thai.id },
+    })
+    const footProgram = await db.menuItem.create({
+      data: { storeId: TEST_STORE_ID, name: "นวดเท้า 30", price: "200.00", itemType: "SERVICE", durationMinutes: 30, stationId: foot.id },
+    })
+    const nid = await db.therapist.create({ data: { storeId: TEST_STORE_ID, code: "001", name: "นิด" } })
+    const noi = await db.therapist.create({ data: { storeId: TEST_STORE_ID, code: "002", name: "หน่อย" } })
+    const room = await db.table.create({ data: { storeId: TEST_STORE_ID, code: "3/1", kind: "ROOM", status: "ORDERED" } })
+    // บิลเดียว: นิดนวดไทย 300 + หน่อยนวดเท้า 200
+    const session = await db.tableSession.create({ data: { storeId: TEST_STORE_ID, tableId: room.id } })
+    await db.mobileOrder.create({
+      data: {
+        storeId: TEST_STORE_ID,
+        tableSessionId: session.id,
+        orderNumber: 1,
+        items: {
+          create: [
+            { menuItemId: thaiProgram.id, quantity: 1, unitPrice: "300.00", status: "SERVED", therapistId: nid.id },
+            { menuItemId: footProgram.id, quantity: 1, unitPrice: "200.00", status: "SERVED", therapistId: noi.id },
+          ],
+        },
+      },
+    })
+    expect((await closeSessionWithPayment({ storeId: TEST_STORE_ID, sessionId: session.id, paymentMethod: "CASH", cashierId: "owner" })).ok).toBe(true)
+
+    const revenueOf = (rows: { therapistId: string; revenue: number }[]) => Object.fromEntries(rows.map((r) => [r.therapistId, r.revenue]))
+
+    // ไม่กรอง
+    expect(revenueOf(await queries.getTherapistSalesReport(TEST_STORE_ID, range))).toEqual({ [nid.id]: 300, [noi.id]: 200 })
+    // กรองพนักงาน → เหลือคนเดียว
+    const onlyNid = await queries.getTherapistSalesReport(TEST_STORE_ID, range, { therapistId: nid.id })
+    expect(revenueOf(onlyNid)).toEqual({ [nid.id]: 300 })
+    // กรองประเภทบริการ → ทุกคนยังอยู่ แต่นับเฉพาะนวดเท้า
+    expect(revenueOf(await queries.getTherapistSalesReport(TEST_STORE_ID, range, { stationId: foot.id }))).toEqual({ [nid.id]: 0, [noi.id]: 200 })
+    // ตารางรายวัน + โปรแกรม ใช้ตัวกรองเดียวกัน
+    const matrix = await queries.getTherapistDailyMatrix(TEST_STORE_ID, range, { stationId: thai.id })
+    expect(matrix.dayTotals[today]).toEqual({ revenue: 300, services: 1 })
+    expect(matrix.programs.map((p) => p.menuItemName)).toEqual(["นวดไทย 60"])
+    expect((await queries.getTherapistDailyMatrix(TEST_STORE_ID, range, { therapistId: noi.id })).rows.map((r) => r.therapistId)).toEqual([noi.id])
+    // CSV
+    const csvRows = await queries.listSalesForExport(TEST_STORE_ID, range, "SERVICE", { therapistId: noi.id })
+    expect(csvRows.map((r) => r.name)).toEqual(["นวดเท้า 30"])
+
+    // id ของร้านอื่น = ผลว่าง ไม่หลุดข้อมูล
+    await ensureTestStore({ id: OTHER_STORE_ID, slug: "test-b", name: "ร้าน B" })
+    const foreign = await db.therapist.create({ data: { storeId: OTHER_STORE_ID, code: "B01", name: "คนร้านบี" } })
+    expect(await queries.getTherapistSalesReport(TEST_STORE_ID, range, { therapistId: foreign.id })).toEqual([])
+    expect(await queries.listSalesForExport(TEST_STORE_ID, range, "SERVICE", { therapistId: foreign.id })).toEqual([])
+  })
 })

@@ -1,9 +1,17 @@
 import Link from "next/link"
-import { getSalesByKind, getStoreSettings, getTherapistDailyMatrix, getTherapistSalesReport } from "@/lib/queries"
+import {
+  getSalesByKind,
+  getStoreSettings,
+  getTherapistDailyMatrix,
+  getTherapistSalesReport,
+  listKitchenStations,
+  listTherapists,
+  type SpaReportFilter as ReportFilter,
+} from "@/lib/queries"
 import { businessDayKey, resolveDayRange } from "@/lib/day"
 import { formatBaht, formatNumber } from "@/lib/format"
 import { requirePageAccess } from "@/lib/permissions"
-import { DayRangePicker } from "@/components/day-range-picker"
+import { SpaReportFilter } from "@/components/spa-report-filter"
 import { IconDownload, IconReports } from "@/components/icons"
 
 export const metadata = { title: "รายงานพนักงานนวด" }
@@ -26,13 +34,24 @@ export default async function SpaReportsPage({ searchParams }: PageProps<"/spa/r
 
   const query = await searchParams
   const range = resolveDayRange(query.from, query.to)
-  const [settings, rows, matrix, byKind] = await Promise.all([
+  // ตัวกรอง (20f) — id จาก URL ไม่ต้องตรวจว่าเป็นของร้านนี้ เพราะทุก query กรอง storeId (id ร้านอื่น = ผลว่าง)
+  const filter: ReportFilter = {
+    therapistId: typeof query.therapist === "string" && query.therapist ? query.therapist : null,
+    stationId: typeof query.type === "string" && query.type ? query.type : null,
+  }
+  const filtered = Boolean(filter.therapistId || filter.stationId)
+  const [settings, rows, matrix, byKind, therapists, stations] = await Promise.all([
     getStoreSettings(storeId),
-    getTherapistSalesReport(storeId, range),
-    getTherapistDailyMatrix(storeId, range),
+    getTherapistSalesReport(storeId, range, filter),
+    getTherapistDailyMatrix(storeId, range, filter),
     // ยอดนวดรวมตัวเดียวกับหน้ารายงานหลัก (20e) — สองหน้าต้องไม่บอกตัวเลขขัดกัน
     getSalesByKind(storeId, range),
+    listTherapists(storeId),
+    listKitchenStations(storeId),
   ])
+  const csvParams = new URLSearchParams({ from: range.from, to: range.to, kind: "SERVICE" })
+  if (filter.therapistId) csvParams.set("therapist", filter.therapistId)
+  if (filter.stationId) csvParams.set("type", filter.stationId)
 
   if (!settings?.spaEnabled) {
     return (
@@ -77,27 +96,31 @@ export default async function SpaReportsPage({ searchParams }: PageProps<"/spa/r
             ไม่รวมอาหาร/เครื่องดื่มในบิลเดียวกันและไม่รวมค่าบริการท้ายบิล
           </p>
         </div>
-        <div className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <DayRangePicker basePath="/spa/reports" from={range.from} to={range.to} today={businessDayKey()} />
-          <a
-            href={`/api/reports/sales-csv?${new URLSearchParams({ from: range.from, to: range.to, kind: "SERVICE" }).toString()}`}
-            className="btn btn-subtle"
-            download
-          >
-            <IconDownload size={17} aria-hidden />
-            ดาวน์โหลด CSV
-          </a>
-        </div>
+        {/* CSV พาตัวกรองติดไปด้วย — ไฟล์ตรงกับที่เห็นบนจอ */}
+        <a href={`/api/reports/sales-csv?${csvParams.toString()}`} className="btn btn-subtle" download>
+          <IconDownload size={17} aria-hidden />
+          ดาวน์โหลด CSV
+        </a>
       </div>
+
+      <SpaReportFilter
+        from={range.from}
+        to={range.to}
+        today={businessDayKey()}
+        therapistId={filter.therapistId ?? ""}
+        stationId={filter.stationId ?? ""}
+        therapists={therapists.map((t) => ({ id: t.id, label: `${t.code} ${t.nickname ?? t.name}`, isActive: t.isActive }))}
+        stations={stations.map((s) => ({ id: s.id, name: s.name }))}
+      />
 
       <div className="field-grid" style={{ marginBottom: 18 }}>
         <div className="stat-tile">
-          <span className="t-caption">ยอดนวด/สปาทั้งร้าน</span>
+          <span className="t-caption">{filtered ? "ยอดนวดตามตัวกรอง" : "ยอดนวด/สปาทั้งร้าน"}</span>
           <strong className="t-h2 num" style={{ display: "block", marginTop: 6 }}>
-            ฿{formatBaht(byKind.kinds.SERVICE.revenue)}
+            ฿{formatBaht(filtered ? totalRevenue : byKind.kinds.SERVICE.revenue)}
           </strong>
-          {/* บรรทัดนวดที่ปิดบิลโดยไม่ได้มอบหมายพนักงาน นับในยอดร้านแต่ไม่เข้าตารางรายคน — บอกส่วนต่างให้เห็น */}
-          {Math.abs(byKind.kinds.SERVICE.revenue - totalRevenue) >= 0.01 ? (
+          {/* บรรทัดนวดที่ปิดบิลโดยไม่ได้มอบหมายพนักงาน นับในยอดร้านแต่ไม่เข้าตารางรายคน — บอกส่วนต่างให้เห็น (เฉพาะตอนไม่กรอง) */}
+          {!filtered && Math.abs(byKind.kinds.SERVICE.revenue - totalRevenue) >= 0.01 ? (
             <span className="t-caption num" style={{ display: "block", marginTop: 4 }}>
               มีพนักงานระบุ ฿{formatBaht(totalRevenue)} · ไม่ระบุพนักงาน ฿{formatBaht(byKind.kinds.SERVICE.revenue - totalRevenue)}
             </span>
@@ -131,7 +154,7 @@ export default async function SpaReportsPage({ searchParams }: PageProps<"/spa/r
         </div>
 
         {rows.length === 0 ? (
-          <p className="t-body" style={{ padding: 24 }}>ยังไม่มีพนักงานนวดในร้าน</p>
+          <p className="t-body" style={{ padding: 24 }}>{filtered ? "ไม่พบพนักงานตามตัวกรอง" : "ยังไม่มีพนักงานนวดในร้าน"}</p>
         ) : (
           <div className="datatable-wrap">
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>
@@ -185,7 +208,7 @@ export default async function SpaReportsPage({ searchParams }: PageProps<"/spa/r
           <span className="t-caption">ในช่อง: ยอดเงิน · จำนวนครั้ง</span>
         </div>
         {matrix.rows.length === 0 ? (
-          <p className="t-body" style={{ padding: 24 }}>ยังไม่มีพนักงานนวดในร้าน</p>
+          <p className="t-body" style={{ padding: 24 }}>{filtered ? "ไม่พบพนักงานตามตัวกรอง" : "ยังไม่มีพนักงานนวดในร้าน"}</p>
         ) : (
           <div className="datatable-wrap" style={{ overflowX: "auto" }}>
             <table style={{ borderCollapse: "collapse", fontSize: "0.875rem", minWidth: "100%" }}>
@@ -254,7 +277,7 @@ export default async function SpaReportsPage({ searchParams }: PageProps<"/spa/r
           <h2 className="t-h2">โปรแกรมที่แต่ละคนนวด</h2>
         </div>
         {matrix.programs.length === 0 ? (
-          <p className="t-body" style={{ padding: 24 }}>ยังไม่มีการให้บริการในช่วงนี้</p>
+          <p className="t-body" style={{ padding: 24 }}>{filtered ? "ไม่มีการให้บริการตามตัวกรองในช่วงนี้" : "ยังไม่มีการให้บริการในช่วงนี้"}</p>
         ) : (
           <div className="datatable-wrap">
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>
