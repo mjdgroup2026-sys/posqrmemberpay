@@ -102,7 +102,8 @@ export function dateOnlyFromKey(dayKey: string): Date {
 
 /// ช่วงวันของรายงาน (Phase 20c) — รับค่าดิบจาก `?from=&to=` แล้วคืนคีย์วันที่ใช้ได้เสมอ
 ///
-/// ค่าผิด/ว่าง = ถอยเป็น `days` วันล่าสุด (นับวันนี้ด้วย) · ห้ามอนาคต (ใช้ parseBusinessDayKey) ·
+/// ค่าผิด/ว่าง = ถอยเป็น `days` วันล่าสุด (นับวันนี้ด้วย · ค่าเริ่มต้น 1 = วันนี้วันเดียว — เจ้าของสั่ง 2026-09-24 ให้รายงานเปิดมาที่วันนี้แล้วเลือกเอง) ·
+/// ห้ามอนาคต (ใช้ parseBusinessDayKey) ·
 /// สลับให้เองถ้ากรอกกลับหัว — หน้ารายงานจึงไม่ต้องมี error state ของตัวเอง ·
 /// ยาวเกิน MAX_REPORT_DAYS = ตัดต้นช่วงให้เหลือเท่าเพดาน (20e — กันไฟล์ CSV/ตารางรายวันใหญ่จนหน้าเว็บค้าง)
 export const MAX_REPORT_DAYS = 366
@@ -110,7 +111,7 @@ export const MAX_REPORT_DAYS = 366
 export function resolveDayRange(
   from: unknown,
   to: unknown,
-  days = 30,
+  days = 1,
   now: Date = new Date(),
 ): { from: string; to: string } {
   const todayKey = businessDayKey(now)

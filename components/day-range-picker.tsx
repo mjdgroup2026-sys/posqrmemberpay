@@ -55,7 +55,7 @@ export function DayRangePicker({
         />
       </div>
       <button type="button" className="btn btn-subtle btn-sm" onClick={() => router.push(basePath)}>
-        30 วันล่าสุด
+        วันนี้
       </button>
     </div>
   )

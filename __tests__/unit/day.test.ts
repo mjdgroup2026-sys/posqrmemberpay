@@ -79,6 +79,13 @@ describe("lib/day — วันทางธุรกิจตามเวลา�
     expect(resolveDayRange(["2026-09-01"], "2026-09-05", 7, now)).toEqual({ from: "2026-08-30", to: "2026-09-05" })
   })
 
+  it("resolveDayRange: ไม่ส่งช่วงวัน = วันนี้วันเดียว (ค่าเริ่มต้นของหน้ารายงาน — เจ้าของสั่ง 2026-09-24)", () => {
+    const now = new Date("2026-09-23T05:00:00.000Z")
+    expect(resolveDayRange(undefined, undefined, undefined, now)).toEqual({ from: "2026-09-23", to: "2026-09-23" })
+    // ส่งมาแค่วันปลาย = วันนั้นวันเดียว
+    expect(resolveDayRange(undefined, "2026-09-10", undefined, now)).toEqual({ from: "2026-09-10", to: "2026-09-10" })
+  })
+
   it("resolveDayRange: ยาวเกิน 366 วัน ถูกตัดต้นช่วงให้เหลือ 366 วันพอดี (20e)", () => {
     const now = new Date("2026-09-23T05:00:00.000Z")
     expect(resolveDayRange("2020-01-01", "2026-09-23", 30, now)).toEqual({ from: "2025-09-23", to: "2026-09-23" })
