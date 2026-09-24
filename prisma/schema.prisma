@@ -329,12 +329,20 @@ model CashierClosing {
   totalCash     Decimal  @db.Decimal(12, 2)
   totalTransfer Decimal  @db.Decimal(12, 2)
   totalQR       Decimal  @db.Decimal(12, 2)
-  /// รวมพร้อมเพย์/บัตร ที่ปิดบิลด้วยแคชเชียร์คนนี้ (Phase 10) — แยกจาก QR ไม่ให้ปนกับยอดสแกน QR หน้าร้าน
+  /// บัตร (EDC) ที่ปิดบิลด้วยแคชเชียร์คนนี้ — ก่อน 20g (2026-09-24) คอลัมน์นี้รวมพร้อมเพย์ไว้ด้วย migration แยกออกให้แล้ว
   totalCard     Decimal  @default(0) @db.Decimal(12, 2)
+  /// พร้อมเพย์ (MJD Mobile Order) — แยกจากบัตรใน 20g เพื่อเทียบกับยอดเข้าบัญชีธนาคาร
+  totalPromptPay Decimal @default(0) @db.Decimal(12, 2)
   billCount     Int      @default(0)
   voidedCount   Int      @default(0)
   countedCash   Decimal  @db.Decimal(12, 2)
   difference    Decimal  @db.Decimal(12, 2)
+  /// ยอดจริงของช่องทางอื่นที่แคชเชียร์กรอกเทียบ (20g) — ไม่บังคับ · null = ไม่ได้กรอก (ไม่มีส่วนต่าง)
+  /// ส่วนต่างไม่เก็บ คำนวณตอนแสดง (counted − total) — เงินสดยังเก็บ `difference` เหมือนเดิมเพราะเป็นกติกาเดิม
+  countedTransfer  Decimal? @db.Decimal(12, 2)
+  countedQR        Decimal? @db.Decimal(12, 2)
+  countedPromptPay Decimal? @db.Decimal(12, 2)
+  countedCard      Decimal? @db.Decimal(12, 2)
   note          String?
   closedAt      DateTime @default(now())
 

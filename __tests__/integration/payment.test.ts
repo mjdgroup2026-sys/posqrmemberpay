@@ -259,7 +259,9 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
     const summary = await getTodaySalesSummary(TEST_STORE_ID, "test-user")
     expect(summary.billCount).toBe(1)
     expect(summary.totalSales).toBe(260)
+    // 20g — บัตรแยกจากพร้อมเพย์แล้ว
     expect(summary.totalCard).toBe(260)
+    expect(summary.totalPromptPay).toBe(0)
     expect(summary.totalCash).toBe(0)
     expect(summary.totalQR).toBe(0)
 

@@ -6,6 +6,7 @@ import { guardAction } from "@/lib/permissions"
 import { businessDateOnly, businessDayKey, businessDayRange, parseBusinessDayKey } from "@/lib/day"
 import { closingSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import { formatBusinessDate, toNumber } from "@/lib/format"
+import { bucketByChannel } from "@/lib/closing-channels"
 import type { ActionResult } from "@/lib/types"
 
 
@@ -30,6 +31,11 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
     // ไม่ส่งวันที่มา = วันนี้ (ผู้เรียกเดิม/เทสเดิมยังใช้ได้) — ส่งมาแล้วต้องเป็นวันที่มีจริงและไม่ใช่อนาคต
     closingDate: formData.get("closingDate") ?? businessDayKey(),
     countedCash: formData.get("countedCash"),
+    // ยอดจริงของช่องทางอื่น (20g) — ไม่ส่ง/เว้นว่าง = ไม่ได้กรอก
+    countedTransfer: formData.get("countedTransfer"),
+    countedQR: formData.get("countedQR"),
+    countedPromptPay: formData.get("countedPromptPay"),
+    countedCard: formData.get("countedCard"),
     note: formData.get("note") ?? undefined,
   })
   if (!parsed.success) {
@@ -40,7 +46,8 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
     }
   }
 
-  const { countedCash, note } = parsed.data
+  const { countedCash, countedTransfer, countedQR, countedPromptPay, countedCard, note } = parsed.data
+  const optional = (value: number | null) => (value === null ? null : round2(value).toFixed(2))
   const closingDay = parseBusinessDayKey(parsed.data.closingDate)
   if (!closingDay) {
     return {
@@ -63,37 +70,32 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
         }),
       ])
 
-      let totalSales = 0
-      let totalCash = 0
-      let totalTransfer = 0
-      let totalQR = 0
-      let totalCard = 0
-      for (const sale of completed) {
-        const value = toNumber(sale.total)
-        totalSales += value
-        if (sale.paymentMethod === "CASH") totalCash += value
-        else if (sale.paymentMethod === "TRANSFER") totalTransfer += value
-        else if (sale.paymentMethod === "QR") totalQR += value
-        // พร้อมเพย์/บัตรจาก MJD Mobile Order — ไม่กระทบเงินสดในลิ้นชัก จึงแยกถังของตัวเอง (Phase 10)
-        else totalCard += value
-      }
+      // แยกถังด้วยตัวเดียวกับหน้าจอ (20g — พร้อมเพย์แยกจากบัตรแล้ว)
+      const { totals, totalSales } = bucketByChannel(
+        completed.map((sale) => ({ paymentMethod: sale.paymentMethod, total: toNumber(sale.total), bills: 1 })),
+      )
 
-      const gap = round2(countedCash - round2(totalCash))
+      const gap = round2(countedCash - totals.CASH)
 
       await tx.cashierClosing.create({
         data: {
           storeId,
           cashierId: user.id,
           closingDate: businessDateOnly(closingDay),
-          totalSales: round2(totalSales).toFixed(2),
-          totalCash: round2(totalCash).toFixed(2),
-          totalTransfer: round2(totalTransfer).toFixed(2),
-          totalQR: round2(totalQR).toFixed(2),
-          totalCard: round2(totalCard).toFixed(2),
+          totalSales: totalSales.toFixed(2),
+          totalCash: totals.CASH.toFixed(2),
+          totalTransfer: totals.TRANSFER.toFixed(2),
+          totalQR: totals.QR.toFixed(2),
+          totalPromptPay: totals.PROMPTPAY.toFixed(2),
+          totalCard: totals.CARD.toFixed(2),
           billCount: completed.length,
           voidedCount,
           countedCash: round2(countedCash).toFixed(2),
           difference: gap.toFixed(2),
+          countedTransfer: optional(countedTransfer),
+          countedQR: optional(countedQR),
+          countedPromptPay: optional(countedPromptPay),
+          countedCard: optional(countedCard),
           note,
         },
       })
