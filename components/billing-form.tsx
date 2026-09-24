@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { BillSwitcher } from "@/components/bill-switcher"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { confirmMobilePayment } from "@/app/actions/payments"
@@ -63,11 +64,14 @@ export function BillingForm({ bill }: { bill: BillingView }) {
       <div className="page-head">
         <div>
           <p className="t-eyebrow">
-            <Link href={`/mobile-order/tables/${bill.tableId}`} className="row" style={{ gap: 6 }}>
+            <Link href={`/mobile-order/tables/${bill.tableId}?session=${bill.sessionId}`} className="row" style={{ gap: 6 }}>
               <IconBack size={14} aria-hidden /> กลับไปรายละเอียดออร์เดอร์
             </Link>
           </p>
-          <h1 className="t-h1">ปิดบิลโต๊ะ {bill.tableCode}</h1>
+          <h1 className="t-h1">
+            ปิดบิลโต๊ะ {bill.tableCode}
+            {bill.customerLabel ? <> · {bill.customerLabel}</> : null}
+          </h1>
           <p className="t-body" style={{ marginTop: 4 }}>
             เปิดโต๊ะ <span className="num">{formatClock(bill.openedAt)}</span>
             {bill.mergedTableCodes.length > 0
@@ -81,6 +85,12 @@ export function BillingForm({ bill }: { bill: BillingView }) {
         </button>
       </div>
 
+      <BillSwitcher
+        bills={bill.bills}
+        currentSessionId={bill.sessionId}
+        hrefFor={(sessionId) => `/mobile-order/tables/${bill.tableId}/billing?session=${sessionId}`}
+      />
+
       {bill.sessionStatus === "AWAITING_BILL" ? (
         <div className="alert-banner info">ลูกค้าขอเช็กบิลแล้ว — ยืนยันการรับชำระเงินเพื่อปิดโต๊ะ</div>
       ) : null}
@@ -89,7 +99,10 @@ export function BillingForm({ bill }: { bill: BillingView }) {
         <section className="card-ui card-pad receipt-print">
           <div style={{ textAlign: "center", marginBottom: 12 }}>
             <p style={{ fontWeight: 700, fontSize: "1.05rem" }}>{bill.storeName}</p>
-            <p className="t-caption">ใบแจ้งยอด · โต๊ะ {bill.tableCode}</p>
+            <p className="t-caption">
+              ใบแจ้งยอด · โต๊ะ {bill.tableCode}
+              {bill.customerLabel ? ` · ${bill.customerLabel}` : ""}
+            </p>
           </div>
 
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>

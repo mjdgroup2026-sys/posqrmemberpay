@@ -18,6 +18,11 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
   // ?table=<id> มาจากปุ่ม "สั่งเพิ่ม" บนหน้าโต๊ะ (F13) — เลือกโต๊ะนั้นให้เลย · id แปลก ๆ ถูกกรองด้วยรายชื่อโต๊ะของร้านนี้
   const wanted = typeof params.table === "string" ? params.table : ""
   const initialTableId = tables.some((t) => t.id === wanted) ? wanted : undefined
+  // ?session= = บิลของลูกค้าคนไหนในห้องสปา (ปุ่ม "สั่งเพิ่ม" ของบิลนั้น) — ต้องเป็นบิลที่เปิดอยู่ของห้องที่เลือกเท่านั้น
+  const wantedSession = typeof params.session === "string" ? params.session : ""
+  const initialSessionId = tables.find((t) => t.id === initialTableId)?.bills.some((b) => b.sessionId === wantedSession)
+    ? wantedSession
+    : undefined
 
   return (
     <MenuPos
@@ -29,6 +34,7 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
       dateLabel={formatBusinessDate(new Date())}
       therapists={therapists}
       spaEnabled={settings?.spaEnabled ?? false}
+      initialSessionId={initialSessionId}
     />
   )
 }

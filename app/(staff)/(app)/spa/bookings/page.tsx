@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { getBookingDay, getStoreSettings } from "@/lib/queries"
-import { businessDayKey, parseDayKey } from "@/lib/day"
+import { businessDayKey, minuteOfBusinessDay, parseDayKey } from "@/lib/day"
 import { requirePageAccess } from "@/lib/permissions"
 import { BookingSchedule } from "@/components/booking-schedule"
 
@@ -49,6 +49,8 @@ export default async function BookingsPage({ searchParams }: PageProps<"/spa/boo
       shifts={data.shifts}
       bookings={data.bookings}
       bufferMinutes={data.bufferMinutes}
+      // เส้น "ตอนนี้" บนไทม์ไลน์ — คำนวณเวลาไทยฝั่ง server เพราะ client ไม่แตะ timezone (ดูหัวไฟล์ของ BookingSchedule)
+      nowMinute={data.dayKey === businessDayKey() ? minuteOfBusinessDay(new Date()) : null}
       allowed={granted.SPA_BOOKINGS ?? []}
     />
   )

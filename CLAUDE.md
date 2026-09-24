@@ -313,9 +313,10 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   ```bash
   grep -rn '\$queryRaw\|\$executeRaw' --include='*.ts' . --exclude-dir=node_modules --exclude-dir=generated
   ```
-  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (8 จุด), `app/actions/products.ts` (1 จุด — `nextSku()`),
+  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (15 จุด — รวมรายงานพนักงานนวด Phase 20c 2 จุด + รายงานแยกประเภท/CSV 20e 5 จุด · วันแบบเวลาไทยใช้ `SALE_DAY_SQL` เพราะ `createdAt` เป็น timestamp ไม่มี TZ), `app/actions/products.ts` (1 จุด — `nextSku()`),
   `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
   `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
+  `lib/table-session.ts` (1 จุด — `lockTableRow()` `SELECT … FOR UPDATE` แถว `restaurant_table` ก่อนคืนห้อง/เปิดบิลแยก, 2026-09-23)
   และ `lib/booking.ts` (2 จุด — advisory lock กันจองซ้อน namespace 720_003 ต่อพนักงาน / 720_004 ต่อห้อง, Phase 20b
   · **ลำดับการจับต้องคงที่เสมอ**: พนักงานก่อน แล้วค่อยห้อง ไม่งั้น deadlock)
   · ทุกจุดต้องมี `WHERE "storeId" = ${storeId}` (Phase 13)
@@ -555,7 +556,7 @@ station ที่ `lib/ticket-lines.ts` ที่เดียว** (KDS/ทิ�
 ทีละใบ (`components/auto-print.tsx` · **กล่องพิมพ์ยังเด้งให้กด 1 ครั้ง** เว้นแต่ Chrome `--kiosk-printing` · ร้านที่ตั้ง `KITCHEN_PRINTER_HOST` ไม่เข้าคิวนี้เพราะ
 `printedAt` ไม่ null) · ลูกค้าไม่เห็น station (ตัดสินใจ 2026-09-22) · เทสใหม่ 27 + tenant-isolation +4 · **Phase 18 (`/explore`) ยกเลิกวันเดียวกัน**
 
-**🔧 Phase 20a ตัวเลือกร้านนวด — โค้ดเสร็จ 2026-09-22 (รอ deploy · migration 3 ไฟล์ `20260922120000_add_spa_resources` (ADD VALUE แยก) → `…120100_add_spa_option_and_therapist` (additive) → `…120200_backfill_spa_permissions` · ไม่มี env ใหม่)**:
+**✅ Phase 20a ตัวเลือกร้านนวด — ขึ้น production แล้ว 2026-09-23 (PR #26 · CI run 35819853906 · backup `posmobileorderdb-20260923-114231.dump`) · migration 3 ไฟล์ `20260922120000_add_spa_resources` (ADD VALUE แยก) → `…120100_add_spa_option_and_therapist` (additive) → `…120200_backfill_spa_permissions` · ไม่มี env ใหม่ (ขึ้นพร้อม 20b ใน PR เดียว)**:
 ตัดสินใจ "ใช้ร่วมกันได้กรณีร้านนวด" → **สวิตช์ `StoreSettings.spaEnabled` เปิดเพิ่มจากของเดิม ไม่ใช่โหมดสลับ** (ร้านนวดมีทั้งโปรแกรมนวดและอาหาร ทั้งห้องนวดและโต๊ะ) ·
 `Therapist` ต่อร้าน (ไม่ผูกบัญชีล็อกอิน · ทักษะ = m:n กับ `KitchenStation` ซึ่งในร้านนวดคือ "ประเภทบริการ") · `MenuItem.itemType FOOD|SERVICE` + `durationMinutes` ·
 `Table.kind TABLE|ROOM` + `stationId` (ประเภทห้อง) · `MobileOrderItem.therapistId` (SetNull) / `SaleItem.therapistId` (RESTRICT — snapshot ลงบิลไว้ทำรายงานต่อคน 20c) ·
@@ -565,9 +566,9 @@ resource `SPA_THERAPISTS` (หน้า `/spa/therapists`) + `SPA_BOOKINGS` (จ
 `startServiceItem` (→COOKING ต้องมีพนักงาน) / `markItemServed` (ข้าม READY ได้แม้ร้านเปิด KDS) · ปิดบิล/รายงาน/ปิดรอบ เส้นทางเดิมทั้งหมด · onboarding ติ๊ก "ร้านนวด/สปา" ได้ตัวอย่างครบ ·
 เทส `spa-therapist.test.ts` 10 + tenant-isolation +8 (623 ทั้งชุด)
 
-**🔧 Phase 20b กะ + จองล่วงหน้า + กระดานว่าง/ไม่ว่าง — โค้ดเสร็จ 2026-09-23 (รอ deploy · migration 1 ไฟล์ `20260923090000_add_therapist_shift_and_booking` additive ล้วน · ไม่มี env ใหม่ · `migrate diff` สะอาด)**:
+**✅ Phase 20b กะ + จองล่วงหน้า + กระดานว่าง/ไม่ว่าง — ขึ้น production แล้ว 2026-09-23 (PR #26 · CI run 35819853906 · backup `posmobileorderdb-20260923-114231.dump`) · migration 1 ไฟล์ `20260923090000_add_therapist_shift_and_booking` additive ล้วน · ไม่มี env ใหม่)**:
 ตัดสินใจ 2026-09-23: **กะเก็บรายวัน** (คัดลอกทั้งสัปดาห์ได้) · **พนักงานบังคับตั้งแต่ตอนจอง ห้องเลือกทีหลังตอนเช็กอินได้** ·
-`TherapistShift` (unique therapistId+workDate · `isOff` = หยุด · **ไม่มีแถว = "ยังไม่ตั้งกะ" ซึ่งยังจองได้**) · `Booking` + enum `BookingStatus`
+`TherapistShift` (unique therapistId+workDate · `isOff` = หยุด · **ไม่มีแถว = "ยังไม่ตั้งกะ" = จองคิว/เช็กอินไม่ได้** (เปลี่ยน 2026-09-24 · 20e)) · `Booking` + enum `BookingStatus`
 (BOOKED→CHECKED_IN→IN_SERVICE→DONE / CANCELLED / NO_SHOW · `durationMinutes` เป็น snapshot) · `StoreSettings.bookingBufferMinutes` (default 10) ·
 **ตรรกะว่าง/ไม่ว่างอยู่ที่ `lib/booking.ts` ที่เดียว ห้ามลอก** (`resolveBookingTarget` ตรวจ FK+ทักษะ+ประเภทห้อง · `assertWithinShift` · `assertSlotFree`
 จับ advisory lock 720_003/720_004 ในทรานแซคชันเดียวกับการเขียน) · หน้า `/spa/bookings?date=` (ตารางรายวัน + ฟอร์ม + เช็กอิน) ·
@@ -575,9 +576,27 @@ resource `SPA_THERAPISTS` (หน้า `/spa/therapists`) + `SPA_BOOKINGS` (จ
 เช็กอิน = conditional update `status: BOOKED` **ก่อน** เปิด session/ออร์เดอร์ (กดพร้อมกันได้ใบเดียว) แล้วใช้ `openOrReuseSession`+`buildOrderLines` เดิม ·
 สถานะคิวเดินตามงานจริง (`startServiceItem`→IN_SERVICE · `markItemServed`→DONE · ปิดบิลปิดคิวค้างเป็น DONE ในทรานแซคชันเดียวกัน) ·
 เตือนคิวใกล้ถึงเวลา 15 นาทีในหน้าแจ้งเตือน + badge (คำนวณสด ไม่มีปุ่มรับทราบ) · เทส `booking.test.ts` 12 + `therapist-shift.test.ts` 4 +
-tenant-isolation +6 query +6 action (651 ทั้งชุด) · **20c (รายงานต่อพนักงานนวด) ยังไม่เริ่ม** — แผนใน spec §8
+tenant-isolation +6 query +6 action (651 ทั้งชุด)
 · **20d (2026-09-23)** ปรับหน้าจอสปาหลังเจ้าของทดลองใช้: ชื่อหน้า "…/ร้านสปา" (`NavItem.spaLabel` · `lib/spa-title.ts`) · แท็บอาหาร/นวดสปา · โต๊ะ/ห้อง
-(`components/segment-tabs.tsx`) · ช่องตั้ง "พักระหว่างคิวนวด" + ข้อความคิวชนบอกเวลาที่เริ่มได้ (`clashMessage()` ใน `lib/booking.ts`) · ข้อ 7 แยกบิลต่อลูกค้า = PR ถัดไป
+(`components/segment-tabs.tsx`) · ช่องตั้ง "พักระหว่างคิวนวด" + ข้อความคิวชนบอกเวลาที่เริ่มได้ (`clashMessage()` ใน `lib/booking.ts`) · **ข้อ 7 แยกบิลต่อลูกค้า**: ห้องสปา (`Table.kind = ROOM`) มีได้หลาย session เปิดพร้อมกัน 1 ใบต่อลูกค้า (`TableSession.customerLabel`) —
+**คืนห้องเป็นว่างต้องผ่าน `releaseTableIfIdle()` ใน `lib/table-session.ts` เท่านั้น** (ล็อกแถวห้องแล้วนับบิลที่ยังเปิด) ห้ามเขียน `status: EMPTY` ตรง ๆ ตอนปิด/ยกเลิก ·
+เข้าบิลเฉพาะใบด้วย `openOrReuseSession({ sessionId })` / เปิดบิลแยกด้วย `{ newCustomer }` · หน้าออร์เดอร์/ปิดบิลรับ `?session=`
+· **deploy จริง 2026-09-23**: backup `posmobileorderdb-20260923-114231.dump` → ซ้อม `migrate deploy` บนสำเนา production ในเครื่อง (25 → 29 migration · `migrate diff` = No difference detected)
+→ merge PR #26 → CI run 35819853906 เขียวครบ 3 job · สลับ blue → **green** · ตรวจในฐานจริงแล้ว: `_prisma_migrations` = 29 · `SPA_THERAPISTS`/`SPA_BOOKINGS` ครบ 12/12 บทบาท ·
+`booking`/`therapist_shift` 0 แถว · ทุกร้าน `spaEnabled = false`, `bookingBufferMinutes = 10` (ร้านอาหารเดิมไม่เห็นความเปลี่ยนแปลง) · ยืนยันโค้ดใหม่ในคอนเทนเนอร์ที่รับ traffic ด้วย
+`docker exec posmobileorder-app-green ls .next/server/app/(staff)/(app)/spa` → board/bookings/shifts/therapists ครบ (ไม่ใช่แค่ `/api/health`)
+· ⚠️ **กับดักใหม่ที่เจอจริง**: Prisma 7 ถอด `migrate diff --from-url` ออกแล้ว — ใส่ไปมันพ่นหน้า help แล้ว **exit 0 เหมือนผ่าน** ต้องใช้ `--from-config-datasource`
+(ตั้ง `DATABASE_URL` ของฐานที่จะตรวจเป็น env นำหน้าคำสั่ง — `prisma7.config.ts` โหลด dotenv ซึ่งไม่ override env ที่ตั้งมาก่อน)
+· **20c รายงานต่อพนักงานนวด เสร็จในเครื่องแล้ว (รอ PR · ไม่มี migration/env)**: `getTherapistSalesReport`/`getTherapistHistory` ใน `lib/queries.ts` (raw SQL อ่าน `SaleItem.therapistId` ของบิล COMPLETED · กรอง storeId เอง) ·
+`/spa/reports?from=&to=` (สิทธิ์ `SPA_THERAPISTS` หรือ `REPORTS`) + `/spa/therapists/[therapistId]` ประวัติรายคน · `resolveDayRange()` ใน `lib/day.ts` · เทส `therapist-report.test.ts` 6
+
+**🔧 20e ปรับร้านสปารอบ 2 + แยกรายงานอาหาร/นวด — โค้ดเสร็จ 2026-09-24 (branch `feat/spa-20e-owner-feedback` รวม #28 + #31 · รอ backup + ซ้อม migration 2 ไฟล์ก่อน merge)**:
+**ไม่มีกะ = จองคิว/เช็กอินไม่ได้** (`assertWithinShift` · จอขาย/walk-in ไม่ต้องมีกะ · เทสที่จองคิวต้องปูกะด้วย `createFullDayShifts()`) · ตารางจองสีตามสถานะ + ขีดชั่วโมง/ครึ่ง ·
+**ห้องรอเริ่มนวด** `listServicesAwaitingStart()` (แถบผังโต๊ะ + ปุ่มเริ่มนวดบนการ์ด + หน้าแจ้งเตือน + badge · คำนวณสด) · ห้องหลายบิล: `/billing` ต้องเลือกลูกค้า ·
+ลูกค้าจ่ายเองผ่าน QR ห้องไม่ได้ (`hasMultipleOpenBills()` ใน `lib/table-session.ts` — ทางจ่ายเองของลูกค้าใหม่ ๆ ต้องเรียกตัวนี้ด้วย) ·
+**`SaleItem.kind` (PRODUCT/FOOD/SERVICE) snapshot ไม่มี default — ทางออกบิลใหม่ต้องระบุเอง** (migration `20260924090000_add_sale_item_kind` เติมค่าบิลเก่า) ·
+`/reports` ช่วงวัน + แยก 3 ประเภท + แถว "ค่าบริการ − ส่วนลด" (ท้ายบิลไม่กระจายเข้าประเภท) · `getSalesByKind` ตัวเดียวใช้ทั้ง `/reports` และ `/spa/reports` ·
+CSV `GET /api/reports/sales-csv` (`lib/sales-csv.ts` · BOM + กันสูตร Excel) · สีกราฟ `--chart-1..3` ใน theme staff (ลำดับตายตัว อาหาร/นวด/สินค้า) · 704 เทสผ่าน
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

@@ -59,6 +59,12 @@
 
 /* ═══════════════ ธีมพนักงาน/หลังบ้าน ═══════════════ */
 [data-theme="staff"] {
+  /* สีกราฟแยกประเภท (20e) — ลำดับตายตัว 1 อาหาร · 2 นวดสปา · 3 สินค้าหน้าร้าน ห้ามสลับตามอันดับยอด
+     ผ่าน validate_palette.js (light, CVD ΔE ≥ 9.2) · ช่อง 3 contrast 2.74:1 จึงต้องมี legend + ตารางตัวเลขคู่เสมอ */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+
   --brand: #01787b;
   --brand-strong: #015659;
   --brand-soft: #e3f2f2;
@@ -425,6 +431,72 @@
   .chip-brand {
     background: var(--brand-soft);
     color: var(--brand-strong);
+  }
+
+  /* ───────────── ตารางจองร้านนวด (20e) — แท่งคิวสีตามสถานะ ใช้สีชุดเดียวกับ chip ─────────────
+     สีต้องตรงกับ chip สถานะในตารางรายการด้านล่าง ผู้ใช้จะได้จับคู่ได้โดยไม่ต้องกดเข้าไปดู */
+  .booking-bar {
+    border: 1px solid transparent;
+    border-left-width: 4px;
+    border-radius: 8px;
+    color: var(--ink);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8125rem;
+    transition: filter 0.15s;
+  }
+  .booking-bar:hover {
+    filter: brightness(0.97);
+  }
+  .booking-bar.is-booked {
+    background: var(--info-bg);
+    border-color: var(--info);
+  }
+  .booking-bar.is-checked-in {
+    background: var(--brand-soft);
+    border-color: var(--brand);
+  }
+  .booking-bar.is-in-service {
+    background: var(--warning-bg);
+    border-color: var(--warning);
+  }
+  .booking-bar.is-done {
+    background: var(--success-bg);
+    border-color: var(--success);
+    opacity: 0.7;
+  }
+  .booking-legend {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .booking-legend .swatch {
+    width: 14px;
+    height: 10px;
+    border-radius: 3px;
+    border-left: 4px solid;
+  }
+  /* ขีดชั่วโมง (เข้ม) / ครึ่งชั่วโมง (จาง) ลากลงทุกแถว — บอกได้ทันทีว่าคิวเริ่มเต็มชั่วโมงหรือครึ่ง */
+  .timeline-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 1px solid var(--line);
+    pointer-events: none;
+  }
+  .timeline-tick.is-half {
+    border-left-style: dashed;
+    opacity: 0.6;
+  }
+  .timeline-now {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 2px solid var(--danger);
+    pointer-events: none;
+    z-index: 2;
   }
 
   /* ───────────── ตัวอักษร ───────────── */

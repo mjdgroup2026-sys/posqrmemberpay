@@ -3,6 +3,7 @@
 import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
 import { useState } from "react"
 import Link from "next/link"
+import { BillSwitcher } from "@/components/bill-switcher"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -167,7 +168,10 @@ export function TableDetail({
               <IconBack size={14} aria-hidden /> กลับไปผังโต๊ะ
             </Link>
           </p>
-          <h1 className="t-h1">โต๊ะ {detail.tableCode}</h1>
+          <h1 className="t-h1">
+            โต๊ะ {detail.tableCode}
+            {detail.customerLabel ? <> · {detail.customerLabel}</> : null}
+          </h1>
           <p className="t-body" style={{ marginTop: 4 }}>
             เปิดโต๊ะ <span className="num">{formatClock(detail.openedAt)}</span> ·{" "}
             <LiveElapsed since={detail.openedAt} prefix="เปิดมาแล้ว " />
@@ -183,13 +187,13 @@ export function TableDetail({
             ยอดรวม ฿<span className="num">{formatBaht(detail.total)}</span>
           </span>
           {canOrderMore && detail.status !== "AWAITING_BILL" ? (
-            <Link href={`/mobile-order/pos?table=${detail.tableId}`} className="btn btn-subtle">
+            <Link href={`/mobile-order/pos?table=${detail.tableId}&session=${detail.sessionId}`} className="btn btn-subtle">
               <IconPlus size={17} aria-hidden />
               สั่งเพิ่ม
             </Link>
           ) : null}
           {allowed.includes("EDIT") ? (
-            <Link href={`/mobile-order/tables/${detail.tableId}/billing`} className="btn btn-primary">
+            <Link href={`/mobile-order/tables/${detail.tableId}/billing?session=${detail.sessionId}`} className="btn btn-primary">
               <IconReceipt size={17} aria-hidden />
               ปิดบิล / รับชำระเงิน
             </Link>
@@ -204,11 +208,17 @@ export function TableDetail({
                 setCancellingTable(true)
               }}
             >
-              ยกเลิกโต๊ะ
+              {detail.bills.length > 1 ? "ยกเลิกบิลนี้" : "ยกเลิกโต๊ะ"}
             </button>
           ) : null}
         </div>
       </div>
+
+      <BillSwitcher
+        bills={detail.bills}
+        currentSessionId={detail.sessionId}
+        hrefFor={(sessionId) => `/mobile-order/tables/${detail.tableId}?session=${sessionId}`}
+      />
 
       {detail.notifications.length > 0 ? (
         <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>

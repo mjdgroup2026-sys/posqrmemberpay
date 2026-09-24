@@ -175,7 +175,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         cashierId: ownerId,
         note: `บิลร้าน ${tag}`,
         items: {
-          create: [{ productId: product.id, name: `สินค้าร้าน ${tag}`, quantity: 2, unitPrice: "50.00", subtotal: "100.00" }],
+          create: [{ productId: product.id, kind: "PRODUCT", name: `สินค้าร้าน ${tag}`, quantity: 2, unitPrice: "50.00", subtotal: "100.00" }],
         },
       },
     })
@@ -445,6 +445,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["countPaymentsAwaitingCallback", (q, a) => q.countPaymentsAwaitingCallback(a.storeId)],
     ["listCustomerPaidBills", (q, a) => q.listCustomerPaidBills(a.storeId)],
     ["getTableDetail", (q, a, b) => q.getTableDetail(a.storeId, b.tableId)],
+    // ?session= จากผู้ใช้ (ห้องสปาหลายบิล · 2026-09-23) — session ของร้านอื่นต้องไม่เปิดอะไรในร้านนี้
+    ["getTableDetail", (q, a, b) => q.getTableDetail(a.storeId, a.tableId, b.sessionId)],
+    ["getBillingView", (q, a, b) => q.getBillingView(a.storeId, a.tableId, b.sessionId)],
     ["listKitchenTickets", (q, a) => q.listKitchenTickets(a.storeId)],
     ["getStoreSettings", (q, a) => q.getStoreSettings(a.storeId)],
     ["listMenu", (q, a) => q.listMenu(a.storeId)],
@@ -474,6 +477,17 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getSpaBoard", (q, a) => q.getSpaBoard(a.storeId)],
     ["listUpcomingBookings", (q, a) => q.listUpcomingBookings(a.storeId)],
     ["countUpcomingBookings", (q, a) => q.countUpcomingBookings(a.storeId)],
+    ["listServicesAwaitingStart", (q, a) => q.listServicesAwaitingStart(a.storeId)],
+    ["countServicesAwaitingStart", (q, a) => q.countServicesAwaitingStart(a.storeId)],
+    ["getTherapistSalesReport", (q, a) => q.getTherapistSalesReport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getTherapistHistory", (q, a, b) => q.getTherapistHistory(a.storeId, b.therapistId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getTherapistById", (q, a, b) => q.getTherapistById(a.storeId, b.therapistId)],
+    // 20e — รายงานแยกประเภท + ตารางพนักงาน × วัน + CSV (raw SQL ทุกตัว ต้องกรอง storeId เอง)
+    ["getTherapistDailyMatrix", (q, a) => q.getTherapistDailyMatrix(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getSalesByKind", (q, a) => q.getSalesByKind(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getTopItemsByKind", (q, a) => q.getTopItemsByKind(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() }, "PRODUCT")],
+    ["listSalesForExport", (q, a) => q.listSalesForExport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() }, null)],
+    ["getPaymentBreakdown", (q, a) => q.getPaymentBreakdown(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {

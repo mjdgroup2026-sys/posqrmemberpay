@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { businessDayKey, businessDayRange, businessDateOnly, isSameBusinessDay, parseBusinessDayKey } from "@/lib/day"
+import { businessDayKey, businessDayRange, businessDateOnly, isSameBusinessDay, parseBusinessDayKey, resolveDayRange } from "@/lib/day"
 
 /// วันทางธุรกิจยึดเวลาไทยเสมอ (UTC+7) ไม่ใช่ TZ ของเครื่องที่รัน —
 /// container บน production รันด้วย UTC ถ้าใช้เวลาเครื่องตรง ๆ "วันนี้" จะหมุนตอน 07:00 น. ตามเวลาไทย
@@ -68,5 +68,21 @@ describe("lib/day — วันทางธุรกิจตามเวลา�
     expect(parseBusinessDayKey("2026-02-30")).toBeNull()
     expect(parseBusinessDayKey("2026-13-01")).toBeNull()
     expect(parseBusinessDayKey("")).toBeNull()
+  })
+
+  it("resolveDayRange: ค่าว่าง/ผิด ถอยเป็น 30 วันล่าสุด · อนาคตถูกปัด · กรอกกลับหัวถูกสลับให้", () => {
+    const now = new Date("2026-09-23T05:00:00.000Z") // 12:00 ไทย วันที่ 23
+    expect(resolveDayRange(undefined, undefined, 30, now)).toEqual({ from: "2026-08-25", to: "2026-09-23" })
+    expect(resolveDayRange("oops", "2026-09-10", 30, now)).toEqual({ from: "2026-08-12", to: "2026-09-10" })
+    expect(resolveDayRange("2026-09-01", "2026-10-01", 30, now)).toEqual({ from: "2026-09-01", to: "2026-09-23" })
+    expect(resolveDayRange("2026-09-20", "2026-09-05", 30, now)).toEqual({ from: "2026-09-05", to: "2026-09-20" })
+    expect(resolveDayRange(["2026-09-01"], "2026-09-05", 7, now)).toEqual({ from: "2026-08-30", to: "2026-09-05" })
+  })
+
+  it("resolveDayRange: ยาวเกิน 366 วัน ถูกตัดต้นช่วงให้เหลือ 366 วันพอดี (20e)", () => {
+    const now = new Date("2026-09-23T05:00:00.000Z")
+    expect(resolveDayRange("2020-01-01", "2026-09-23", 30, now)).toEqual({ from: "2025-09-23", to: "2026-09-23" })
+    // พอดี 366 วันไม่ถูกแตะ
+    expect(resolveDayRange("2025-09-23", "2026-09-23", 30, now)).toEqual({ from: "2025-09-23", to: "2026-09-23" })
   })
 })

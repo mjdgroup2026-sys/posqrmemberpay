@@ -20,7 +20,8 @@ export default async function PromptPayPage({ params }: PageProps<"/order/[qrTok
   const settings = store ? await getStoreSettings(store.storeId) : null
 
   if (status.state === "PAID") redirect(`/order/${qrToken}/pay/success`)
-  if (status.state === "UNKNOWN" || status.total <= 0) redirect(`/order/${qrToken}/pay`)
+  // ห้องหลายบิล (20e) — ห้ามออก QR ให้บิลที่เดาเอา หน้า /pay บอกให้ไปจ่ายที่พนักงาน
+  if (status.state === "UNKNOWN" || status.total <= 0 || status.sharedRoom) redirect(`/order/${qrToken}/pay`)
 
   // payload สร้างสดทุกครั้งที่เข้าหน้า — ยอดจึงตรงกับบิลปัจจุบันเสมอแม้ลูกค้าสั่งเพิ่มระหว่างทาง
   //

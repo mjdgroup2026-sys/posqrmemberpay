@@ -9,17 +9,18 @@ import {
 } from "@/app/actions/notifications"
 import Link from "next/link"
 import { formatBaht, formatClock, formatDateTime, formatNumber } from "@/lib/format"
-import type { BookingRow, CustomerPaidBill, NotificationCard, PaymentAwaitingCallback } from "@/lib/queries"
+import type { BookingRow, CustomerPaidBill, NotificationCard, PaymentAwaitingCallback, ServiceAwaitingStart } from "@/lib/queries"
 import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { AwaitingCallbackBadge, CustomerPaidBadge } from "@/components/payment-alerts"
-import { IconBell, IconCalendar, IconReceipt, IconSpinner, IconWarning } from "@/components/icons"
+import { IconBell, IconCalendar, IconReceipt, IconRoom, IconSpinner, IconWarning } from "@/components/icons"
 
 export function NotificationBoard({
   notifications,
   awaitingCallback = [],
   paidBills = [],
   upcomingBookings = [],
+  awaitingStart = [],
   canAcknowledge = true,
 }: {
   notifications: NotificationCard[]
@@ -27,6 +28,8 @@ export function NotificationBoard({
   paidBills?: CustomerPaidBill[]
   /// คิวนวดที่ใกล้ถึงเวลาแล้วยังไม่เช็กอิน (Phase 20b) — คำนวณสด ไม่ใช่แถวใน Notification จึงไม่มีปุ่มรับทราบ
   upcomingBookings?: BookingRow[]
+  /// ห้องที่เช็กอินแล้วรอกดเริ่มนวด (20e) — คำนวณสด นับรวมใน badge จึงต้องมีที่แสดงที่นี่ด้วย
+  awaitingStart?: ServiceAwaitingStart[]
   /// MO_NOTIFICATIONS:EDIT — ไม่มี = ดูอย่างเดียว
   canAcknowledge?: boolean
 }) {
@@ -203,6 +206,40 @@ export function NotificationBoard({
                   className="btn btn-subtle btn-block btn-sm"
                 >
                   เปิดหน้าปิดบิลของโต๊ะนี้
+                </Link>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {/* ห้องรอเริ่มนวด (20e) — ไม่มีปุ่มรับทราบ หายเองเมื่อกดเริ่มนวดที่ผังห้อง/หน้าห้อง */}
+      {awaitingStart.length > 0 ? (
+        <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <h2 className="t-h3" style={{ color: "var(--warning)" }}>
+            ห้องรอเริ่มนวด · <span className="num">{formatNumber(awaitingStart.length)}</span>
+          </h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+            {awaitingStart.map((item) => (
+              <article key={item.itemId} className="card-ui card-pad" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                  <span className="row" style={{ gap: 8 }}>
+                    <IconRoom size={17} aria-hidden />
+                    <span style={{ fontWeight: 700 }}>
+                      ห้อง {item.tableCode}
+                      {item.customerLabel ? ` · ${item.customerLabel}` : ""}
+                    </span>
+                  </span>
+                  <span className="chip chip-warning">
+                    <span className="dot" />
+                    รอ <LiveElapsed since={item.orderedAt} />
+                  </span>
+                </div>
+                <span className="t-small">
+                  {item.menuItemName} · {item.therapistLabel ?? "ยังไม่มอบหมายพนักงานนวด"}
+                </span>
+                <Link href={`/mobile-order/tables/${item.tableId}?session=${item.sessionId}`} className="btn btn-subtle btn-block btn-sm">
+                  เปิดห้องเพื่อเริ่มนวด
                 </Link>
               </article>
             ))}

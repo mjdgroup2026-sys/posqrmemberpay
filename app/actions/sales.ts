@@ -161,6 +161,7 @@ export async function createSale(formData: FormData): Promise<ActionResult<Recei
             data: {
               saleId: sale.id,
               productId: item.productId,
+              kind: "PRODUCT",
               name: item.name,
               quantity: item.quantity,
               unitPrice: item.unitPrice.toFixed(2),

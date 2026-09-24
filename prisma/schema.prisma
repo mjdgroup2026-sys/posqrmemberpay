@@ -297,6 +297,8 @@ model SaleItem {
   menuItemId  String?
   /// พนักงานนวดที่ให้บริการบรรทัดนี้ (Phase 20) — snapshot ลงบิลไว้ทำรายงาน/ค่ามือต่อคน · บิลอาหาร/สินค้าเป็น null
   therapistId String?
+  /// ประเภทบรรทัด ณ เวลาขาย (20e) — แยกรายงานอาหาร/นวด/สินค้า · ไม่มี default โดยตั้งใจ ทุกทางที่ออกบิลต้องระบุเอง
+  kind        SaleLineKind
   /// ชื่อรายการ ณ เวลาขาย (snapshot) — หน้าประวัติ/ใบเสร็จอ่านจากฟิลด์นี้ ไม่ต้อง join กลับ
   name        String
   quantity    Int
@@ -448,17 +450,20 @@ enum TableKind {
 }
 
 model TableSession {
-  id           String             @id @default(cuid())
-  storeId      String
-  tableId      String
-  qrCodeId     String?
-  openedAt     DateTime           @default(now())
-  status       TableSessionStatus @default(OPEN)
-  closedAt     DateTime?
-  closedById   String?
-  cancelReason String?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  id            String             @id @default(cuid())
+  storeId       String
+  tableId       String
+  qrCodeId      String?
+  openedAt      DateTime           @default(now())
+  status        TableSessionStatus @default(OPEN)
+  closedAt      DateTime?
+  closedById    String?
+  cancelReason  String?
+  /// ชื่อลูกค้าของบิลนี้ (2026-09-23 · ร้านสปา) — ห้องนวดเดียวเปิดได้หลายบิลพร้อมกัน 1 บิลต่อลูกค้า
+  /// ป้ายนี้ใช้แยกบิลบนผังห้อง/หน้าปิดบิล · null = บิลปกติของโต๊ะอาหาร หรือไม่ได้ระบุชื่อ
+  customerLabel String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 
   store          Store                 @relation(fields: [storeId], references: [id])
   table          Table                 @relation(fields: [tableId], references: [id])
@@ -515,6 +520,15 @@ model MenuItem {
   @@index([isFeatured])
   @@index([stationId])
   @@map("menu_item")
+}
+
+/// ประเภทของบรรทัดในบิล (20e) — snapshot ตอนขาย ใช้แยกรายงาน อาหาร / นวดสปา / สินค้าหน้าร้าน
+/// PRODUCT = สินค้าหน้าร้าน (POS · มี productId) · FOOD = เมนูอาหาร/เครื่องดื่ม · SERVICE = โปรแกรมนวด
+/// เก็บลงบิลเอง ไม่อ่านจาก MenuItem ปัจจุบัน — ลบเมนู/เปลี่ยนชนิดทีหลังแล้วรายงานย้อนหลังต้องไม่เพี้ยน
+enum SaleLineKind {
+  PRODUCT
+  FOOD
+  SERVICE
 }
 
 /// ชนิดของรายการในเมนู (Phase 20) — FOOD = อาหาร/เครื่องดื่ม (เข้าครัว/KDS) · SERVICE = โปรแกรมนวด (มีระยะเวลา ต้องมีพนักงานนวด)

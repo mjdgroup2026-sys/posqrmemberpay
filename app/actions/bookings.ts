@@ -7,7 +7,7 @@ import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { assertSlotFree, assertWithinShift, BookingError, resolveBookingTarget } from "@/lib/booking"
 import { buildOrderLines, OrderLineError } from "@/lib/order-lines"
-import { openOrReuseSession, SessionError } from "@/lib/table-session"
+import { findCustomerSession, openOrReuseSession, SessionError } from "@/lib/table-session"
 import { businessDayTime, formatHhMm, minuteOfBusinessDay, parseHhMm } from "@/lib/day"
 import {
   bookingCancelSchema,
@@ -222,7 +222,7 @@ export async function checkInBooking(formData: FormData): Promise<ActionResult<C
     const result = await db.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: parsed.data.id },
-        select: { id: true, status: true, menuItemId: true, therapistId: true, startAt: true, endAt: true, customerName: true },
+        select: { id: true, status: true, menuItemId: true, therapistId: true, startAt: true, endAt: true, customerName: true, customerPhone: true },
       })
       if (!booking) throw new BookingError("ไม่พบการจองที่ต้องการ")
       if (booking.status !== "BOOKED") throw new BookingError("การจองนี้เช็กอินหรือถูกปิดไปแล้ว")
@@ -250,10 +250,29 @@ export async function checkInBooking(formData: FormData): Promise<ActionResult<C
         therapistLabel: target.therapistLabel,
         tableCode: target.tableCode,
       })
+      // ตรวจกะซ้ำตอนเช็กอิน (2026-09-24) — คิวที่จองไว้ก่อนบังคับกะ หรือกะถูกลบ/ตั้งหยุดหลังจอง ต้องไม่เข้าห้องได้เงียบ ๆ
+      await assertWithinShift(tx, {
+        therapistId: target.therapistId,
+        therapistLabel: target.therapistLabel,
+        startAt: booking.startAt,
+        endAt: booking.endAt,
+      })
 
-      const session = await openOrReuseSession(tx, storeId, { tableId: parsed.data.tableId })
+      // 1 ลูกค้า = 1 บิล (2026-09-23): ห้องมีบิลของลูกค้าคนเดิมเปิดอยู่ → เข้าบิลนั้น · คนอื่น/ห้องว่าง → เปิดบิลใหม่ของลูกค้าคนนี้
+      // เดิม reuse session ของห้องเสมอ ลูกค้าคนถัดไปในห้องเดียวกันจึงถูกรวมบิลกับคนก่อนที่ยังไม่จ่าย
+      const sameCustomer = await findCustomerSession(tx, parsed.data.tableId, {
+        name: booking.customerName,
+        phone: booking.customerPhone,
+      })
+      const session = await openOrReuseSession(
+        tx,
+        storeId,
+        sameCustomer
+          ? { tableId: parsed.data.tableId, sessionId: sameCustomer }
+          : { tableId: parsed.data.tableId, newCustomer: { label: booking.customerName } },
+      )
       if (session.status === "AWAITING_BILL") {
-        throw new BookingError(`ห้อง ${session.tableCode} ขอเช็กบิลแล้ว ปิดบิลก่อนแล้วค่อยเช็กอินคิวถัดไป`)
+        throw new BookingError(`บิลของคุณ${booking.customerName} ในห้อง ${session.tableCode} ขอเช็กบิลแล้ว — ปิดบิลนั้นก่อนแล้วค่อยเช็กอิน`)
       }
 
       // บรรทัดบริการผ่านตัวเดียวกับจอขาย — ราคา/ทักษะ/ตัวเลือกเสริมถูกตรวจซ้ำในทรานแซคชันนี้

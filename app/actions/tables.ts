@@ -8,7 +8,7 @@ import { publishStoreEvent } from "@/lib/realtime"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { isPlanActive } from "@/lib/subscription"
 import { assertTableCapacity, TableLimitExceeded } from "@/lib/table-limit"
-import { openOrReuseSession, SessionError, LIVE_SESSION_STATUS } from "@/lib/table-session"
+import { openOrReuseSession, SessionError, LIVE_SESSION_STATUS, releaseTableIfIdle } from "@/lib/table-session"
 import {
   openTableSchema,
   mergeTablesSchema,
@@ -175,12 +175,15 @@ export async function mergeTables(formData: FormData): Promise<ActionResult> {
       })
       if (!secondary) throw new TableAbort({ error: "ไม่พบโต๊ะที่จะรวม" })
 
-      const primarySession = await tx.tableSession.findFirst({
+      const primarySessions = await tx.tableSession.count({
         where: { tableId: primaryTableId, status: { in: LIVE_SESSION_STATUS } },
-        select: { id: true },
       })
-      if (!primarySession) {
+      if (primarySessions === 0) {
         throw new TableAbort({ error: `โต๊ะ ${primary.code} ยังไม่ได้เปิดใช้งาน — เปิดโต๊ะหลักก่อนจึงจะรวมโต๊ะได้` })
+      }
+      // ห้องสปาที่มีหลายบิล (หลายลูกค้า) รวมโต๊ะไม่ได้ — บิลที่ต้องย้ายไปไม่ชัดว่าเป็นของใคร (2026-09-23)
+      if (primarySessions > 1) {
+        throw new TableAbort({ error: `ห้อง ${primary.code} มีบิลของลูกค้า ${primarySessions} คนเปิดอยู่ — ปิดให้เหลือบิลเดียวก่อนจึงจะรวมได้` })
       }
 
       // ★ conditional update — โต๊ะรองต้องยังว่างอยู่จริง ณ วินาทีที่เขียน
@@ -318,15 +321,8 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
         },
       })
 
-      // คืนโต๊ะหลักและโต๊ะที่รวมอยู่ทั้งหมดเป็นว่างพร้อมกัน
-      await tx.table.updateMany({
-        where: { primaryTableId: session.tableId },
-        data: { primaryTableId: null, status: "EMPTY" },
-      })
-      await tx.table.update({
-        where: { id: session.tableId },
-        data: { status: "EMPTY" },
-      })
+      // คืนโต๊ะหลักและโต๊ะที่รวมอยู่เป็นว่าง — ห้องสปาที่ยังมีบิลของลูกค้าคนอื่นเปิดอยู่ไม่ถูกคืน (2026-09-23)
+      await releaseTableIfIdle(tx, storeId, session.tableId)
 
       return session.table.code
     })

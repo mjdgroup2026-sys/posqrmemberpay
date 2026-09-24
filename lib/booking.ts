@@ -196,15 +196,17 @@ export function clashMessage(
 
 /// กะของพนักงานวันนั้นครอบช่วงเวลาที่จองไหม
 ///
-/// **ไม่มีแถวกะ = จองได้** โดยตั้งใจ — ร้านที่ยังไม่เริ่มตั้งกะต้องจองได้ตามปกติ (กระดานจะบอกว่า "ยังไม่ตั้งกะ")
-/// มีแถวแล้วถือว่าร้านนั้นใช้ระบบกะจริง จึงบังคับตามนั้น: หยุด = จองไม่ได้ · นอกเวลากะ = จองไม่ได้
+/// **ไม่มีแถวกะ = จองไม่ได้** (เจ้าของสั่ง 2026-09-24 — เดิม 20b ปล่อยให้จองได้ แล้วเจ้าของงงว่า "ไม่ได้ลงกะแต่จัดคิวได้")
+/// หยุด = จองไม่ได้ · นอกเวลากะ = จองไม่ได้ · ใช้ทั้งตอนจองและตอนเช็กอิน — ขายหน้าร้าน/มอบหมายงาน walk-in ไม่ผ่านด่านนี้
 export async function assertWithinShift(tx: StoreTx, input: { therapistId: string; therapistLabel: string; startAt: Date; endAt: Date }): Promise<void> {
   const dayKey = businessDayKey(input.startAt)
   const shift = await tx.therapistShift.findUnique({
     where: { therapistId_workDate: { therapistId: input.therapistId, workDate: dateOnlyFromKey(dayKey) } },
     select: { startMinute: true, endMinute: true, isOff: true },
   })
-  if (!shift) return
+  if (!shift) {
+    throw new BookingError(`พนักงาน ${input.therapistLabel} ยังไม่ได้ลงกะวันที่ ${dayKey} — ตั้งกะที่หน้า "ตารางกะ" ก่อนจึงจะจองคิวได้`)
+  }
   if (shift.isOff) throw new BookingError(`พนักงาน ${input.therapistLabel} หยุดวันที่ ${dayKey}`)
 
   const startMinute = minuteOfBusinessDay(input.startAt)

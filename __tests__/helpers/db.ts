@@ -367,3 +367,16 @@ export async function createTestNotification(
     },
   })
 }
+
+/// กะเต็มวัน (00:00–24:00) ให้พนักงานนวด — ตั้งแต่ 2026-09-24 ไม่มีกะ = จองคิวไม่ได้
+/// เทสที่ไม่ได้ทดสอบเรื่องกะโดยตรงใช้ตัวนี้ปูพื้นให้จองได้ทุกเวลา
+export async function createFullDayShifts(therapistIds: string[], dayKeys: string[], storeId = TEST_STORE_ID) {
+  const db = testPrisma()
+  for (const therapistId of therapistIds) {
+    for (const dayKey of dayKeys) {
+      await db.therapistShift.create({
+        data: { storeId, therapistId, workDate: new Date(`${dayKey}T00:00:00.000Z`), startMinute: 0, endMinute: 1440 },
+      })
+    }
+  }
+}

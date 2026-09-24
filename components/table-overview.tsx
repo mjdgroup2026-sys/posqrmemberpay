@@ -12,12 +12,14 @@ import {
   cancelTableSession,
 } from "@/app/actions/tables"
 import { acknowledgeNotification } from "@/app/actions/notifications"
+import { startServiceItem } from "@/app/actions/orders"
 import { formatBaht, formatClock, formatNumber } from "@/lib/format"
-import type { CustomerPaidBill, PaymentAwaitingCallback, TableCard } from "@/lib/queries"
+import type { CustomerPaidBill, PaymentAwaitingCallback, ServiceAwaitingStart, TableCard } from "@/lib/queries"
 import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { IconBell, IconMerge, IconReceipt, IconRoom, IconSpinner, IconTable } from "@/components/icons"
 import { SegmentTabs } from "@/components/segment-tabs"
+import { billLabel } from "@/components/bill-switcher"
 import { AwaitingCallbackBadge, CustomerPaidBadge } from "@/components/payment-alerts"
 import {
   Dialog,
@@ -76,6 +78,8 @@ export function TableOverview({
   allowed = FULL_ACCESS,
   canAcknowledge = true,
   spaEnabled = false,
+  awaitingStart = [],
+  canStartService = false,
 }: {
   tables: TableCard[]
   paidBills?: CustomerPaidBill[]
@@ -86,6 +90,10 @@ export function TableOverview({
   canAcknowledge?: boolean
   /// ร้านเปิดตัวเลือกร้านนวด — แยกแท็บ โต๊ะอาหาร / ห้องสปา (2026-09-23 เจ้าของสั่ง)
   spaEnabled?: boolean
+  /// รายการนวดที่เข้าห้องแล้วแต่ยังไม่กดเริ่มนวด (20e) — แถบบนสุด + ปุ่มเริ่มนวดบนการ์ดห้อง
+  awaitingStart?: ServiceAwaitingStart[]
+  /// MO_TABLES:EDIT หรือ SPA_BOOKINGS:EDIT — กดเริ่มนวดได้ (ด่านจริงอยู่ที่ startServiceItem)
+  canStartService?: boolean
 }) {
   const router = useRouter()
   const [filter, setFilter] = useState<Filter>("all")
@@ -136,6 +144,27 @@ export function TableOverview({
     }
     return map
   }, [awaitingCallback])
+
+  const awaitingStartByTable = useMemo(() => {
+    const map = new Map<string, ServiceAwaitingStart[]>()
+    for (const item of awaitingStart) map.set(item.tableId, [...(map.get(item.tableId) ?? []), item])
+    return map
+  }, [awaitingStart])
+
+  /// กดห้องในแถบ "รอเริ่มนวด" — สลับไปแท็บห้องสปา ล้างตัวกรอง แล้วเลื่อนไปที่การ์ดห้องนั้น
+  function jumpToRoom(tableId: string) {
+    setKindTab("ROOM")
+    setFilter("all")
+    requestAnimationFrame(() => {
+      document.getElementById(`table-card-${tableId}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+    })
+  }
+
+  function handleStartService(itemId: string) {
+    const formData = new FormData()
+    formData.set("id", itemId)
+    void run(() => startServiceItem(formData))
+  }
 
   async function run(action: () => Promise<{ ok: boolean; message?: string; error?: string }>) {
     setPending(true)
@@ -225,6 +254,26 @@ export function TableOverview({
         </div>
       ) : null}
 
+      {/* ห้องที่เช็กอินแล้วยังไม่เริ่มนวด (20e — เจ้าของสั่ง 2026-09-24) — อยู่บนสุดทุกแท็บ กดแล้วพาไปการ์ดห้อง
+          คำนวณสด หายเองเมื่อกดเริ่มนวด · นับรวมใน badge ของ sidebar ด้วย */}
+      {awaitingStart.length > 0 ? (
+        <div className="alert-banner warning" role="status">
+          <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <IconRoom size={16} aria-hidden />
+            <strong>
+              รอเริ่มนวด <span className="num">{formatNumber(awaitingStart.length)}</span> รายการ:
+            </strong>
+            {awaitingStart.map((item) => (
+              <button key={item.itemId} type="button" className="btn btn-subtle btn-sm" onClick={() => jumpToRoom(item.tableId)}>
+                ห้อง {item.tableCode}
+                {item.customerLabel ? ` · ${item.customerLabel}` : ""}
+                <span className="t-caption"> · รอ <LiveElapsed since={item.orderedAt} /></span>
+              </button>
+            ))}
+          </span>
+        </div>
+      ) : null}
+
       {spaEnabled ? (
         <SegmentTabs
           label="โต๊ะหรือห้อง"
@@ -274,8 +323,15 @@ export function TableOverview({
           {group.items.map((table) => (
             <article
               key={table.id}
+              id={`table-card-${table.id}`}
               className="card-ui card-pad"
-              style={{ display: "flex", flexDirection: "column", gap: 8 }}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                // ห้องที่รอเริ่มนวดมีกรอบสีเตือน เห็นได้จากระยะไกลโดยไม่ต้องอ่าน (20e)
+                ...(awaitingStartByTable.has(table.id) ? { boxShadow: "0 0 0 2px var(--warning)" } : {}),
+              }}
             >
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <span className="row" style={{ gap: 8 }}>
@@ -308,6 +364,38 @@ export function TableOverview({
                 <AwaitingCallbackBadge item={awaitingByTable.get(table.id)!} />
               ) : null}
 
+              {/* รอเริ่มนวด (20e) — กดเริ่มได้จากผังเลย ไม่ต้องเข้าหน้าห้องก่อน · ยังไม่มอบหมายพนักงาน = พาไปหน้าห้องให้เลือกคน */}
+              {awaitingStartByTable.has(table.id) ? (
+                <div className="alert-banner warning" style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+                  {awaitingStartByTable.get(table.id)!.map((item) => (
+                    <div key={item.itemId} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <span className="t-small">
+                        <strong>รอเริ่มนวด</strong>
+                        {item.customerLabel ? ` · ${item.customerLabel}` : ""} · {item.menuItemName}
+                        <br />
+                        <span className="t-caption">
+                          {item.therapistLabel ?? "ยังไม่มอบหมายพนักงานนวด"} · รอ <LiveElapsed since={item.orderedAt} />
+                        </span>
+                      </span>
+                      {!canStartService ? null : item.therapistId ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm btn-block"
+                          disabled={pending}
+                          onClick={() => handleStartService(item.itemId)}
+                        >
+                          เริ่มนวด
+                        </button>
+                      ) : (
+                        <Link href={`/mobile-order/tables/${table.id}?session=${item.sessionId}`} className="btn btn-subtle btn-sm btn-block">
+                          เลือกพนักงานนวด
+                        </Link>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               {table.primaryTableCode ? (
                 <span className="t-caption">
                   บิลรวมอยู่ที่{" "}
@@ -323,9 +411,32 @@ export function TableOverview({
                 </span>
               ) : null}
 
-              {table.sessionId ? (
+              {/* ห้องสปาที่มีลูกค้าหลายคน = หลายบิล (2026-09-23) — แยกแถวต่อบิล แต่ละคนจ่ายแยก */}
+              {table.bills.length > 1 ? (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {table.bills.map((bill, index) => (
+                    <li key={bill.sessionId} className="row" style={{ justifyContent: "space-between", gap: 6, borderTop: "1px solid var(--line)", paddingTop: 6 }}>
+                      <Link href={`/mobile-order/tables/${table.id}?session=${bill.sessionId}`} className="t-small" style={{ fontWeight: 600 }}>
+                        {billLabel(bill, index)}
+                        {bill.status === "AWAITING_BILL" ? <span className="t-caption"> · ขอเช็กบิล</span> : null}
+                      </Link>
+                      <span className="row" style={{ gap: 6 }}>
+                        <span className="num" style={{ fontWeight: 700 }}>฿{formatBaht(bill.total)}</span>
+                        {allowed.includes("EDIT") ? (
+                          <Link href={`/mobile-order/tables/${table.id}/billing?session=${bill.sessionId}`} className="btn btn-accent btn-sm">
+                            ปิดบิล
+                          </Link>
+                        ) : null}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : table.sessionId ? (
                 <span className="row" style={{ justifyContent: "space-between" }}>
-                  <span className="t-caption num">{formatNumber(table.itemCount)} รายการ</span>
+                  <span className="t-caption num">
+                    {table.bills[0]?.label ? `${table.bills[0].label} · ` : ""}
+                    {formatNumber(table.itemCount)} รายการ
+                  </span>
                   <span className="num" style={{ fontWeight: 700 }}>
                     ฿{formatBaht(table.total)}
                   </span>
@@ -371,7 +482,7 @@ export function TableOverview({
                   </button>
                 ) : null}
 
-                {table.sessionId ? (
+                {table.sessionId && table.bills.length <= 1 ? (
                   <>
                     <Link href={`/mobile-order/tables/${table.id}`} className="btn btn-primary btn-sm">
                       ดูออร์เดอร์

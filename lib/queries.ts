@@ -11,7 +11,8 @@ import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFromKey, minuteOfBusinessDay } from "@/lib/day"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import type { PaymentMethodValue } from "@/lib/types"
-import type { PaymentMode, PermissionAction as PermissionActionValue, Prisma, ResourceKey } from "@/generated/prisma/client"
+import { Prisma } from "@/generated/prisma/client"
+import type { PaymentMode, PermissionAction as PermissionActionValue, ResourceKey } from "@/generated/prisma/client"
 
 function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
@@ -462,11 +463,16 @@ export async function getTopSellingProducts(storeId: string, limit = 5) {
   }))
 }
 
-export async function getPaymentBreakdown(storeId: string) {
+/// `range` (20e) = ช่วงวันเดียวกับรายงานยอดขายแยกประเภท · ไม่ส่ง = 30 วันล่าสุดแบบเดิม
+export async function getPaymentBreakdown(storeId: string, range?: { from: string; to: string }) {
   const db = forStore(storeId)
+  const window = range ? reportRange(range.from, range.to) : null
   const rows = await db.sale.groupBy({
     by: ["paymentMethod"],
-    where: { status: "COMPLETED", createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+    where: {
+      status: "COMPLETED",
+      createdAt: window ? { gte: window.start, lt: window.end } : { gte: new Date(Date.now() - 30 * 86_400_000) },
+    },
     _sum: { total: true },
     _count: { _all: true },
   })
@@ -601,6 +607,41 @@ export type TableCard = {
   /// Phase 20 — โต๊ะอาหาร/ห้องนวด (ผังแยกกลุ่ม) + ประเภทห้อง
   kind: "TABLE" | "ROOM"
   stationName: string | null
+  /// บิลที่เปิดอยู่ทั้งหมดของโต๊ะ/ห้องนี้ เรียงตามเวลาเปิด (2026-09-23) — โต๊ะอาหารมีไม่เกิน 1 ·
+  /// ห้องสปามีได้หลายใบ 1 ใบต่อลูกค้า · `sessionId`/`total` ด้านบนยังเป็นของบิลล่าสุด/ยอดรวมทุกใบเพื่อให้ของเดิมใช้ต่อได้
+  bills: OpenBill[]
+}
+
+/// บิลที่ยังเปิดอยู่ของโต๊ะ/ห้อง (2026-09-23 · ร้านสปาแยกบิลต่อลูกค้า)
+export type OpenBill = {
+  sessionId: string
+  /// ชื่อลูกค้าของบิล — null = ไม่ได้ระบุ (บิลปกติของโต๊ะอาหาร)
+  label: string | null
+  openedAt: Date
+  status: "OPEN" | "AWAITING_BILL"
+  total: number
+  itemCount: number
+}
+
+/// จัดกลุ่ม session ที่เปิดอยู่ตามโต๊ะ เรียงเก่า → ใหม่ (ตัวสุดท้าย = บิลล่าสุด)
+function groupOpenBills(
+  sessions: { id: string; tableId: string; openedAt: Date; status: string; customerLabel: string | null }[],
+  totals: Map<string, { total: number; items: number }>,
+): Map<string, OpenBill[]> {
+  const byTable = new Map<string, OpenBill[]>()
+  for (const s of [...sessions].sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime())) {
+    const row = totals.get(s.id)
+    const bill: OpenBill = {
+      sessionId: s.id,
+      label: s.customerLabel,
+      openedAt: s.openedAt,
+      status: s.status === "AWAITING_BILL" ? "AWAITING_BILL" : "OPEN",
+      total: row?.total ?? 0,
+      itemCount: row?.items ?? 0,
+    }
+    byTable.set(s.tableId, [...(byTable.get(s.tableId) ?? []), bill])
+  }
+  return byTable
 }
 
 /// ยอดสดต่อ session (ไม่รวมรายการที่ยกเลิก) — ใช้ raw SQL เพราะ Prisma groupBy ข้ามความสัมพันธ์ไม่ได้
@@ -626,7 +667,7 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
     db.tableSession.findMany({
       where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
       orderBy: { openedAt: "desc" },
-      select: { id: true, tableId: true, openedAt: true, status: true },
+      select: { id: true, tableId: true, openedAt: true, status: true, customerLabel: true },
     }),
     liveSessionTotals(storeId),
     db.notification.findMany({
@@ -636,7 +677,7 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
     }),
   ])
 
-  const sessionByTable = new Map(sessions.map((s) => [s.tableId, s]))
+  const billsByTable = groupOpenBills(sessions, totals)
   const notificationBySession = new Map<string, (typeof notifications)[number]>()
   for (const n of notifications) {
     if (!notificationBySession.has(n.tableSessionId)) notificationBySession.set(n.tableSessionId, n)
@@ -649,18 +690,20 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
   }
 
   return tables.map<TableCard>((t) => {
-    const session = sessionByTable.get(t.id) ?? null
-    const totalsRow = session ? totals.get(session.id) : undefined
-    const notification = session ? (notificationBySession.get(session.id) ?? null) : null
+    const bills = billsByTable.get(t.id) ?? []
+    const session = bills.at(-1) ?? null
+    // แจ้งเตือนของบิลใดก็ได้ในห้อง (ห้องสปาหลายบิล) — ใบที่เก่าสุดก่อน
+    const notification = bills.map((b) => notificationBySession.get(b.sessionId)).find(Boolean) ?? null
 
     return {
       id: t.id,
       code: t.code,
       status: t.status,
-      sessionId: session?.id ?? null,
-      openedAt: session?.openedAt ?? null,
-      total: totalsRow?.total ?? 0,
-      itemCount: totalsRow?.items ?? 0,
+      sessionId: session?.sessionId ?? null,
+      // เวลาเปิด = บิลแรกที่ยังเปิดอยู่ (ห้องถูกใช้มาตั้งแต่ตอนนั้น) · ยอด = รวมทุกบิลในห้อง
+      openedAt: bills[0]?.openedAt ?? null,
+      total: Math.round(bills.reduce((sum, b) => sum + b.total, 0) * 100) / 100,
+      itemCount: bills.reduce((sum, b) => sum + b.itemCount, 0),
       primaryTableId: t.primaryTableId,
       primaryTableCode: t.primaryTableId ? (codeById.get(t.primaryTableId) ?? null) : null,
       mergedTableCodes: mergedByPrimary.get(t.id) ?? [],
@@ -669,6 +712,7 @@ export async function listTableOverview(storeId: string): Promise<TableCard[]> {
         : null,
       kind: t.kind,
       stationName: t.station?.name ?? null,
+      bills,
     }
   })
 }
@@ -725,14 +769,16 @@ export async function listNotifications(storeId: string, limit = 60): Promise<No
 
 export async function getPendingNotificationCount(storeId: string) {
   const db = forStore(storeId)
-  const [notifications, awaitingCallback, upcomingBookings] = await Promise.all([
+  const [notifications, awaitingCallback, upcomingBookings, servicesAwaitingStart] = await Promise.all([
     db.notification.count({ where: { status: "PENDING" } }),
     countPaymentsAwaitingCallback(storeId),
     // คิวนวดที่ใกล้ถึงเวลา (Phase 20b) — ร้านที่ไม่ได้เปิดตัวเลือกร้านนวดจะไม่มีแถว booking เลย ค่าจึงเป็น 0 เสมอ
     countUpcomingBookings(storeId),
+    // ห้องที่รอกดเริ่มนวด (20e) — ร้านอาหารล้วนไม่มีเมนู SERVICE ค่าจึงเป็น 0 เสมอ
+    countServicesAwaitingStart(storeId),
   ])
   // รวมเข้า badge เดียวกัน — ถ้าไม่รวม พนักงานจะไม่มีวันรู้ว่ามีเรื่องต้องดู จนกว่าจะบังเอิญเปิดหน้านี้
-  return notifications + awaitingCallback + upcomingBookings
+  return notifications + awaitingCallback + upcomingBookings + servicesAwaitingStart
 }
 
 /// เวลาที่ยอมให้ callback ของธนาคารมาช้าได้ ก่อนจะเตือนพนักงานให้ไปตรวจเอง
@@ -918,6 +964,23 @@ export type TableDetail = {
     items: OrderItemRow[]
   }[]
   notifications: { id: string; type: "CALL_STAFF" | "CHECK_BILL"; reason: string | null; createdAt: Date }[]
+  /// ชื่อลูกค้าของบิลที่กำลังดู (ห้องสปา · 2026-09-23)
+  customerLabel: string | null
+  /// บิลที่เปิดอยู่ทั้งหมดของโต๊ะ/ห้องนี้ — มากกว่า 1 = ห้องสปาที่มีลูกค้าหลายคน หน้าจอโชว์ตัวสลับบิล
+  bills: OpenBill[]
+}
+
+/// บิลที่เปิดอยู่ทั้งหมดของโต๊ะ (ห้องสปามีได้หลายใบ) — ใช้ทำตัวสลับบิลบนหน้ารายละเอียด/ปิดบิล
+async function openBillsOfTable(storeId: string, tableId: string): Promise<OpenBill[]> {
+  const db = forStore(storeId)
+  const [sessions, totals] = await Promise.all([
+    db.tableSession.findMany({
+      where: { tableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+      select: { id: true, tableId: true, openedAt: true, status: true, customerLabel: true },
+    }),
+    liveSessionTotals(storeId),
+  ])
+  return groupOpenBills(sessions, totals).get(tableId) ?? []
 }
 
 /// แปลง JSON snapshot ของ modifier ให้เป็นรูปแบบที่หน้าจอใช้ได้ — ข้อมูลเก่าอาจว่างหรือผิดรูป
@@ -937,7 +1000,9 @@ function parseOptions(raw: unknown): { groupName: string; optionName: string; pr
   })
 }
 
-export async function getTableDetail(storeId: string, tableId: string): Promise<TableDetail | null> {
+/// `sessionId` = บิลที่ต้องการดู (ห้องสปาหลายบิล · 2026-09-23) — ต้องเป็นบิลที่ยังเปิดของโต๊ะ/ห้องนี้ ไม่งั้นได้ null ·
+/// ไม่ส่ง = บิลล่าสุดเหมือนเดิม
+export async function getTableDetail(storeId: string, tableId: string, sessionId?: string): Promise<TableDetail | null> {
   const db = forStore(storeId)
   const table = await db.table.findUnique({
     where: { id: tableId },
@@ -948,9 +1013,9 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
   // โต๊ะรองไม่มี session ของตัวเอง — ทุกอย่างอยู่ที่โต๊ะหลัก
   const targetId = table.primaryTableId ?? table.id
 
-  const [session, settings, merged] = await Promise.all([
+  const [session, settings, merged, bills] = await Promise.all([
     db.tableSession.findFirst({
-      where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+      where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] }, ...(sessionId ? { id: sessionId } : {}) },
       orderBy: { openedAt: "desc" },
       include: {
         table: { select: { id: true, code: true, status: true } },
@@ -973,6 +1038,7 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
     }),
     db.storeSettings.findUnique({ where: { storeId }, select: { hasKDS: true } }),
     db.table.findMany({ where: { primaryTableId: targetId }, select: { code: true } }),
+    openBillsOfTable(storeId, targetId),
   ])
 
   if (!session) return null
@@ -1018,7 +1084,9 @@ export async function getTableDetail(storeId: string, tableId: string): Promise<
     total: Math.round((total + Number.EPSILON) * 100) / 100,
     hasKDS: settings?.hasKDS ?? false,
     orders,
-  notifications: session.notifications,
+    notifications: session.notifications,
+    customerLabel: session.customerLabel,
+    bills,
   }
 }
 
@@ -1383,6 +1451,10 @@ export type BillingView = {
   sessionStatus: "OPEN" | "AWAITING_BILL"
   openedAt: Date
   mergedTableCodes: string[]
+  /// ชื่อลูกค้าของบิล (ห้องสปา · 2026-09-23)
+  customerLabel: string | null
+  /// บิลที่เปิดอยู่ทั้งหมดของห้องนี้ — หน้าปิดบิลโชว์ตัวสลับเมื่อมีมากกว่า 1
+  bills: OpenBill[]
   storeName: string
   lines: BillingLine[]
   itemsTotal: number
@@ -1393,7 +1465,8 @@ export type BillingView = {
 
 /// ใบเสร็จของโต๊ะสำหรับหน้าปิดบิลฝั่งพนักงาน (F17) — ยอดคิดจาก `computeBillTotals` ตัวเดียวกับที่ปิดบิลจริง
 /// รายการที่ถูกยกเลิกไม่เข้าบิล และรายการซ้ำ (ชื่อ+ตัวเลือก+ราคาเดียวกัน) ถูกยุบเป็นบรรทัดเดียว
-export async function getBillingView(storeId: string, tableId: string): Promise<BillingView | null> {
+/// `sessionId` = บิลที่จะปิด (ห้องสปาหลายบิล) — ต้องเป็นบิลที่ยังเปิดของห้องนี้ · ไม่ส่ง = บิลล่าสุด
+export async function getBillingView(storeId: string, tableId: string, sessionId?: string): Promise<BillingView | null> {
   const db = forStore(storeId)
   const table = await db.table.findUnique({
     where: { id: tableId },
@@ -1404,14 +1477,15 @@ export async function getBillingView(storeId: string, tableId: string): Promise<
   // โต๊ะรองไม่มีบิลของตัวเอง — ปิดบิลที่โต๊ะหลักเสมอ
   const targetId = table.primaryTableId ?? table.id
 
-  const [session, settings, merged] = await Promise.all([
+  const [session, settings, merged, bills] = await Promise.all([
     db.tableSession.findFirst({
-      where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+      where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] }, ...(sessionId ? { id: sessionId } : {}) },
       orderBy: { openedAt: "desc" },
       select: {
         id: true,
         status: true,
         openedAt: true,
+        customerLabel: true,
         table: { select: { id: true, code: true } },
         orders: {
           orderBy: { orderNumber: "asc" },
@@ -1436,6 +1510,7 @@ export async function getBillingView(storeId: string, tableId: string): Promise<
       select: { storeName: true, serviceChargePercent: true },
     }),
     db.table.findMany({ where: { primaryTableId: targetId }, select: { code: true } }),
+    openBillsOfTable(storeId, targetId),
   ])
 
   if (!session) return null
@@ -1475,6 +1550,8 @@ export async function getBillingView(storeId: string, tableId: string): Promise<
     sessionStatus: session.status as "OPEN" | "AWAITING_BILL",
     openedAt: session.openedAt,
     mergedTableCodes: merged.map((m) => m.code),
+    customerLabel: session.customerLabel,
+    bills,
     storeName: settings?.storeName ?? "MJD Mobile Order",
     lines,
     itemsTotal: totals.itemsTotal,
@@ -1495,6 +1572,8 @@ export type CustomerPaymentStatus =
       serviceCharge: number
       total: number
       awaitingBill: boolean
+      /// ห้องมีบิลเปิดมากกว่า 1 ใบ (ห้องสปาหลายลูกค้า · 20e) — ลูกค้าจ่ายเองผ่าน QR ไม่ได้ ต้องจ่ายที่พนักงาน
+      sharedRoom: boolean
     }
   | { state: "PAID"; tableCode: string; saleNumber: string; total: number; paidAt: Date }
   | { state: "UNKNOWN" }
@@ -1570,6 +1649,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
     serviceCharge: totals.serviceCharge,
     total: totals.total,
     awaitingBill: session.status === "AWAITING_BILL",
+    sharedRoom: (await db.tableSession.count({ where: { tableId: targetTableId, status: { in: ["OPEN", "AWAITING_BILL"] } } })) > 1,
   }
 }
 
@@ -2173,6 +2253,10 @@ export type PosTableOption = {
   mergedIntoCode: string | null
   /// ยอดปัจจุบันของบิลที่เปิดอยู่ (0 ถ้ายังไม่มีรายการ)
   currentTotal: number
+  /// โต๊ะอาหาร/ห้องสปา — ห้องที่มีบิลเปิดอยู่ต้องเลือกบิลก่อนส่ง (2026-09-23)
+  kind: "TABLE" | "ROOM"
+  /// บิลที่เปิดอยู่ทั้งหมด (ห้องสปามีได้หลายใบ)
+  bills: OpenBill[]
 }
 
 /// รายชื่อโต๊ะสำหรับจอขาย `/mobile-order/pos` — พนักงานเลือกโต๊ะก่อนส่งออร์เดอร์เข้าครัว
@@ -2181,20 +2265,21 @@ export async function listTablesForPos(storeId: string): Promise<PosTableOption[
   const [tables, sessions, totals] = await Promise.all([
     db.table.findMany({
       orderBy: { code: "asc" },
-      select: { id: true, code: true, status: true, primaryTable: { select: { code: true } } },
+      select: { id: true, code: true, status: true, kind: true, primaryTable: { select: { code: true } } },
     }),
     db.tableSession.findMany({
       where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
       orderBy: { openedAt: "desc" },
-      select: { id: true, tableId: true, status: true },
+      select: { id: true, tableId: true, status: true, openedAt: true, customerLabel: true },
     }),
     liveSessionTotals(storeId),
   ])
 
-  const sessionByTable = new Map(sessions.map((s) => [s.tableId, s]))
+  const billsByTable = groupOpenBills(sessions, totals)
 
   return tables.map((table) => {
-    const session = sessionByTable.get(table.id)
+    const bills = billsByTable.get(table.id) ?? []
+    const session = bills.at(-1)
     return {
       id: table.id,
       code: table.code,
@@ -2202,7 +2287,9 @@ export async function listTablesForPos(storeId: string): Promise<PosTableOption[
       hasOpenSession: Boolean(session),
       awaitingBill: session?.status === "AWAITING_BILL",
       mergedIntoCode: table.primaryTable?.code ?? null,
-      currentTotal: session ? (totals.get(session.id)?.total ?? 0) : 0,
+      currentTotal: session?.total ?? 0,
+      kind: table.kind,
+      bills,
     }
   })
 }
@@ -2607,4 +2694,520 @@ export async function listUpcomingBookings(storeId: string, now: Date = new Date
 
 export async function countUpcomingBookings(storeId: string, now: Date = new Date()): Promise<number> {
   return (await listUpcomingBookings(storeId, now)).length
+}
+
+export type ServiceAwaitingStart = {
+  itemId: string
+  tableId: string
+  tableCode: string
+  sessionId: string
+  /// ชื่อลูกค้าของบิลนั้น (ห้องสปาที่มีหลายบิล) — null = บิลเดียวของห้อง
+  customerLabel: string | null
+  menuItemName: string
+  therapistId: string | null
+  therapistLabel: string | null
+  /// เวลาที่รายการเข้าห้อง (เช็กอิน/สั่ง) — ใช้เรียงคิวใครรอนานสุดขึ้นก่อน
+  orderedAt: Date
+}
+
+/// รายการนวดที่ลูกค้าเข้าห้องแล้วแต่ยังไม่มีใครกด "เริ่มนวด" (20e — เจ้าของสั่ง 2026-09-24)
+///
+/// นับจากบรรทัด SERVICE ที่ยัง `AWAITING_KITCHEN` ในบิลที่เปิดอยู่ ไม่ใช่จากสถานะคิวจอง —
+/// ลูกค้า walk-in จากจอขายก็ต้องขึ้นด้วย · คำนวณสด ไม่ใช่แถวใน Notification จึงหายเองเมื่อกดเริ่มนวด/ยกเลิก
+/// ไม่ต้องมีปุ่มรับทราบ (หลักเดียวกับ listUpcomingBookings)
+export async function listServicesAwaitingStart(storeId: string): Promise<ServiceAwaitingStart[]> {
+  const rows = await forStore(storeId).mobileOrderItem.findMany({
+    where: {
+      status: "AWAITING_KITCHEN",
+      menuItem: { itemType: "SERVICE" },
+      order: { storeId, session: { status: { in: ["OPEN", "AWAITING_BILL"] } } },
+    },
+    orderBy: [{ createdAt: "asc" }],
+    select: {
+      id: true,
+      createdAt: true,
+      therapistId: true,
+      menuItem: { select: { name: true } },
+      therapist: { select: { code: true, name: true, nickname: true } },
+      order: {
+        select: {
+          session: { select: { id: true, customerLabel: true, table: { select: { id: true, code: true } } } },
+        },
+      },
+    },
+  })
+  return rows.flatMap((row) => {
+    const session = row.order.session
+    if (!session) return []
+    return [
+      {
+        itemId: row.id,
+        tableId: session.table.id,
+        tableCode: session.table.code,
+        sessionId: session.id,
+        customerLabel: session.customerLabel,
+        menuItemName: row.menuItem.name,
+        therapistId: row.therapistId,
+        therapistLabel: row.therapist ? `${row.therapist.code} ${row.therapist.nickname ?? row.therapist.name}` : null,
+        orderedAt: row.createdAt,
+      },
+    ]
+  })
+}
+
+export async function countServicesAwaitingStart(storeId: string): Promise<number> {
+  return forStore(storeId).mobileOrderItem.count({
+    where: {
+      status: "AWAITING_KITCHEN",
+      menuItem: { itemType: "SERVICE" },
+      order: { storeId, session: { status: { in: ["OPEN", "AWAITING_BILL"] } } },
+    },
+  })
+}
+
+// ───────────────────── ร้านนวด — รายงานต่อพนักงานนวด (Phase 20c) ─────────────────────
+
+/// ช่วงวันของรายงาน — รับคีย์วันทางธุรกิจ (เวลาไทย) แล้วแปลงเป็นช่วงเวลาจริงที่ใช้กับ createdAt
+/// ปลายทางเป็น "ต้นวันถัดไป" เสมอ เพื่อให้บิลที่ออกช่วงดึกของวันสุดท้ายถูกนับครบ
+function reportRange(fromKey: string, toKey: string): { start: Date; end: Date } {
+  return {
+    start: new Date(`${fromKey}T00:00:00.000+07:00`),
+    end: new Date(new Date(`${toKey}T00:00:00.000+07:00`).getTime() + 86_400_000),
+  }
+}
+
+export type TherapistReportRow = {
+  therapistId: string
+  code: string
+  label: string
+  isActive: boolean
+  /// จำนวนครั้งที่ให้บริการ (รวม quantity ของบรรทัด — ปกติ 1 ต่อบรรทัด)
+  services: number
+  /// จำนวนบิลที่มีชื่อคนนี้ (บิลเดียวอาจมีหลายบรรทัด นับครั้งเดียว)
+  bills: number
+  /// ยอดเงินของบรรทัดบริการที่เป็นของคนนี้ (ไม่รวมอาหารในบิลเดียวกัน · ไม่รวมค่าบริการท้ายบิล)
+  revenue: number
+  /// นาทีรวม = Σ (quantity × MenuItem.durationMinutes) — โปรแกรมที่ไม่ได้ตั้งนาทีนับเป็น 0
+  minutes: number
+}
+
+/// ยอด/จำนวนครั้ง/นาทีรวม ต่อพนักงานนวด ในช่วงวันที่เลือก (Phase 20c)
+///
+/// อ่านจาก `SaleItem.therapistId` ที่ snapshot ไว้ตอนปิดบิล — **ไม่ใช่** `MobileOrderItem` ที่ยังเปลี่ยนได้
+/// จึงตรงกับเงินที่เก็บได้จริงเสมอ · นับเฉพาะบิล `COMPLETED` (บิลที่ void หายจากรายงานทันทีตามกติกาเดิม)
+/// ⚠️ raw SQL ไม่ผ่าน forStore() — ต้องกรอง `s."storeId"` เองและใช้ชื่อตารางจริง (snake_case)
+export async function getTherapistSalesReport(
+  storeId: string,
+  range: { from: string; to: string },
+): Promise<TherapistReportRow[]> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const rows = await db.$queryRaw<
+    { id: string; code: string; name: string; nickname: string | null; isActive: boolean; services: bigint | null; bills: bigint | null; revenue: string | null; minutes: bigint | null }[]
+  >`
+    SELECT t."id"        AS id,
+           t."code"      AS code,
+           t."name"      AS name,
+           t."nickname"  AS nickname,
+           t."isActive"  AS "isActive",
+           COALESCE(SUM(i."quantity"), 0)::bigint                             AS services,
+           COUNT(DISTINCT s."id")::bigint                                     AS bills,
+           COALESCE(SUM(i."subtotal"), 0)::text                               AS revenue,
+           COALESCE(SUM(i."quantity" * COALESCE(m."durationMinutes", 0)), 0)::bigint AS minutes
+    FROM "therapist" t
+    -- จับ sale_item กับ sale เป็นคู่ใน JOIN วงเล็บก่อน แล้วค่อย LEFT JOIN เข้าพนักงาน —
+    -- ถ้าเอาเงื่อนไขบิลไปไว้ใน ON ของ LEFT JOIN "sale" ตรง ๆ บรรทัดของบิล void/นอกช่วงยังถูก SUM อยู่
+    LEFT JOIN ("sale_item" i
+               JOIN "sale" s ON s."id" = i."saleId"
+                            AND s."storeId" = ${storeId}
+                            AND s."status" = 'COMPLETED'
+                            AND s."createdAt" >= ${start}
+                            AND s."createdAt" < ${end})
+           ON i."therapistId" = t."id"
+    LEFT JOIN "menu_item" m ON m."id" = i."menuItemId"
+    WHERE t."storeId" = ${storeId}
+    GROUP BY t."id", t."code", t."name", t."nickname", t."isActive"
+    ORDER BY COALESCE(SUM(i."subtotal"), 0) DESC, t."code" ASC
+  `
+
+  // LEFT JOIN ทำให้พนักงานที่ไม่มีงานในช่วงนี้ยังมีแถว (ยอด 0) — ต้องเห็นเพื่อรู้ว่าใครว่างงาน
+  return rows.map((row) => ({
+    therapistId: row.id,
+    code: row.code,
+    label: `${row.code} ${row.nickname ?? row.name}`,
+    isActive: row.isActive,
+    services: Number(row.services ?? 0),
+    bills: Number(row.bills ?? 0),
+    revenue: toNumber(row.revenue ?? "0"),
+    minutes: Number(row.minutes ?? 0),
+  }))
+}
+
+export type TherapistHistoryRow = {
+  saleId: string
+  saleNumber: string
+  soldAt: Date
+  menuItemName: string
+  quantity: number
+  minutes: number
+  subtotal: number
+  /// ห้อง/โต๊ะของบิลนั้น (บิลกลับบ้าน/หน้าร้านไม่มี)
+  tableCode: string | null
+}
+
+/// ประวัติรายบรรทัดของพนักงานนวดคนหนึ่งในช่วงวันที่เลือก (Phase 20c)
+export async function getTherapistHistory(
+  storeId: string,
+  therapistId: string,
+  range: { from: string; to: string },
+  limit = 200,
+): Promise<TherapistHistoryRow[]> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const rows = await db.$queryRaw<
+    { saleId: string; saleNumber: string; soldAt: Date; name: string; quantity: number; minutes: number | null; subtotal: string; tableCode: string | null }[]
+  >`
+    SELECT s."id"         AS "saleId",
+           s."saleNumber" AS "saleNumber",
+           s."createdAt"  AS "soldAt",
+           i."name"       AS name,
+           i."quantity"   AS quantity,
+           m."durationMinutes" AS minutes,
+           i."subtotal"::text  AS subtotal,
+           rt."code"      AS "tableCode"
+    FROM "sale_item" i
+    JOIN "sale" s ON s."id" = i."saleId"
+    LEFT JOIN "menu_item" m ON m."id" = i."menuItemId"
+    LEFT JOIN "table_session" ts ON ts."id" = s."tableSessionId"
+    LEFT JOIN "restaurant_table" rt ON rt."id" = ts."tableId"
+    WHERE s."storeId" = ${storeId}
+      AND i."therapistId" = ${therapistId}
+      AND s."status" = 'COMPLETED'
+      AND s."createdAt" >= ${start}
+      AND s."createdAt" < ${end}
+    ORDER BY s."createdAt" DESC
+    LIMIT ${limit}
+  `
+
+  return rows.map((row) => ({
+    saleId: row.saleId,
+    saleNumber: row.saleNumber,
+    soldAt: row.soldAt,
+    menuItemName: row.name,
+    quantity: row.quantity,
+    minutes: (row.minutes ?? 0) * row.quantity,
+    subtotal: toNumber(row.subtotal),
+    tableCode: row.tableCode,
+  }))
+}
+
+/// วันทางธุรกิจ (เวลาไทย) ของ `s."createdAt"` ใน raw SQL — คอลัมน์เป็น timestamp ไม่มี TZ ที่เก็บเวลา UTC
+/// จึงต้องบอกก่อนว่าเป็น UTC แล้วค่อยแปลงเป็นเวลาไทย ไม่งั้นบิลช่วง 00:00–07:00 น. ตกไปอยู่วันก่อนหน้า
+const SALE_DAY_SQL = Prisma.sql`to_char((s."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`
+
+export type TherapistMatrixCell = { revenue: number; services: number }
+export type TherapistMatrix = {
+  /// ทุกวันในช่วง เรียงจากเก่าไปใหม่ (รวมวันที่ไม่มีงาน เพื่อให้คอลัมน์ครบ)
+  days: string[]
+  rows: {
+    therapistId: string
+    label: string
+    isActive: boolean
+    /// คีย์ = วัน · ไม่มีคีย์ = วันนั้นไม่มีงาน
+    cells: Record<string, TherapistMatrixCell>
+    total: TherapistMatrixCell
+  }[]
+  /// ยอดรวมรายวันของทุกคน (แถวท้ายตาราง)
+  dayTotals: Record<string, TherapistMatrixCell>
+  /// พนักงาน × โปรแกรม — ใครนวดโปรแกรมอะไรกี่ครั้ง ได้เท่าไหร่
+  programs: { therapistId: string; label: string; menuItemName: string; services: number; revenue: number }[]
+}
+
+/// ตาราง "พนักงานนวด × วัน" + "พนักงาน × โปรแกรม" (20e ข้อ 7 — เจ้าของอยากรู้ว่าใครนวดวันไหน นวดอะไร ได้เท่าไหร่)
+///
+/// อ่าน snapshot เดียวกับ getTherapistSalesReport (`SaleItem.therapistId` ของบิล COMPLETED) — ตัวเลขรวมจึงตรงกัน
+/// ⚠️ raw SQL ไม่ผ่าน forStore() — กรอง `s."storeId"` เอง
+export async function getTherapistDailyMatrix(storeId: string, range: { from: string; to: string }): Promise<TherapistMatrix> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const [therapists, rows] = await Promise.all([
+    db.therapist.findMany({
+      orderBy: [{ isActive: "desc" }, { code: "asc" }],
+      select: { id: true, code: true, name: true, nickname: true, isActive: true },
+    }),
+    db.$queryRaw<{ therapistId: string; day: string; name: string; services: bigint; revenue: string }[]>`
+      SELECT i."therapistId"          AS "therapistId",
+             ${SALE_DAY_SQL}          AS day,
+             i."name"                 AS name,
+             SUM(i."quantity")::bigint AS services,
+             SUM(i."subtotal")::text  AS revenue
+      FROM "sale_item" i
+      JOIN "sale" s ON s."id" = i."saleId"
+      WHERE s."storeId" = ${storeId}
+        AND s."status" = 'COMPLETED'
+        AND s."createdAt" >= ${start}
+        AND s."createdAt" < ${end}
+        AND i."therapistId" IS NOT NULL
+      GROUP BY 1, 2, 3
+    `,
+  ])
+
+  const days: string[] = []
+  for (let day = range.from; day <= range.to; day = addDays(day, 1)) days.push(day)
+
+  const add = (cell: TherapistMatrixCell | undefined, services: number, revenue: number): TherapistMatrixCell => ({
+    services: (cell?.services ?? 0) + services,
+    revenue: round2((cell?.revenue ?? 0) + revenue),
+  })
+
+  const byTherapist = new Map(
+    therapists.map((t) => [
+      t.id,
+      { therapistId: t.id, label: `${t.code} ${t.nickname ?? t.name}`, isActive: t.isActive, cells: {} as Record<string, TherapistMatrixCell>, total: { services: 0, revenue: 0 } },
+    ]),
+  )
+  const dayTotals: Record<string, TherapistMatrixCell> = {}
+  const programMap = new Map<string, TherapistMatrix["programs"][number]>()
+
+  for (const row of rows) {
+    const target = byTherapist.get(row.therapistId)
+    if (!target) continue
+    const services = Number(row.services)
+    const revenue = toNumber(row.revenue)
+    target.cells[row.day] = add(target.cells[row.day], services, revenue)
+    target.total = add(target.total, services, revenue)
+    dayTotals[row.day] = add(dayTotals[row.day], services, revenue)
+    const key = `${row.therapistId}|${row.name}`
+    const program = programMap.get(key)
+    programMap.set(key, {
+      therapistId: row.therapistId,
+      label: target.label,
+      menuItemName: row.name,
+      services: (program?.services ?? 0) + services,
+      revenue: round2((program?.revenue ?? 0) + revenue),
+    })
+  }
+
+  return {
+    days,
+    rows: [...byTherapist.values()].sort((a, b) => b.total.revenue - a.total.revenue),
+    dayTotals,
+    programs: [...programMap.values()].sort((a, b) => a.label.localeCompare(b.label, "th") || b.revenue - a.revenue),
+  }
+}
+
+// ───────────────────── รายงานแยกประเภท อาหาร / นวดสปา / สินค้าหน้าร้าน (20e ข้อ 8) ─────────────────────
+
+export type SaleKind = "PRODUCT" | "FOOD" | "SERVICE"
+export type SalesByKindTotals = Record<SaleKind, { revenue: number; quantity: number; bills: number }>
+export type SalesByKind = {
+  from: string
+  to: string
+  kinds: SalesByKindTotals
+  /// ค่าบริการท้ายบิล (service charge) — คิดทั้งใบ ไม่แยกประเภท จึงเป็นแถวของตัวเอง
+  serviceCharge: number
+  /// ส่วนลดท้ายบิล — เช่นเดียวกัน
+  discount: number
+  /// ยอดขายสุทธิ = Σ Sale.total — ต้องเท่ากับ ยอดทุกประเภท + ค่าบริการ − ส่วนลด พอดี (มีเทสล็อกไว้)
+  grandTotal: number
+  bills: number
+  /// รายวัน ครบทุกวันในช่วง (วันไม่มีขาย = 0)
+  daily: { day: string; PRODUCT: number; FOOD: number; SERVICE: number; adjustments: number; total: number }[]
+}
+
+/// ยอดขายแยกประเภทบรรทัด (`SaleItem.kind`) ในช่วงวันที่เลือก — ใช้ทั้งหน้ารายงานหลักและการ์ดบนรายงานสปา
+///
+/// ส่วนลด/ค่าบริการท้ายบิลไม่ถูกกระจายเข้าประเภท (เจ้าของเลือก 2026-09-24) — แยกเป็นแถวต่างหาก ตรวจย้อนได้ง่าย
+/// ⚠️ raw SQL ไม่ผ่าน forStore() — กรอง `s."storeId"` เองทุกคำสั่ง
+export async function getSalesByKind(storeId: string, range: { from: string; to: string }): Promise<SalesByKind> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const [lineRows, billRows] = await Promise.all([
+    db.$queryRaw<{ day: string; kind: SaleKind; revenue: string; quantity: bigint; bills: bigint }[]>`
+      SELECT ${SALE_DAY_SQL}              AS day,
+             i."kind"::text               AS kind,
+             SUM(i."subtotal")::text      AS revenue,
+             SUM(i."quantity")::bigint    AS quantity,
+             COUNT(DISTINCT s."id")::bigint AS bills
+      FROM "sale_item" i
+      JOIN "sale" s ON s."id" = i."saleId"
+      WHERE s."storeId" = ${storeId}
+        AND s."status" = 'COMPLETED'
+        AND s."createdAt" >= ${start}
+        AND s."createdAt" < ${end}
+      GROUP BY 1, 2
+    `,
+    // ท้ายบิล: ค่าบริการ = subtotal − ผลรวมบรรทัด · ส่วนลด = discount · ต่อวัน
+    db.$queryRaw<{ day: string; total: string; items: string; subtotal: string; discount: string; bills: bigint }[]>`
+      SELECT ${SALE_DAY_SQL}            AS day,
+             SUM(s."total")::text       AS total,
+             SUM(COALESCE(li.items, 0))::text AS items,
+             SUM(s."subtotal")::text    AS subtotal,
+             SUM(s."discount")::text    AS discount,
+             COUNT(*)::bigint           AS bills
+      FROM "sale" s
+      LEFT JOIN (SELECT "saleId", SUM("subtotal") AS items FROM "sale_item" GROUP BY "saleId") li ON li."saleId" = s."id"
+      WHERE s."storeId" = ${storeId}
+        AND s."status" = 'COMPLETED'
+        AND s."createdAt" >= ${start}
+        AND s."createdAt" < ${end}
+      GROUP BY 1
+    `,
+  ])
+
+  const empty = () => ({ revenue: 0, quantity: 0, bills: 0 })
+  const kinds: SalesByKindTotals = { PRODUCT: empty(), FOOD: empty(), SERVICE: empty() }
+  const daily = new Map<string, SalesByKind["daily"][number]>()
+  for (let day = range.from; day <= range.to; day = addDays(day, 1)) {
+    daily.set(day, { day, PRODUCT: 0, FOOD: 0, SERVICE: 0, adjustments: 0, total: 0 })
+  }
+
+  for (const row of lineRows) {
+    const revenue = toNumber(row.revenue)
+    const bucket = kinds[row.kind]
+    bucket.revenue = round2(bucket.revenue + revenue)
+    bucket.quantity += Number(row.quantity)
+    // บิลเดียวข้ามวันไม่ได้ จึงบวกรายวันได้โดยไม่นับซ้ำ
+    bucket.bills += Number(row.bills)
+    const day = daily.get(row.day)
+    if (day) day[row.kind] = round2(day[row.kind] + revenue)
+  }
+
+  let serviceCharge = 0
+  let discount = 0
+  let grandTotal = 0
+  let bills = 0
+  for (const row of billRows) {
+    const charge = round2(toNumber(row.subtotal) - toNumber(row.items))
+    const off = toNumber(row.discount)
+    serviceCharge = round2(serviceCharge + charge)
+    discount = round2(discount + off)
+    grandTotal = round2(grandTotal + toNumber(row.total))
+    bills += Number(row.bills)
+    const day = daily.get(row.day)
+    if (day) {
+      day.adjustments = round2(charge - off)
+      day.total = toNumber(row.total)
+    }
+  }
+
+  return { from: range.from, to: range.to, kinds, serviceCharge, discount, grandTotal, bills, daily: [...daily.values()] }
+}
+
+/// ขายดีแยกประเภทในช่วงวันที่เลือก (20e) — แท็บ อาหาร / นวดสปา / สินค้า บนหน้ารายงาน
+export async function getTopItemsByKind(
+  storeId: string,
+  range: { from: string; to: string },
+  kind: SaleKind,
+  limit = 10,
+): Promise<{ name: string; quantity: number; revenue: number }[]> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+  const rows = await db.$queryRaw<{ name: string; qty: bigint; revenue: string }[]>`
+    SELECT i."name"                AS name,
+           SUM(i."quantity")::bigint AS qty,
+           SUM(i."subtotal")::text AS revenue
+    FROM "sale_item" i
+    JOIN "sale" s ON s."id" = i."saleId"
+    WHERE s."storeId" = ${storeId}
+      AND s."status" = 'COMPLETED'
+      AND s."createdAt" >= ${start}
+      AND s."createdAt" < ${end}
+      AND i."kind"::text = ${kind}
+    GROUP BY i."name"
+    ORDER BY SUM(i."subtotal") DESC, qty DESC
+    LIMIT ${limit}
+  `
+  return rows.map((row) => ({ name: row.name, quantity: Number(row.qty), revenue: toNumber(row.revenue) }))
+}
+
+export type SalesExportRow = {
+  soldAt: Date
+  saleNumber: string
+  channel: string
+  kind: SaleKind
+  name: string
+  quantity: number
+  unitPrice: number
+  subtotal: number
+  therapistLabel: string | null
+  tableCode: string | null
+  paymentMethod: string
+}
+
+/// บรรทัดขายทีละบรรทัดสำหรับไฟล์ CSV (20e) — `kind` = null คือทุกประเภท
+/// เรียงตามเวลาขาย · บิล void ไม่นับ · ⚠️ raw SQL กรอง storeId เอง
+export async function listSalesForExport(
+  storeId: string,
+  range: { from: string; to: string },
+  kind: SaleKind | null,
+): Promise<SalesExportRow[]> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+  const kindFilter = kind ? Prisma.sql`AND i."kind"::text = ${kind}` : Prisma.empty
+  const rows = await db.$queryRaw<
+    {
+      soldAt: Date
+      saleNumber: string
+      channel: string
+      kind: SaleKind
+      name: string
+      quantity: number
+      unitPrice: string
+      subtotal: string
+      therapistCode: string | null
+      therapistName: string | null
+      therapistNickname: string | null
+      tableCode: string | null
+      paymentMethod: string
+    }[]
+  >`
+    SELECT s."createdAt"      AS "soldAt",
+           s."saleNumber"     AS "saleNumber",
+           s."channel"::text  AS channel,
+           i."kind"::text     AS kind,
+           i."name"           AS name,
+           i."quantity"       AS quantity,
+           i."unitPrice"::text AS "unitPrice",
+           i."subtotal"::text AS subtotal,
+           t."code"           AS "therapistCode",
+           t."name"           AS "therapistName",
+           t."nickname"       AS "therapistNickname",
+           rt."code"          AS "tableCode",
+           s."paymentMethod"::text AS "paymentMethod"
+    FROM "sale_item" i
+    JOIN "sale" s ON s."id" = i."saleId"
+    LEFT JOIN "therapist" t ON t."id" = i."therapistId"
+    LEFT JOIN "table_session" ts ON ts."id" = s."tableSessionId"
+    LEFT JOIN "restaurant_table" rt ON rt."id" = ts."tableId"
+    WHERE s."storeId" = ${storeId}
+      AND s."status" = 'COMPLETED'
+      AND s."createdAt" >= ${start}
+      AND s."createdAt" < ${end}
+      ${kindFilter}
+    ORDER BY s."createdAt" ASC, s."saleNumber" ASC, i."id" ASC
+  `
+  return rows.map((row) => ({
+    soldAt: row.soldAt,
+    saleNumber: row.saleNumber,
+    channel: row.channel,
+    kind: row.kind,
+    name: row.name,
+    quantity: row.quantity,
+    unitPrice: toNumber(row.unitPrice),
+    subtotal: toNumber(row.subtotal),
+    therapistLabel: row.therapistCode ? `${row.therapistCode} ${row.therapistNickname ?? row.therapistName ?? ""}`.trim() : null,
+    tableCode: row.tableCode,
+    paymentMethod: row.paymentMethod,
+  }))
+}
+
+/// พนักงานนวดคนเดียว (หน้าประวัติรายคน) — คืน null เมื่อไม่ใช่ของร้านนี้
+export async function getTherapistById(storeId: string, therapistId: string): Promise<TherapistRow | null> {
+  const rows = await listTherapists(storeId)
+  return rows.find((t) => t.id === therapistId) ?? null
 }
