@@ -6,6 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+# กันรันซ้อน (2026-09-24 — เจ้าของสั่งหลัง merge #35/#37 ติดกันต้องรอเองทีละตัว)
+#
+# push main: ทั้งสาย test → build → deploy อยู่กลุ่มเดียว "release-main" รันทีละรอบ **ห้ามยกเลิกรอบที่กำลังรัน**
+#   (ตัดกลาง migrate/switch-deploy.sh = production ครึ่ง ๆ กลาง ๆ) · ต้องกันทั้งสาย ไม่ใช่แค่ job deploy เพราะ
+#   ทุกรอบ push ทับ tag :latest ร่วมกัน — build สองรอบซ้อนกัน รอบเก่าอาจ push เสร็จทีหลังแล้ว deploy ได้โค้ดเก่า
+#   · GitHub เก็บรอบที่รอคิวได้ทีละ 1 — merge 3 ตัวติดกัน รอบกลางที่ยังรอคิวจะถูกยกเลิก (ขึ้น cancelled)
+#   ซึ่งไม่เป็นไรเพราะรอบล่าสุดมีโค้ดของทุก commit ก่อนหน้าอยู่แล้ว
+# pull request: แยกกลุ่มต่อ PR · push ใหม่เข้า PR เดิม = ยกเลิกรอบเก่าที่ยังเทสอยู่ (ประหยัดนาที CI ไม่มีผลกับ production)
+concurrency:
+  group: ${{ github.event_name == 'push' && 'release-main' || format('pr-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # รันทุก push + ทุก PR — typecheck + vitest (มี postgres service ให้ integration test)
   test:

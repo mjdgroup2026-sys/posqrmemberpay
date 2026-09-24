@@ -625,6 +625,9 @@ CSV `GET /api/reports/sales-csv` (`lib/sales-csv.ts` · BOM + กันสูต
 CI/CD อัตโนมัติจาก `main` ทำงานจริง — push → test → build+push image ไป `ghcr.io` → scp compose +
 `up -d` + `migrate deploy` (ตั้งแต่ Phase 5 เปลี่ยนเป็น pull → migrate → `ops/switch-deploy.sh`) บน VPS `138.252.93.119` (user `deploy`) · nginx + HTTPS (Let's Encrypt,
 ต่ออายุอัตโนมัติ) · PostgreSQL 18 ในคอนเทนเนอร์ `posmobileorder-db` · `/api/health` ตอบ 200
+· **(2026-09-24) workflow มี `concurrency`**: push main ทั้งสาย test → build → deploy รันทีละรอบในกลุ่ม `release-main` และ**ไม่ยกเลิกรอบที่กำลังรัน**
+(ตัดกลาง migrate/สลับสี = production พัง · build ซ้อนกันทำให้ `:latest` เป็นโค้ดเก่าได้) · merge หลาย PR ติดกันได้เลย ไม่ต้องรอทีละตัว
+— รอบกลางที่ยังรอคิวอาจขึ้น cancelled ซึ่งปกติ (รอบล่าสุดมีทุก commit) · PR แยกกลุ่มของตัวเองและยกเลิกรอบเก่าได้
 
 **✅ Phase 5 ทำบน VPS จริงแล้ว (2026-09-04)** — เหลือเฉพาะที่ต้องรอ API key:
 
