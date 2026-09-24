@@ -771,6 +771,21 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         expect(await testPrisma().sale.count({ where: { tableSessionId: b.sessionId } })).toBe(0)
       },
     ],
+    // 20f — ออก QR พร้อมเพย์ให้บิลของร้าน B ต้องไม่ได้ (มีแค่ intent ใบเดียวจาก fixture · ไม่มีใบใหม่/ไม่ถูกทำ EXPIRED)
+    [
+      "prepareStaffPromptPay",
+      (b) => makeFormData({ sessionId: b.sessionId }),
+      async (b) => {
+        const intents = await testPrisma().paymentIntent.findMany({ where: { tableSessionId: b.sessionId }, select: { id: true, status: true } })
+        expect(intents.map((i) => i.id)).toEqual([b.intentId])
+        expect(intents[0].status).toBe("PENDING")
+      },
+    ],
+    [
+      "getStaffBillStatus",
+      (b) => makeFormData({ sessionId: b.sessionId }),
+      async (b) => expect((await testPrisma().tableSession.findUniqueOrThrow({ where: { id: b.sessionId } })).status).toBe("OPEN"),
+    ],
     [
       "generateQRCode",
       (b) => makeFormData({ tableId: b.table2Id, type: "STATIC" }),
