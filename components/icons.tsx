@@ -38,6 +38,8 @@ export {
   CreditCard as IconCard,
   BookOpen as IconMenu,
   Banknote as IconCash,
+  Landmark as IconBank,
+  Smartphone as IconPhone,
   // Phase 14a — onboarding / คำเชิญ / ผู้ดูแลแพลตฟอร์ม
   Send as IconSend,
   ShieldCheck as IconShield,

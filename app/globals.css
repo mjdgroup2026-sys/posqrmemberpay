@@ -433,6 +433,68 @@
     color: var(--brand-strong);
   }
 
+  /* ───────────── ฟอร์มนับเงินและปิดยอด (20g) — การ์ดทีละช่องทาง ─────────────
+     คอลัมน์ฟอร์มกว้างแค่ ~420px ตารางหลายคอลัมน์เบียดกัน → ใช้การ์ดซ้อนแนวตั้งแทน */
+  .closing-channel {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: var(--sp-3) var(--sp-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .closing-channel:focus-within {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 14%, transparent);
+  }
+  .closing-channel.is-off {
+    border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  }
+  .closing-channel.is-over {
+    border-color: color-mix(in srgb, var(--info) 45%, var(--line));
+  }
+  .closing-channel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+  }
+  .closing-channel-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    display: inline-grid;
+    place-items: center;
+    background: var(--brand-soft);
+    color: var(--brand-strong);
+    flex: none;
+  }
+  .closing-channel-body {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+  /* ช่องทางที่วันนี้ไม่มียอด — ยุบเป็นปุ่มเล็กเรียงบรรทัดเดียว กดแล้วกางเป็นการ์ด */
+  .closing-idle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    align-items: center;
+  }
+  .closing-summary {
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    padding: var(--sp-3) var(--sp-4);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+  }
+
   /* ───────────── ตารางจองร้านนวด (20e) — แท่งคิวสีตามสถานะ ใช้สีชุดเดียวกับ chip ─────────────
      สีต้องตรงกับ chip สถานะในตารางรายการด้านล่าง ผู้ใช้จะได้จับคู่ได้โดยไม่ต้องกดเข้าไปดู */
   .booking-bar {

@@ -187,7 +187,7 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
                             row.difference === 0
                               ? undefined
                               : row.difference > 0
-                                ? "var(--success)"
+                                ? "var(--info)"
                                 : "var(--danger)",
                         }}
                       >
@@ -287,10 +287,10 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
   )
 }
 
-/// สีส่วนต่าง: เกิน = เขียว · ขาด = แดง · ตรง/ไม่ได้ตรวจ = สีปกติ
+/// สีส่วนต่าง: เกิน = น้ำเงิน · ขาด = แดง · ตรง/ไม่ได้ตรวจ = สีปกติ (ตรงกับป้ายในฟอร์มปิดรอบ — เขียวสงวนไว้ให้ "ตรงพอดี")
 function diffColor(difference: number | null): string | undefined {
   if (difference === null || difference === 0) return undefined
-  return difference > 0 ? "var(--success)" : "var(--danger)"
+  return difference > 0 ? "var(--info)" : "var(--danger)"
 }
 
 /// สรุปช่องทางที่ไม่ใช่เงินสดของรอบหนึ่งในบรรทัดเดียว (ประวัติ)
