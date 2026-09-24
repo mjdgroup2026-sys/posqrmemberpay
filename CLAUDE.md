@@ -598,7 +598,7 @@ tenant-isolation +6 query +6 action (651 ทั้งชุด)
 `/reports` ช่วงวัน + แยก 3 ประเภท + แถว "ค่าบริการ − ส่วนลด" (ท้ายบิลไม่กระจายเข้าประเภท) · `getSalesByKind` ตัวเดียวใช้ทั้ง `/reports` และ `/spa/reports` ·
 CSV `GET /api/reports/sales-csv` (`lib/sales-csv.ts` · BOM + กันสูตร Excel) · สีกราฟ `--chart-1..3` ใน theme staff (ลำดับตายตัว อาหาร/นวด/สินค้า) · 704 เทสผ่าน
 
-**🔧 20f — โค้ดเสร็จ 2026-09-24 (รอ deploy · ไม่มี migration/env)**: **ปิดบิลพร้อมเพย์ที่หน้าพนักงานต้องแสดง QR ก่อนเสมอ** (เดิมกดแล้วปิดบิลเลยไม่มี QR —
+**✅ 20f — ขึ้น production แล้ว 2026-09-24 (PR #33 · CI run 35970803906 · ไม่มี migration/env) · PR #34 ตามมา: รายงานทุกหน้าเปิดมาที่วันนี้ (`resolveDayRange` ค่าเริ่มต้น `days = 1`)**: **ปิดบิลพร้อมเพย์ที่หน้าพนักงานต้องแสดง QR ก่อนเสมอ** (เดิมกดแล้วปิดบิลเลยไม่มี QR —
 เจ้าของเจอหลัง 20e) · `prepareStaffPromptPay` ใน `app/actions/payments.ts` คิดยอดที่ server ตามโหมดร้าน: SCB = QR ธนาคารพก ref1 (`issuePaymentIntent` เดิม) แล้วบิลปิดเองจาก callback
 (หน้าจอฟัง SSE + `getStaffBillStatus` อ่านอย่างเดียว **ห้ามยิงถามธนาคาร** ตามกติกา callback-only) · ร้านอื่น = QR พร้อมเพย์ของร้าน + พนักงานกดยืนยัน ·
 `/spa/reports` ตัวกรอง ช่วงวัน/พนักงาน/ประเภทบริการ (`SpaReportFilter` + `spaFilterSql()` · ประเภทบริการอ่านจากเมนูปัจจุบัน ไม่ snapshot) · hover ตารางจองบอกเวลาสิ้นสุด/ว่างถึงกี่โมง · 712 เทสผ่าน

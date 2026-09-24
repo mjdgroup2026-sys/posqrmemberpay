@@ -103,7 +103,7 @@ export function SpaReportFilter({
             ล้างตัวกรอง
           </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => router.push("/spa/reports")}>
-            30 วันล่าสุด
+            วันนี้
           </button>
         </div>
       </div>
