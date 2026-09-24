@@ -11,7 +11,8 @@ import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFromKey, minuteOfBusinessDay } from "@/lib/day"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import type { PaymentMethodValue } from "@/lib/types"
-import type { PaymentMode, PermissionAction as PermissionActionValue, Prisma, ResourceKey } from "@/generated/prisma/client"
+import { Prisma } from "@/generated/prisma/client"
+import type { PaymentMode, PermissionAction as PermissionActionValue, ResourceKey } from "@/generated/prisma/client"
 
 function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
@@ -462,11 +463,16 @@ export async function getTopSellingProducts(storeId: string, limit = 5) {
   }))
 }
 
-export async function getPaymentBreakdown(storeId: string) {
+/// `range` (20e) = ช่วงวันเดียวกับรายงานยอดขายแยกประเภท · ไม่ส่ง = 30 วันล่าสุดแบบเดิม
+export async function getPaymentBreakdown(storeId: string, range?: { from: string; to: string }) {
   const db = forStore(storeId)
+  const window = range ? reportRange(range.from, range.to) : null
   const rows = await db.sale.groupBy({
     by: ["paymentMethod"],
-    where: { status: "COMPLETED", createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+    where: {
+      status: "COMPLETED",
+      createdAt: window ? { gte: window.start, lt: window.end } : { gte: new Date(Date.now() - 30 * 86_400_000) },
+    },
     _sum: { total: true },
     _count: { _all: true },
   })
@@ -2894,6 +2900,309 @@ export async function getTherapistHistory(
     minutes: (row.minutes ?? 0) * row.quantity,
     subtotal: toNumber(row.subtotal),
     tableCode: row.tableCode,
+  }))
+}
+
+/// วันทางธุรกิจ (เวลาไทย) ของ `s."createdAt"` ใน raw SQL — คอลัมน์เป็น timestamp ไม่มี TZ ที่เก็บเวลา UTC
+/// จึงต้องบอกก่อนว่าเป็น UTC แล้วค่อยแปลงเป็นเวลาไทย ไม่งั้นบิลช่วง 00:00–07:00 น. ตกไปอยู่วันก่อนหน้า
+const SALE_DAY_SQL = Prisma.sql`to_char((s."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`
+
+export type TherapistMatrixCell = { revenue: number; services: number }
+export type TherapistMatrix = {
+  /// ทุกวันในช่วง เรียงจากเก่าไปใหม่ (รวมวันที่ไม่มีงาน เพื่อให้คอลัมน์ครบ)
+  days: string[]
+  rows: {
+    therapistId: string
+    label: string
+    isActive: boolean
+    /// คีย์ = วัน · ไม่มีคีย์ = วันนั้นไม่มีงาน
+    cells: Record<string, TherapistMatrixCell>
+    total: TherapistMatrixCell
+  }[]
+  /// ยอดรวมรายวันของทุกคน (แถวท้ายตาราง)
+  dayTotals: Record<string, TherapistMatrixCell>
+  /// พนักงาน × โปรแกรม — ใครนวดโปรแกรมอะไรกี่ครั้ง ได้เท่าไหร่
+  programs: { therapistId: string; label: string; menuItemName: string; services: number; revenue: number }[]
+}
+
+/// ตาราง "พนักงานนวด × วัน" + "พนักงาน × โปรแกรม" (20e ข้อ 7 — เจ้าของอยากรู้ว่าใครนวดวันไหน นวดอะไร ได้เท่าไหร่)
+///
+/// อ่าน snapshot เดียวกับ getTherapistSalesReport (`SaleItem.therapistId` ของบิล COMPLETED) — ตัวเลขรวมจึงตรงกัน
+/// ⚠️ raw SQL ไม่ผ่าน forStore() — กรอง `s."storeId"` เอง
+export async function getTherapistDailyMatrix(storeId: string, range: { from: string; to: string }): Promise<TherapistMatrix> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const [therapists, rows] = await Promise.all([
+    db.therapist.findMany({
+      orderBy: [{ isActive: "desc" }, { code: "asc" }],
+      select: { id: true, code: true, name: true, nickname: true, isActive: true },
+    }),
+    db.$queryRaw<{ therapistId: string; day: string; name: string; services: bigint; revenue: string }[]>`
+      SELECT i."therapistId"          AS "therapistId",
+             ${SALE_DAY_SQL}          AS day,
+             i."name"                 AS name,
+             SUM(i."quantity")::bigint AS services,
+             SUM(i."subtotal")::text  AS revenue
+      FROM "sale_item" i
+      JOIN "sale" s ON s."id" = i."saleId"
+      WHERE s."storeId" = ${storeId}
+        AND s."status" = 'COMPLETED'
+        AND s."createdAt" >= ${start}
+        AND s."createdAt" < ${end}
+        AND i."therapistId" IS NOT NULL
+      GROUP BY 1, 2, 3
+    `,
+  ])
+
+  const days: string[] = []
+  for (let day = range.from; day <= range.to; day = addDays(day, 1)) days.push(day)
+
+  const add = (cell: TherapistMatrixCell | undefined, services: number, revenue: number): TherapistMatrixCell => ({
+    services: (cell?.services ?? 0) + services,
+    revenue: round2((cell?.revenue ?? 0) + revenue),
+  })
+
+  const byTherapist = new Map(
+    therapists.map((t) => [
+      t.id,
+      { therapistId: t.id, label: `${t.code} ${t.nickname ?? t.name}`, isActive: t.isActive, cells: {} as Record<string, TherapistMatrixCell>, total: { services: 0, revenue: 0 } },
+    ]),
+  )
+  const dayTotals: Record<string, TherapistMatrixCell> = {}
+  const programMap = new Map<string, TherapistMatrix["programs"][number]>()
+
+  for (const row of rows) {
+    const target = byTherapist.get(row.therapistId)
+    if (!target) continue
+    const services = Number(row.services)
+    const revenue = toNumber(row.revenue)
+    target.cells[row.day] = add(target.cells[row.day], services, revenue)
+    target.total = add(target.total, services, revenue)
+    dayTotals[row.day] = add(dayTotals[row.day], services, revenue)
+    const key = `${row.therapistId}|${row.name}`
+    const program = programMap.get(key)
+    programMap.set(key, {
+      therapistId: row.therapistId,
+      label: target.label,
+      menuItemName: row.name,
+      services: (program?.services ?? 0) + services,
+      revenue: round2((program?.revenue ?? 0) + revenue),
+    })
+  }
+
+  return {
+    days,
+    rows: [...byTherapist.values()].sort((a, b) => b.total.revenue - a.total.revenue),
+    dayTotals,
+    programs: [...programMap.values()].sort((a, b) => a.label.localeCompare(b.label, "th") || b.revenue - a.revenue),
+  }
+}
+
+// ───────────────────── รายงานแยกประเภท อาหาร / นวดสปา / สินค้าหน้าร้าน (20e ข้อ 8) ─────────────────────
+
+export type SaleKind = "PRODUCT" | "FOOD" | "SERVICE"
+export type SalesByKindTotals = Record<SaleKind, { revenue: number; quantity: number; bills: number }>
+export type SalesByKind = {
+  from: string
+  to: string
+  kinds: SalesByKindTotals
+  /// ค่าบริการท้ายบิล (service charge) — คิดทั้งใบ ไม่แยกประเภท จึงเป็นแถวของตัวเอง
+  serviceCharge: number
+  /// ส่วนลดท้ายบิล — เช่นเดียวกัน
+  discount: number
+  /// ยอดขายสุทธิ = Σ Sale.total — ต้องเท่ากับ ยอดทุกประเภท + ค่าบริการ − ส่วนลด พอดี (มีเทสล็อกไว้)
+  grandTotal: number
+  bills: number
+  /// รายวัน ครบทุกวันในช่วง (วันไม่มีขาย = 0)
+  daily: { day: string; PRODUCT: number; FOOD: number; SERVICE: number; adjustments: number; total: number }[]
+}
+
+/// ยอดขายแยกประเภทบรรทัด (`SaleItem.kind`) ในช่วงวันที่เลือก — ใช้ทั้งหน้ารายงานหลักและการ์ดบนรายงานสปา
+///
+/// ส่วนลด/ค่าบริการท้ายบิลไม่ถูกกระจายเข้าประเภท (เจ้าของเลือก 2026-09-24) — แยกเป็นแถวต่างหาก ตรวจย้อนได้ง่าย
+/// ⚠️ raw SQL ไม่ผ่าน forStore() — กรอง `s."storeId"` เองทุกคำสั่ง
+export async function getSalesByKind(storeId: string, range: { from: string; to: string }): Promise<SalesByKind> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const [lineRows, billRows] = await Promise.all([
+    db.$queryRaw<{ day: string; kind: SaleKind; revenue: string; quantity: bigint; bills: bigint }[]>`
+      SELECT ${SALE_DAY_SQL}              AS day,
+             i."kind"::text               AS kind,
+             SUM(i."subtotal")::text      AS revenue,
+             SUM(i."quantity")::bigint    AS quantity,
+             COUNT(DISTINCT s."id")::bigint AS bills
+      FROM "sale_item" i
+      JOIN "sale" s ON s."id" = i."saleId"
+      WHERE s."storeId" = ${storeId}
+        AND s."status" = 'COMPLETED'
+        AND s."createdAt" >= ${start}
+        AND s."createdAt" < ${end}
+      GROUP BY 1, 2
+    `,
+    // ท้ายบิล: ค่าบริการ = subtotal − ผลรวมบรรทัด · ส่วนลด = discount · ต่อวัน
+    db.$queryRaw<{ day: string; total: string; items: string; subtotal: string; discount: string; bills: bigint }[]>`
+      SELECT ${SALE_DAY_SQL}            AS day,
+             SUM(s."total")::text       AS total,
+             SUM(COALESCE(li.items, 0))::text AS items,
+             SUM(s."subtotal")::text    AS subtotal,
+             SUM(s."discount")::text    AS discount,
+             COUNT(*)::bigint           AS bills
+      FROM "sale" s
+      LEFT JOIN (SELECT "saleId", SUM("subtotal") AS items FROM "sale_item" GROUP BY "saleId") li ON li."saleId" = s."id"
+      WHERE s."storeId" = ${storeId}
+        AND s."status" = 'COMPLETED'
+        AND s."createdAt" >= ${start}
+        AND s."createdAt" < ${end}
+      GROUP BY 1
+    `,
+  ])
+
+  const empty = () => ({ revenue: 0, quantity: 0, bills: 0 })
+  const kinds: SalesByKindTotals = { PRODUCT: empty(), FOOD: empty(), SERVICE: empty() }
+  const daily = new Map<string, SalesByKind["daily"][number]>()
+  for (let day = range.from; day <= range.to; day = addDays(day, 1)) {
+    daily.set(day, { day, PRODUCT: 0, FOOD: 0, SERVICE: 0, adjustments: 0, total: 0 })
+  }
+
+  for (const row of lineRows) {
+    const revenue = toNumber(row.revenue)
+    const bucket = kinds[row.kind]
+    bucket.revenue = round2(bucket.revenue + revenue)
+    bucket.quantity += Number(row.quantity)
+    // บิลเดียวข้ามวันไม่ได้ จึงบวกรายวันได้โดยไม่นับซ้ำ
+    bucket.bills += Number(row.bills)
+    const day = daily.get(row.day)
+    if (day) day[row.kind] = round2(day[row.kind] + revenue)
+  }
+
+  let serviceCharge = 0
+  let discount = 0
+  let grandTotal = 0
+  let bills = 0
+  for (const row of billRows) {
+    const charge = round2(toNumber(row.subtotal) - toNumber(row.items))
+    const off = toNumber(row.discount)
+    serviceCharge = round2(serviceCharge + charge)
+    discount = round2(discount + off)
+    grandTotal = round2(grandTotal + toNumber(row.total))
+    bills += Number(row.bills)
+    const day = daily.get(row.day)
+    if (day) {
+      day.adjustments = round2(charge - off)
+      day.total = toNumber(row.total)
+    }
+  }
+
+  return { from: range.from, to: range.to, kinds, serviceCharge, discount, grandTotal, bills, daily: [...daily.values()] }
+}
+
+/// ขายดีแยกประเภทในช่วงวันที่เลือก (20e) — แท็บ อาหาร / นวดสปา / สินค้า บนหน้ารายงาน
+export async function getTopItemsByKind(
+  storeId: string,
+  range: { from: string; to: string },
+  kind: SaleKind,
+  limit = 10,
+): Promise<{ name: string; quantity: number; revenue: number }[]> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+  const rows = await db.$queryRaw<{ name: string; qty: bigint; revenue: string }[]>`
+    SELECT i."name"                AS name,
+           SUM(i."quantity")::bigint AS qty,
+           SUM(i."subtotal")::text AS revenue
+    FROM "sale_item" i
+    JOIN "sale" s ON s."id" = i."saleId"
+    WHERE s."storeId" = ${storeId}
+      AND s."status" = 'COMPLETED'
+      AND s."createdAt" >= ${start}
+      AND s."createdAt" < ${end}
+      AND i."kind"::text = ${kind}
+    GROUP BY i."name"
+    ORDER BY SUM(i."subtotal") DESC, qty DESC
+    LIMIT ${limit}
+  `
+  return rows.map((row) => ({ name: row.name, quantity: Number(row.qty), revenue: toNumber(row.revenue) }))
+}
+
+export type SalesExportRow = {
+  soldAt: Date
+  saleNumber: string
+  channel: string
+  kind: SaleKind
+  name: string
+  quantity: number
+  unitPrice: number
+  subtotal: number
+  therapistLabel: string | null
+  tableCode: string | null
+  paymentMethod: string
+}
+
+/// บรรทัดขายทีละบรรทัดสำหรับไฟล์ CSV (20e) — `kind` = null คือทุกประเภท
+/// เรียงตามเวลาขาย · บิล void ไม่นับ · ⚠️ raw SQL กรอง storeId เอง
+export async function listSalesForExport(
+  storeId: string,
+  range: { from: string; to: string },
+  kind: SaleKind | null,
+): Promise<SalesExportRow[]> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+  const kindFilter = kind ? Prisma.sql`AND i."kind"::text = ${kind}` : Prisma.empty
+  const rows = await db.$queryRaw<
+    {
+      soldAt: Date
+      saleNumber: string
+      channel: string
+      kind: SaleKind
+      name: string
+      quantity: number
+      unitPrice: string
+      subtotal: string
+      therapistCode: string | null
+      therapistName: string | null
+      therapistNickname: string | null
+      tableCode: string | null
+      paymentMethod: string
+    }[]
+  >`
+    SELECT s."createdAt"      AS "soldAt",
+           s."saleNumber"     AS "saleNumber",
+           s."channel"::text  AS channel,
+           i."kind"::text     AS kind,
+           i."name"           AS name,
+           i."quantity"       AS quantity,
+           i."unitPrice"::text AS "unitPrice",
+           i."subtotal"::text AS subtotal,
+           t."code"           AS "therapistCode",
+           t."name"           AS "therapistName",
+           t."nickname"       AS "therapistNickname",
+           rt."code"          AS "tableCode",
+           s."paymentMethod"::text AS "paymentMethod"
+    FROM "sale_item" i
+    JOIN "sale" s ON s."id" = i."saleId"
+    LEFT JOIN "therapist" t ON t."id" = i."therapistId"
+    LEFT JOIN "table_session" ts ON ts."id" = s."tableSessionId"
+    LEFT JOIN "restaurant_table" rt ON rt."id" = ts."tableId"
+    WHERE s."storeId" = ${storeId}
+      AND s."status" = 'COMPLETED'
+      AND s."createdAt" >= ${start}
+      AND s."createdAt" < ${end}
+      ${kindFilter}
+    ORDER BY s."createdAt" ASC, s."saleNumber" ASC, i."id" ASC
+  `
+  return rows.map((row) => ({
+    soldAt: row.soldAt,
+    saleNumber: row.saleNumber,
+    channel: row.channel,
+    kind: row.kind,
+    name: row.name,
+    quantity: row.quantity,
+    unitPrice: toNumber(row.unitPrice),
+    subtotal: toNumber(row.subtotal),
+    therapistLabel: row.therapistCode ? `${row.therapistCode} ${row.therapistNickname ?? row.therapistName ?? ""}`.trim() : null,
+    tableCode: row.tableCode,
+    paymentMethod: row.paymentMethod,
   }))
 }
 

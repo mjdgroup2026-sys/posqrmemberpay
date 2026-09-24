@@ -175,7 +175,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         cashierId: ownerId,
         note: `บิลร้าน ${tag}`,
         items: {
-          create: [{ productId: product.id, name: `สินค้าร้าน ${tag}`, quantity: 2, unitPrice: "50.00", subtotal: "100.00" }],
+          create: [{ productId: product.id, kind: "PRODUCT", name: `สินค้าร้าน ${tag}`, quantity: 2, unitPrice: "50.00", subtotal: "100.00" }],
         },
       },
     })
@@ -482,6 +482,12 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getTherapistSalesReport", (q, a) => q.getTherapistSalesReport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getTherapistHistory", (q, a, b) => q.getTherapistHistory(a.storeId, b.therapistId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getTherapistById", (q, a, b) => q.getTherapistById(a.storeId, b.therapistId)],
+    // 20e — รายงานแยกประเภท + ตารางพนักงาน × วัน + CSV (raw SQL ทุกตัว ต้องกรอง storeId เอง)
+    ["getTherapistDailyMatrix", (q, a) => q.getTherapistDailyMatrix(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getSalesByKind", (q, a) => q.getSalesByKind(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getTopItemsByKind", (q, a) => q.getTopItemsByKind(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() }, "PRODUCT")],
+    ["listSalesForExport", (q, a) => q.listSalesForExport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() }, null)],
+    ["getPaymentBreakdown", (q, a) => q.getPaymentBreakdown(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {

@@ -118,7 +118,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
                   menuItemId: true,
                   quantity: true,
                   unitPrice: true,
-                  menuItem: { select: { name: true } },
+                  menuItem: { select: { name: true, itemType: true } },
                   therapistId: true,
                 },
               },
@@ -183,6 +183,8 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
               name: line.menuItem.name,
               // พนักงานนวดของบรรทัดบริการ (Phase 20) — snapshot ลงบิลไว้ทำรายงานต่อคน
               therapistId: line.therapistId ?? null,
+              // ประเภทบรรทัด ณ เวลาขาย (20e) — แยกรายงานอาหาร/นวด · มีพนักงานนวดติดอยู่ถือเป็นนวดเสมอ
+              kind: line.menuItem.itemType === "SERVICE" || line.therapistId ? "SERVICE" : "FOOD",
               quantity: line.quantity,
               unitPrice: toNumber(line.unitPrice).toFixed(2),
               subtotal: round2(toNumber(line.unitPrice) * line.quantity).toFixed(2),

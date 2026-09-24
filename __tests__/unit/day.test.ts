@@ -78,4 +78,11 @@ describe("lib/day — วันทางธุรกิจตามเวลา�
     expect(resolveDayRange("2026-09-20", "2026-09-05", 30, now)).toEqual({ from: "2026-09-05", to: "2026-09-20" })
     expect(resolveDayRange(["2026-09-01"], "2026-09-05", 7, now)).toEqual({ from: "2026-08-30", to: "2026-09-05" })
   })
+
+  it("resolveDayRange: ยาวเกิน 366 วัน ถูกตัดต้นช่วงให้เหลือ 366 วันพอดี (20e)", () => {
+    const now = new Date("2026-09-23T05:00:00.000Z")
+    expect(resolveDayRange("2020-01-01", "2026-09-23", 30, now)).toEqual({ from: "2025-09-23", to: "2026-09-23" })
+    // พอดี 366 วันไม่ถูกแตะ
+    expect(resolveDayRange("2025-09-23", "2026-09-23", 30, now)).toEqual({ from: "2025-09-23", to: "2026-09-23" })
+  })
 })

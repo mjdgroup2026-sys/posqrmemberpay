@@ -304,6 +304,7 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
               create: rows.map((row) => ({
                 menuItemId: row.menuItemId,
                 name: row.menuItemName,
+                kind: row.itemType,
                 quantity: row.quantity,
                 unitPrice: row.unitPrice.toFixed(2),
                 subtotal: round2(row.unitPrice * row.quantity).toFixed(2),

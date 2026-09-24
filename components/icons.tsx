@@ -5,6 +5,7 @@ export {
   PackagePlus as IconStockIn,
   PackageMinus as IconStockOut,
   ChartColumn as IconReports,
+  Download as IconDownload,
   Users as IconUsers,
   Settings as IconSettings,
   Search as IconSearch,
