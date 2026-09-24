@@ -8,10 +8,29 @@ import { formatBaht, formatBusinessDate } from "@/lib/format"
 import type { ClosingSummary } from "@/lib/queries"
 import { CLOSING_CHANNELS, CLOSING_CHANNEL_LABEL, COUNTED_FIELD, type ClosingChannel } from "@/lib/closing-channels"
 import type { FieldErrors } from "@/lib/types"
-import { IconSpinner } from "@/components/icons"
+import { IconBank, IconCard, IconCash, IconPhone, IconPlus, IconQr, IconSpinner } from "@/components/icons"
 
 function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
+const ICON: Record<ClosingChannel, typeof IconCash> = {
+  CASH: IconCash,
+  TRANSFER: IconBank,
+  QR: IconQr,
+  PROMPTPAY: IconPhone,
+  CARD: IconCard,
+}
+
+/// ป้ายส่วนต่าง — ใช้ chip สถานะเดิม (สี + คำ ไม่พึ่งสีอย่างเดียว)
+function DiffChip({ diff }: { diff: number | null }) {
+  if (diff === null) return <span className="chip chip-neutral"><span className="dot" />ไม่ได้ตรวจ</span>
+  if (diff === 0) return <span className="chip chip-success"><span className="dot" />ตรงพอดี</span>
+  return diff > 0 ? (
+    <span className="chip chip-info num"><span className="dot" />เกิน +{formatBaht(diff)}</span>
+  ) : (
+    <span className="chip chip-danger num"><span className="dot" />ขาด −{formatBaht(Math.abs(diff))}</span>
+  )
 }
 
 const HINT: Record<ClosingChannel, string> = {
@@ -25,7 +44,8 @@ const HINT: Record<ClosingChannel, string> = {
 /// `closingDate` = คีย์ YYYY-MM-DD ของวันทางธุรกิจที่กำลังปิด (Phase 19 — เลือกจากหน้า `/pos/closing?date=`)
 /// `isToday` ใช้แค่เปลี่ยนถ้อยคำบนปุ่ม/คำเตือน ด่านจริง (ห้ามอนาคต · ปิดซ้ำไม่ได้) อยู่ที่ action
 ///
-/// 20g: ตาราง 5 ช่องทาง ยอดในระบบ · ยอดจริงที่ตรวจได้ · ส่วนต่างสด — เงินสดบังคับกรอก ช่องทางอื่นไม่บังคับ
+/// 20g: การ์ดทีละช่องทาง (ไอคอน · ยอดในระบบ · ช่องกรอก · ป้ายส่วนต่าง) + แถบสรุป "ตรวจแล้ว n/m · ส่วนต่างรวม" —
+/// เจ้าของขอให้สวยขึ้น 2026-09-24 (ตารางเดิมเบียดในคอลัมน์ 420px) · เงินสดบังคับกรอก ช่องทางอื่นไม่บังคับ
 /// (เว้นว่าง = ไม่ได้ตรวจ ไม่ใช่ 0 · ส่วนต่างขึ้นเฉพาะช่องที่กรอก)
 export function ClosingForm({
   summary,
@@ -41,6 +61,7 @@ export function ClosingForm({
   const [note, setNote] = useState("")
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+  const [opened, setOpened] = useState<ClosingChannel[]>([])
 
   const systemTotal: Record<ClosingChannel, number> = {
     CASH: summary.totalCash,
@@ -56,6 +77,14 @@ export function ClosingForm({
     const value = Number(text === "" ? 0 : text)
     return Number.isFinite(value) ? round2(value - systemTotal[channel]) : null
   }
+  // ช่องทางที่แสดงเป็นการ์ด: เงินสดเสมอ · มียอดวันนี้ · กดเพิ่มเอง · หรือพิมพ์ค้างไว้ — ที่เหลือยุบเป็นปุ่มบรรทัดเดียว
+  const shown = CLOSING_CHANNELS.filter(
+    (channel) => channel === "CASH" || systemTotal[channel] !== 0 || opened.includes(channel) || counted[channel] !== "",
+  )
+  const idle = CLOSING_CHANNELS.filter((channel) => !shown.includes(channel))
+  const checked = shown.filter((channel) => diffOf(channel) !== null)
+  const totalDiff = round2(checked.reduce((sum, channel) => sum + (diffOf(channel) ?? 0), 0))
+
   const valid = CLOSING_CHANNELS.every((channel) => {
     const text = counted[channel]
     // ช่องว่างผ่านเสมอ (เงินสดว่างถือเป็น 0 · ช่องอื่นว่าง = ไม่ได้ตรวจ)
@@ -95,75 +124,92 @@ export function ClosingForm({
 
   return (
     <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div className="datatable-wrap">
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>
-          <thead>
-            <tr style={{ textAlign: "left", color: "var(--ink-3)", background: "var(--surface-2)" }}>
-              <th style={{ padding: "8px 10px", fontWeight: 500 }}>ช่องทาง</th>
-              <th style={{ padding: "8px 10px", fontWeight: 500, textAlign: "right" }}>ยอดในระบบ</th>
-              <th style={{ padding: "8px 10px", fontWeight: 500 }}>ยอดจริงที่ตรวจได้</th>
-              <th style={{ padding: "8px 10px", fontWeight: 500, textAlign: "right" }}>ส่วนต่าง</th>
-            </tr>
-          </thead>
-          <tbody>
-            {CLOSING_CHANNELS.map((channel) => {
-              const diff = diffOf(channel)
-              const idle = channel !== "CASH" && systemTotal[channel] === 0 && counted[channel] === ""
-              const field = COUNTED_FIELD[channel]
-              return (
-                <tr key={channel} style={{ borderTop: "1px solid var(--line)", opacity: idle ? 0.55 : 1 }}>
-                  <td style={{ padding: "8px 10px" }}>
-                    <label htmlFor={field} style={{ fontWeight: 600 }}>
-                      {CLOSING_CHANNEL_LABEL[channel]}
-                      {channel === "CASH" ? <span style={{ color: "var(--danger)" }}> *</span> : null}
-                    </label>
-                    <br />
-                    <span className="t-caption">{HINT[channel]}</span>
-                  </td>
-                  <td className="num" style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
-                    ฿{formatBaht(systemTotal[channel])}
-                  </td>
-                  <td style={{ padding: "8px 10px", minWidth: 130 }}>
-                    <input
-                      id={field}
-                      className="input num"
-                      inputMode="decimal"
-                      required={channel === "CASH"}
-                      value={counted[channel]}
-                      onChange={(e) => {
-                        const value = e.target.value.replace(/[^0-9.]/g, "")
-                        setCounted((current) => ({ ...current, [channel]: value }))
-                      }}
-                      placeholder={channel === "CASH" ? "0.00" : "ไม่บังคับ"}
-                    />
-                    {fieldErrors[field] ? <span className="field-hint error">{fieldErrors[field]}</span> : null}
-                  </td>
-                  <td
-                    className="num"
-                    style={{
-                      padding: "8px 10px",
-                      textAlign: "right",
-                      fontWeight: 700,
-                      whiteSpace: "nowrap",
-                      color: diff === null || diff === 0 ? undefined : diff > 0 ? "var(--success)" : "var(--danger)",
-                    }}
-                  >
-                    {diff === null ? <span className="t-caption">ไม่ได้ตรวจ</span> : `${diff > 0 ? "+" : ""}${formatBaht(diff)}`}
-                  </td>
-                </tr>
-              )
-            })}
-            <tr style={{ borderTop: "2px solid var(--line)", background: "var(--surface-2)" }}>
-              <td style={{ padding: "8px 10px", fontWeight: 600 }}>รวมทุกช่องทาง</td>
-              <td className="num" style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>
-                ฿{formatBaht(summary.totalSales)}
-              </td>
-              <td colSpan={2} className="t-caption" style={{ padding: "8px 10px" }}>
-                ส่วนต่าง: เขียว = เกิน · แดง = ขาด
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      {/* การ์ดทีละช่องทาง — เงินสดเสมอ + ช่องทางที่มียอดวันนี้ (หรือกดเพิ่มเอง) · ที่เหลือยุบเป็นปุ่มบรรทัดเดียว */}
+      {shown.map((channel) => {
+        const diff = diffOf(channel)
+        const field = COUNTED_FIELD[channel]
+        const Icon = ICON[channel]
+        return (
+          <div key={channel} className={`closing-channel${diff === null || diff === 0 ? "" : diff < 0 ? " is-off" : " is-over"}`}>
+            <div className="closing-channel-head">
+              <span className="row" style={{ gap: 10, flexWrap: "nowrap" }}>
+                <span className="closing-channel-icon" aria-hidden>
+                  <Icon size={18} />
+                </span>
+                <span>
+                  <label htmlFor={field} style={{ fontWeight: 600 }}>
+                    {CLOSING_CHANNEL_LABEL[channel]}
+                    {channel === "CASH" ? <span style={{ color: "var(--danger)" }}> *</span> : null}
+                  </label>
+                  <br />
+                  <span className="t-caption">{HINT[channel]}</span>
+                </span>
+              </span>
+              <span style={{ textAlign: "right" }}>
+                <span className="t-caption">ในระบบ</span>
+                <br />
+                <strong className="num" style={{ fontSize: "1.05rem" }}>
+                  ฿{formatBaht(systemTotal[channel])}
+                </strong>
+              </span>
+            </div>
+            <div className="closing-channel-body">
+              <input
+                id={field}
+                className="input num"
+                inputMode="decimal"
+                required={channel === "CASH"}
+                value={counted[channel]}
+                onChange={(e) => {
+                  const value = e.target.value.replace(/[^0-9.]/g, "")
+                  setCounted((current) => ({ ...current, [channel]: value }))
+                }}
+                placeholder={channel === "CASH" ? "เงินที่นับได้ 0.00" : "ยอดที่ตรวจได้ (ไม่บังคับ)"}
+                aria-describedby={`${field}-diff`}
+              />
+              <span id={`${field}-diff`}>
+                <DiffChip diff={diff} />
+              </span>
+            </div>
+            {fieldErrors[field] ? <span className="field-hint error">{fieldErrors[field]}</span> : null}
+          </div>
+        )
+      })}
+
+      {idle.length > 0 ? (
+        <div className="closing-idle">
+          <span className="t-caption">ไม่มียอดวันนี้:</span>
+          {idle.map((channel) => (
+            <button
+              key={channel}
+              type="button"
+              className="btn btn-ghost btn-sm"
+              title={`เพิ่มช่อง${CLOSING_CHANNEL_LABEL[channel]}เพื่อกรอกยอดที่ตรวจได้`}
+              onClick={() => setOpened((current) => [...current, channel])}
+            >
+              {CLOSING_CHANNEL_LABEL[channel]} ฿0
+              <IconPlus size={13} aria-hidden />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {/* แถบสรุป — ตรวจไปกี่ช่อง ส่วนต่างรวมเท่าไหร่ (นับเฉพาะช่องที่กรอก) */}
+      <div className="closing-summary" role="status" aria-live="polite">
+        <span>
+          <span className="t-caption">ยอดขายรวมทุกช่องทาง</span>
+          <br />
+          <strong className="num" style={{ fontSize: "1.1rem" }}>
+            ฿{formatBaht(summary.totalSales)}
+          </strong>
+        </span>
+        <span style={{ textAlign: "right" }}>
+          <span className="t-caption">
+            ตรวจแล้ว <span className="num">{checked.length}</span>/<span className="num">{shown.length}</span> ช่อง · ส่วนต่างรวม
+          </span>
+          <br />
+          <DiffChip diff={checked.length === 0 ? null : totalDiff} />
+        </span>
       </div>
 
       <div className="field">
