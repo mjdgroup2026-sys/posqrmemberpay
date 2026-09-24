@@ -603,6 +603,11 @@ CSV `GET /api/reports/sales-csv` (`lib/sales-csv.ts` · BOM + กันสูต
 (หน้าจอฟัง SSE + `getStaffBillStatus` อ่านอย่างเดียว **ห้ามยิงถามธนาคาร** ตามกติกา callback-only) · ร้านอื่น = QR พร้อมเพย์ของร้าน + พนักงานกดยืนยัน ·
 `/spa/reports` ตัวกรอง ช่วงวัน/พนักงาน/ประเภทบริการ (`SpaReportFilter` + `spaFilterSql()` · ประเภทบริการอ่านจากเมนูปัจจุบัน ไม่ snapshot) · hover ตารางจองบอกเวลาสิ้นสุด/ว่างถึงกี่โมง · 712 เทสผ่าน
 
+**🔧 20g ปิดยอดแยกตามช่องทาง — โค้ดเสร็จ 2026-09-24 (รอ deploy · migration `20260924150000_split_closing_payment_methods` · ไม่มี env)**:
+`CashierClosing.totalPromptPay` แยกจาก `totalCard` + ยอดจริงที่กรอกไม่บังคับ `counted{Transfer,QR,PromptPay,Card}` (null = ไม่ได้ตรวจ · ส่วนต่างคำนวณตอนแสดง) ·
+**วิธีชำระลงถังไหนตัดสินที่ `bucketByChannel()` ใน `lib/closing-channels.ts` ที่เดียว** (เพิ่ม `PaymentMethod` ใหม่ต้องเพิ่มช่องที่นี่ ไม่งั้นตกถังบัตร) ·
+`getStoreDaySummary()` สรุปทั้งร้านรายวัน รวมบิลที่ธนาคารปิดเอง (`SYSTEM_USER_ID` ไม่มีรอบของตัวเอง) — ท้าย `/pos/closing` เฉพาะ `REPORTS:VIEW` · 717 เทสผ่าน
+
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —
 ลำดับงานทั้งหมดอยู่ที่ [`Docs/spec.md` §8](Docs/spec.md)

@@ -10,6 +10,7 @@ import { decodeStoreScb, getStoreScb } from "@/lib/scb-store"
 import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFromKey, minuteOfBusinessDay } from "@/lib/day"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
+import { bucketByChannel, CLOSING_CHANNELS, type ClosingChannel } from "@/lib/closing-channels"
 import type { PaymentMethodValue } from "@/lib/types"
 import { Prisma } from "@/generated/prisma/client"
 import type { PaymentMode, PermissionAction as PermissionActionValue, ResourceKey } from "@/generated/prisma/client"
@@ -488,7 +489,9 @@ export type ClosingSummary = {
   totalCash: number
   totalTransfer: number
   totalQR: number
-  /// พร้อมเพย์/บัตร จากช่องทาง MJD Mobile Order (Phase 10) — แยกถังไว้ ไม่ปนกับ QR หน้าร้าน
+  /// พร้อมเพย์ (MJD Mobile Order) — แยกจากบัตรตั้งแต่ 20g เพื่อเทียบกับยอดเข้าบัญชีธนาคาร
+  totalPromptPay: number
+  /// บัตร (EDC) — ก่อน 20g รวมพร้อมเพย์ไว้ด้วย
   totalCard: number
   billCount: number
   voidedCount: number
@@ -510,27 +513,84 @@ export async function getTodaySalesSummary(storeId: string, cashierId: string, d
     db.sale.count({ where: { cashierId, status: "VOIDED", voidedAt: { gte: start, lt: end } } }),
   ])
 
-  const summary: ClosingSummary = {
-    totalSales: 0,
-    totalCash: 0,
-    totalTransfer: 0,
-    totalQR: 0,
-    totalCard: 0,
-    billCount: 0,
+  const { totals, totalSales, billCount } = bucketByChannel(
+    byMethod.map((row) => ({ paymentMethod: row.paymentMethod, total: toNumber(row._sum.total ?? 0), bills: row._count._all })),
+  )
+  return {
+    totalSales,
+    totalCash: totals.CASH,
+    totalTransfer: totals.TRANSFER,
+    totalQR: totals.QR,
+    totalPromptPay: totals.PROMPTPAY,
+    totalCard: totals.CARD,
+    billCount,
     voidedCount,
   }
+}
 
-  for (const row of byMethod) {
-    const value = toNumber(row._sum.total ?? 0)
-    summary.totalSales += value
-    summary.billCount += row._count._all
-    if (row.paymentMethod === "CASH") summary.totalCash += value
-    else if (row.paymentMethod === "TRANSFER") summary.totalTransfer += value
-    else if (row.paymentMethod === "QR") summary.totalQR += value
-    else summary.totalCard += value
+type ClosingRow = {
+  id: string
+  closingDate: Date
+  totalSales: Prisma.Decimal
+  totalCash: Prisma.Decimal
+  totalTransfer: Prisma.Decimal
+  totalQR: Prisma.Decimal
+  totalPromptPay: Prisma.Decimal
+  totalCard: Prisma.Decimal
+  billCount: number
+  voidedCount: number
+  countedCash: Prisma.Decimal
+  difference: Prisma.Decimal
+  countedTransfer: Prisma.Decimal | null
+  countedQR: Prisma.Decimal | null
+  countedPromptPay: Prisma.Decimal | null
+  countedCard: Prisma.Decimal | null
+  note: string | null
+  closedAt: Date
+}
+
+/// ยอดในระบบ / ยอดจริงที่กรอก / ส่วนต่าง ต่อช่องทาง (20g) — ไม่ได้กรอก = counted/difference เป็น null
+export type ClosingChannelLine = { channel: ClosingChannel; total: number; counted: number | null; difference: number | null }
+
+function closingView(row: ClosingRow) {
+  const counted: Record<ClosingChannel, number | null> = {
+    CASH: toNumber(row.countedCash),
+    TRANSFER: row.countedTransfer === null ? null : toNumber(row.countedTransfer),
+    QR: row.countedQR === null ? null : toNumber(row.countedQR),
+    PROMPTPAY: row.countedPromptPay === null ? null : toNumber(row.countedPromptPay),
+    CARD: row.countedCard === null ? null : toNumber(row.countedCard),
   }
-
-  return summary
+  const totals: Record<ClosingChannel, number> = {
+    CASH: toNumber(row.totalCash),
+    TRANSFER: toNumber(row.totalTransfer),
+    QR: toNumber(row.totalQR),
+    PROMPTPAY: toNumber(row.totalPromptPay),
+    CARD: toNumber(row.totalCard),
+  }
+  const channels: ClosingChannelLine[] = CLOSING_CHANNELS.map((channel) => ({
+    channel,
+    total: totals[channel],
+    counted: counted[channel],
+    // เงินสดใช้ค่าที่บันทึกไว้ตอนปิดรอบ (กติกาเดิม) · ช่องอื่นคำนวณตอนแสดง
+    difference: channel === "CASH" ? toNumber(row.difference) : counted[channel] === null ? null : round2((counted[channel] ?? 0) - totals[channel]),
+  }))
+  return {
+    id: row.id,
+    closingDate: row.closingDate,
+    totalSales: toNumber(row.totalSales),
+    totalCash: totals.CASH,
+    totalTransfer: totals.TRANSFER,
+    totalQR: totals.QR,
+    totalPromptPay: totals.PROMPTPAY,
+    totalCard: totals.CARD,
+    billCount: row.billCount,
+    voidedCount: row.voidedCount,
+    countedCash: toNumber(row.countedCash),
+    difference: toNumber(row.difference),
+    channels,
+    note: row.note,
+    closedAt: row.closedAt,
+  }
 }
 
 export async function getTodayClosing(storeId: string, cashierId: string, date: Date = new Date()) {
@@ -538,22 +598,7 @@ export async function getTodayClosing(storeId: string, cashierId: string, date: 
   const row = await db.cashierClosing.findUnique({
     where: { storeId_cashierId_closingDate: { storeId, cashierId, closingDate: businessDateOnly(date) } },
   })
-  if (!row) return null
-  return {
-    id: row.id,
-    closingDate: row.closingDate,
-    totalSales: toNumber(row.totalSales),
-    totalCash: toNumber(row.totalCash),
-    totalTransfer: toNumber(row.totalTransfer),
-    totalQR: toNumber(row.totalQR),
-    totalCard: toNumber(row.totalCard),
-    billCount: row.billCount,
-    voidedCount: row.voidedCount,
-    countedCash: toNumber(row.countedCash),
-    difference: toNumber(row.difference),
-    note: row.note,
-    closedAt: row.closedAt,
-  }
+  return row ? closingView(row) : null
 }
 
 export async function listClosings(storeId: string, params: { cashierId?: string; limit?: number } = {}) {
@@ -564,22 +609,73 @@ export async function listClosings(storeId: string, params: { cashierId?: string
     take: params.limit ?? 60,
     include: { cashier: { select: { name: true } } },
   })
-  return rows.map((row) => ({
-    id: row.id,
-    cashierName: row.cashier.name,
-    closingDate: row.closingDate,
-    totalSales: toNumber(row.totalSales),
-    totalCash: toNumber(row.totalCash),
-    totalTransfer: toNumber(row.totalTransfer),
-    totalQR: toNumber(row.totalQR),
-    totalCard: toNumber(row.totalCard),
-    billCount: row.billCount,
-    voidedCount: row.voidedCount,
-    countedCash: toNumber(row.countedCash),
-    difference: toNumber(row.difference),
-    note: row.note,
-    closedAt: row.closedAt,
-  }))
+  return rows.map((row) => ({ ...closingView(row), cashierName: row.cashier.name }))
+}
+
+export type StoreDaySummary = {
+  totalSales: number
+  billCount: number
+  totals: Record<ClosingChannel, number>
+  /// แยกตามคนปิดบิล — `isSystem` = บิลที่ธนาคารปิดให้เอง (ไม่มีแคชเชียร์ ไม่มีรอบให้ปิด)
+  byCashier: {
+    cashierId: string
+    name: string
+    isSystem: boolean
+    totalSales: number
+    billCount: number
+    totals: Record<ClosingChannel, number>
+    /// ปิดรอบวันนี้แล้วหรือยัง (ระบบ = null เพราะไม่มีรอบ)
+    closed: boolean | null
+  }[]
+}
+
+/// สรุปทั้งร้านรายวันแยกช่องทาง (20g) — ไว้เทียบกับยอดเข้าบัญชีธนาคาร/สลิปสรุป EDC ทั้งวัน
+///
+/// ต่างจากปิดรอบรายคนตรงที่ **รวมบิลที่ธนาคารปิดเอง** (`cashierId = SYSTEM_USER_ID`) ซึ่งไม่อยู่ในรอบของใคร
+/// อ่านอย่างเดียว ไม่มีการปิดยอดรวม · ผู้เรียกต้องผ่าน parseBusinessDayKey() มาก่อน
+export async function getStoreDaySummary(storeId: string, date: Date = new Date()): Promise<StoreDaySummary> {
+  const db = forStore(storeId)
+  const { start, end } = businessDayRange(date)
+
+  const [grouped, closings] = await Promise.all([
+    db.sale.groupBy({
+      by: ["cashierId", "paymentMethod"],
+      where: { status: "COMPLETED", createdAt: { gte: start, lt: end } },
+      _sum: { total: true },
+      _count: { _all: true },
+    }),
+    db.cashierClosing.findMany({ where: { closingDate: businessDateOnly(date) }, select: { cashierId: true } }),
+  ])
+
+  const cashierIds = [...new Set(grouped.map((row) => row.cashierId))]
+  const users = cashierIds.length
+    ? await db.user.findMany({ where: { id: { in: cashierIds } }, select: { id: true, name: true } })
+    : []
+  const nameOf = new Map(users.map((u) => [u.id, u.name]))
+  const closedIds = new Set(closings.map((c) => c.cashierId))
+
+  const all = bucketByChannel(grouped.map((row) => ({ paymentMethod: row.paymentMethod, total: toNumber(row._sum.total ?? 0), bills: row._count._all })))
+  const byCashier = cashierIds.map((cashierId) => {
+    const mine = bucketByChannel(
+      grouped
+        .filter((row) => row.cashierId === cashierId)
+        .map((row) => ({ paymentMethod: row.paymentMethod, total: toNumber(row._sum.total ?? 0), bills: row._count._all })),
+    )
+    const isSystem = cashierId === SYSTEM_USER_ID
+    return {
+      cashierId,
+      name: isSystem ? "ระบบ (ธนาคารปิดบิลให้เอง)" : (nameOf.get(cashierId) ?? "ไม่ทราบชื่อ"),
+      isSystem,
+      totalSales: mine.totalSales,
+      billCount: mine.billCount,
+      totals: mine.totals,
+      closed: isSystem ? null : closedIds.has(cashierId),
+    }
+  })
+  // คนก่อน ระบบไว้ท้าย · ยอดมากขึ้นก่อน
+  byCashier.sort((a, b) => Number(a.isSystem) - Number(b.isSystem) || b.totalSales - a.totalSales)
+
+  return { totalSales: all.totalSales, billCount: all.billCount, totals: all.totals, byCashier }
 }
 
 // ───────────────────── MJD Mobile Order (Phase 6–7) ─────────────────────

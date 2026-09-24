@@ -207,4 +207,86 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     expect(voided.ok).toBe(false)
     expect((await testPrisma().sale.findUniqueOrThrow({ where: { id: sale.data.id } })).status).toBe("COMPLETED")
   })
+
+  // ───────────── 20g — ปิดยอดแยกตามช่องทาง (เจ้าของสั่ง 2026-09-24) ─────────────
+
+  /// บิลสำเร็จรูปของวันนี้ด้วยวิธีชำระใดก็ได้ (พร้อมเพย์/บัตรออกจากหน้าปิดบิลโต๊ะ ไม่ใช่ POS จึงสร้างตรง)
+  let billSeq = 0
+  async function bill(paymentMethod: "CASH" | "TRANSFER" | "QR" | "PROMPTPAY" | "CARD", total: string, cashierId = "test-user") {
+    billSeq += 1
+    const storeId = (await testPrisma().storeMember.findFirstOrThrow({ where: { userId: "test-user" } })).storeId
+    return testPrisma().sale.create({
+      data: {
+        storeId,
+        saleNumber: `INV-G${String(billSeq).padStart(5, "0")}`,
+        channel: "MOBILE_ORDER",
+        subtotal: total,
+        total,
+        paymentMethod,
+        amountReceived: total,
+        cashierId,
+        items: { create: [{ kind: "FOOD", name: "ทดสอบ", quantity: 1, unitPrice: total, subtotal: total }] },
+      },
+    })
+  }
+
+  it("20g: พร้อมเพย์แยกจากบัตร · ยอดจริงที่กรอกเก็บครบ · ไม่กรอก = null (ไม่ใช่ 0)", async () => {
+    await bill("CASH", "100.00")
+    await bill("PROMPTPAY", "250.00")
+    await bill("CARD", "80.00")
+    await bill("TRANSFER", "40.00")
+
+    const queries = await import("@/lib/queries")
+    const storeId = (await testPrisma().storeMember.findFirstOrThrow({ where: { userId: "test-user" } })).storeId
+    const summary = await queries.getTodaySalesSummary(storeId, "test-user")
+    expect(summary).toMatchObject({ totalCash: 100, totalPromptPay: 250, totalCard: 80, totalTransfer: 40, totalQR: 0, totalSales: 470 })
+
+    // พร้อมเพย์เข้าบัญชีจริง 240 (ขาด 10) · บัตรตรง · โอน/QR ไม่ได้ตรวจ
+    const result = await closeCashierDay(
+      makeFormData({ countedCash: "100", countedPromptPay: "240", countedCard: "80", countedTransfer: "", note: "" }),
+    )
+    expect(result.ok).toBe(true)
+
+    const row = await testPrisma().cashierClosing.findFirstOrThrow()
+    expect(Number(row.totalPromptPay)).toBe(250)
+    expect(Number(row.totalCard)).toBe(80)
+    expect(Number(row.countedPromptPay)).toBe(240)
+    expect(Number(row.countedCard)).toBe(80)
+    expect(row.countedTransfer).toBeNull()
+    expect(row.countedQR).toBeNull()
+
+    const view = await queries.getTodayClosing(storeId, "test-user")
+    const diff = Object.fromEntries(view!.channels.map((c) => [c.channel, c.difference]))
+    expect(diff).toEqual({ CASH: 0, TRANSFER: null, QR: null, PROMPTPAY: -10, CARD: 0 })
+  })
+
+  it("20g: ยอดจริงติดลบ/ไม่ใช่ตัวเลข ถูกปฏิเสธเป็นภาษาไทย ไม่มีแถวถูกสร้าง", async () => {
+    const negative = await closeCashierDay(makeFormData({ countedCash: "0", countedCard: "-5" }))
+    expect(negative.ok).toBe(false)
+    expect(negative.ok === false && negative.error).toContain("ไม่ติดลบ")
+    const garbage = await closeCashierDay(makeFormData({ countedCash: "0", countedPromptPay: "abc" }))
+    expect(garbage.ok).toBe(false)
+    expect(await testPrisma().cashierClosing.count()).toBe(0)
+  })
+
+  it("20g: สรุปทั้งร้านรวมบิลที่ธนาคารปิดเอง (ไม่มีรอบ) และบอกว่าแคชเชียร์ไหนปิดรอบแล้ว", async () => {
+    await ensureTestUser("system", "ระบบ", { storeId: null })
+    await ensureTestUser("cashier-2", "แคชเชียร์สอง")
+    await bill("CASH", "100.00")
+    await bill("PROMPTPAY", "300.00", "system")
+    await bill("CARD", "50.00", "cashier-2")
+    await closeCashierDay(makeFormData({ countedCash: "100" }))
+
+    const queries = await import("@/lib/queries")
+    const storeId = (await testPrisma().storeMember.findFirstOrThrow({ where: { userId: "test-user" } })).storeId
+    const day = await queries.getStoreDaySummary(storeId)
+    expect(day.totalSales).toBe(450)
+    expect(day.totals).toEqual({ CASH: 100, TRANSFER: 0, QR: 0, PROMPTPAY: 300, CARD: 50 })
+    const byId = Object.fromEntries(day.byCashier.map((r) => [r.cashierId, r]))
+    expect(byId["system"]).toMatchObject({ isSystem: true, closed: null, totalSales: 300 })
+    expect(byId["test-user"]).toMatchObject({ closed: true, totalSales: 100 })
+    expect(byId["cashier-2"]).toMatchObject({ closed: false, totalSales: 50 })
+    // ระบบอยู่ท้ายเสมอ
+    expect(day.byCashier.at(-1)?.cashierId).toBe("system")
+  })
 })

@@ -143,6 +143,9 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `totalCash` | Decimal | ≥ 0 | Σ `total` เฉพาะ `paymentMethod = CASH` |
 | `totalTransfer` | Decimal | ≥ 0 | Σ `total` เฉพาะ `paymentMethod = TRANSFER` |
 | `totalQR` | Decimal | ≥ 0 | Σ `total` เฉพาะ `paymentMethod = QR` |
+| `totalPromptPay` | Decimal | ≥ 0 (20g) | Σ `total` เฉพาะ `paymentMethod = PROMPTPAY` — แยกจากบัตรเพื่อเทียบยอดเข้าบัญชีธนาคาร |
+| `totalCard` | Decimal | ≥ 0 | Σ `total` เฉพาะ `paymentMethod = CARD` (ก่อน 20g รวมพร้อมเพย์ไว้ด้วย — migration แยกให้แล้ว) |
+| `countedTransfer` / `countedQR` / `countedPromptPay` / `countedCard` | Decimal? | ≥ 0, **ไม่บังคับ** (20g) | ยอดจริงที่แคชเชียร์ตรวจจากแอปธนาคาร/สลิป EDC · null = ไม่ได้ตรวจ · ส่วนต่างคำนวณตอนแสดง ไม่เก็บ |
 | `billCount` | Int | ≥ 0 | จำนวนบิล COMPLETED ของวันนั้น |
 | `voidedCount` | Int | ≥ 0 | จำนวนบิลที่ถูก void ในวันนั้น |
 | `countedCash` | Decimal | ≥ 0 | เงินสดที่แคชเชียร์นับได้จริงตอนปิดยอด |
@@ -2235,6 +2238,20 @@ enum ResourceKey {
 - [x] เทส: `staff-promptpay.test.ts` 5 · `sales-by-kind.test.ts` +1 (ตัวกรอง + id ร้านอื่นได้ผลว่าง) · tenant-isolation +2 action · **712 ทั้งชุดผ่าน** · `pnpm build` ผ่าน
 - [x] **deploy 2026-09-24 (PR #33 · CI run 35970803906)** — ไม่มี migration · สลับ blue → green
 - [x] (4) รายงานทุกหน้า (`/reports` · `/spa/reports` · ประวัติรายคน · CSV) **เปิดมาที่วันนี้วันเดียว** แล้วผู้ใช้เลือกช่วงเอง (เจ้าของสั่ง 2026-09-24) — `resolveDayRange` ค่าเริ่มต้น `days = 1` · ปุ่ม "30 วันล่าสุด" → "วันนี้"
+
+#### 20g — ปิดยอดแยกตามช่องทางชำระเงิน (เจ้าของสั่ง 2026-09-24) — โค้ดเสร็จ รอ deploy
+> ที่มา: "การปิดยอดเงินควรแยกประเภทการจ่าย เผื่อจ่ายจากหลายช่องทาง จะได้เช็คเงินได้" · ตัดสินใจ: แยกยอดตามช่องทาง (1 บิลยังจ่ายทางเดียว) ·
+> สรุปทั้งร้านรายวันรวมบิลที่ธนาคารปิดเอง · ช่องทางอื่นกรอกยอดจริงได้แต่ไม่บังคับ · **มี migration 1 ไฟล์**
+- [x] migration `20260924150000_split_closing_payment_methods`: `CashierClosing.totalPromptPay` (แยกจาก `totalCard`) + `counted{Transfer,QR,PromptPay,Card}` nullable ·
+      เติมค่ารอบเก่า = คำนวณพร้อมเพย์ใหม่จากบิลจริงของแคชเชียร์/วัน (เวลาไทย) แล้วหักจาก `totalCard` เดิม → ผลรวมไม่เปลี่ยน
+      · ซ้อมบนสำเนา production (dump 20260924-121414): ขึ้น 3 migration · diff สะอาด · production ยังไม่มีรอบปิด (0 แถว) → ทดสอบ SQL เติมค่าด้วยแถวสมมติ 6 แถว ผลรวมตรง
+- [x] `lib/closing-channels.ts` — ลำดับ/ชื่อช่องทาง + `bucketByChannel()` **ที่เดียว**ที่ตัดสินว่าวิธีชำระลงถังไหน (หน้าจอ · `closeCashierDay` · สรุปทั้งร้าน ใช้ร่วม)
+- [x] ฟอร์มปิดรอบเป็นตาราง 5 ช่องทาง: ยอดในระบบ · ยอดจริงที่ตรวจได้ · ส่วนต่างสด (เงินสดบังคับ · ช่องอื่นว่าง = "ไม่ได้ตรวจ" ไม่ใช่ 0)
+      · ผลการปิดรอบ/ประวัติแสดงส่วนต่างรายช่องทาง (`ClosingChannelLine`)
+- [x] `getStoreDaySummary()` — สรุปทั้งร้านรายวันแยกช่องทาง × คนปิดบิล รวมแถว "ระบบ (ธนาคารปิดบิลให้เอง)" + สถานะปิดรอบของแต่ละคน ·
+      ท้ายหน้า `/pos/closing` เห็นเฉพาะ `REPORTS:VIEW` · อ่านอย่างเดียว ไม่มีปิดยอดรวม
+- [x] เทส `closing.test.ts` +3 · `payment.test.ts` ปรับ · tenant-isolation +1 query · **717 ทั้งชุดผ่าน** · `pnpm build` ผ่าน
+- [ ] deploy: backup ใหม่ก่อน merge (มี migration) → merge → CI → ตรวจ `\d cashier_closing` มี `totalPromptPay` + `counted*` · เจ้าของลองปิดรอบจริง
 
 ### ✅ Phase 19 — ปรับปรุงครัว + ปิดรอบ (F24–F26) — ขึ้น production แล้ว 2026-09-22 (PR #24 · CI run 35708166462)
 > **ที่มา (เจ้าของสั่ง 2026-09-22)**: (1) หน้าขายไม่มีวันที่ และปิดรอบเลือกวันไม่ได้ (2) ครัวต้องทำ/เสิร์ฟ/ยกเลิกทีละรายการได้ ไม่ต้องทั้งรอบ

@@ -438,6 +438,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getTodaySalesSummary", (q, a, b) => q.getTodaySalesSummary(a.storeId, b.ownerId)],
     ["getTodayClosing", (q, a, b) => q.getTodayClosing(a.storeId, b.ownerId)],
     ["listClosings", (q, a) => q.listClosings(a.storeId, {})],
+    // 20g — สรุปทั้งร้านรายวัน (รวมบิลอัตโนมัติ) ต้องไม่รวมบิล/รอบของร้านอื่น
+    ["getStoreDaySummary", (q, a) => q.getStoreDaySummary(a.storeId)],
     ["listTableOverview", (q, a) => q.listTableOverview(a.storeId)],
     ["listNotifications", (q, a) => q.listNotifications(a.storeId)],
     ["getPendingNotificationCount", (q, a) => q.getPendingNotificationCount(a.storeId)],

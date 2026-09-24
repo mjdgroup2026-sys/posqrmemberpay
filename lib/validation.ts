@@ -84,6 +84,10 @@ const money = (label: string) =>
     .min(0, `${label} ต้องไม่ติดลบ`)
     .max(MAX_MONEY, `${label} สูงเกินไป`)
 
+/// เงินที่ไม่บังคับกรอก (20g) — "" / null / ไม่ส่ง = null · ถ้ากรอกต้องเป็นตัวเลข ≥ 0 เหมือน money()
+const optionalMoney = (label: string) =>
+  z.preprocess((value) => (value === "" || value === null || value === undefined ? null : value), money(label).nullable())
+
 export const categorySchema = z.object({
   name: z.string({ error: "กรุณากรอกชื่อหมวดหมู่" }).trim().min(1, "กรุณากรอกชื่อหมวดหมู่").max(60, "ชื่อหมวดหมู่ยาวเกินไป"),
 })
@@ -125,6 +129,11 @@ export const closingSchema = z.object({
     .string({ error: "กรุณาเลือกวันที่ปิดรอบ" })
     .regex(/^\d{4}-\d{2}-\d{2}$/, "รูปแบบวันที่ปิดรอบไม่ถูกต้อง"),
   countedCash: money("เงินสดที่นับได้"),
+  // ยอดจริงของช่องทางอื่น (20g) — ไม่บังคับ · ช่องว่าง/ไม่ส่ง = ไม่ได้กรอก (null) ไม่ใช่ 0
+  countedTransfer: optionalMoney("ยอดโอนที่ตรวจได้"),
+  countedQR: optionalMoney("ยอด QR หน้าร้านที่ตรวจได้"),
+  countedPromptPay: optionalMoney("ยอดพร้อมเพย์ที่ตรวจได้"),
+  countedCard: optionalMoney("ยอดบัตรที่ตรวจได้"),
   note: z
     .string({ error: "หมายเหตุไม่ถูกต้อง" })
     .trim()
