@@ -99,3 +99,22 @@ export function weekStartKey(dayKey: string): string {
 export function dateOnlyFromKey(dayKey: string): Date {
   return new Date(`${dayKey}T00:00:00.000Z`)
 }
+
+/// ช่วงวันของรายงาน (Phase 20c) — รับค่าดิบจาก `?from=&to=` แล้วคืนคีย์วันที่ใช้ได้เสมอ
+///
+/// ค่าผิด/ว่าง = ถอยเป็น `days` วันล่าสุด (นับวันนี้ด้วย) · ห้ามอนาคต (ใช้ parseBusinessDayKey) ·
+/// สลับให้เองถ้ากรอกกลับหัว — หน้ารายงานจึงไม่ต้องมี error state ของตัวเอง
+export function resolveDayRange(
+  from: unknown,
+  to: unknown,
+  days = 30,
+  now: Date = new Date(),
+): { from: string; to: string } {
+  const todayKey = businessDayKey(now)
+  const parse = (value: unknown): string | null =>
+    typeof value === "string" && parseBusinessDayKey(value, now) ? value : null
+
+  const toKey = parse(to) ?? todayKey
+  const fromKey = parse(from) ?? addDays(toKey, -(days - 1))
+  return fromKey > toKey ? { from: toKey, to: fromKey } : { from: fromKey, to: toKey }
+}

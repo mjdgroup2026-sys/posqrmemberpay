@@ -2684,3 +2684,147 @@ export async function listUpcomingBookings(storeId: string, now: Date = new Date
 export async function countUpcomingBookings(storeId: string, now: Date = new Date()): Promise<number> {
   return (await listUpcomingBookings(storeId, now)).length
 }
+
+// ───────────────────── ร้านนวด — รายงานต่อพนักงานนวด (Phase 20c) ─────────────────────
+
+/// ช่วงวันของรายงาน — รับคีย์วันทางธุรกิจ (เวลาไทย) แล้วแปลงเป็นช่วงเวลาจริงที่ใช้กับ createdAt
+/// ปลายทางเป็น "ต้นวันถัดไป" เสมอ เพื่อให้บิลที่ออกช่วงดึกของวันสุดท้ายถูกนับครบ
+function reportRange(fromKey: string, toKey: string): { start: Date; end: Date } {
+  return {
+    start: new Date(`${fromKey}T00:00:00.000+07:00`),
+    end: new Date(new Date(`${toKey}T00:00:00.000+07:00`).getTime() + 86_400_000),
+  }
+}
+
+export type TherapistReportRow = {
+  therapistId: string
+  code: string
+  label: string
+  isActive: boolean
+  /// จำนวนครั้งที่ให้บริการ (รวม quantity ของบรรทัด — ปกติ 1 ต่อบรรทัด)
+  services: number
+  /// จำนวนบิลที่มีชื่อคนนี้ (บิลเดียวอาจมีหลายบรรทัด นับครั้งเดียว)
+  bills: number
+  /// ยอดเงินของบรรทัดบริการที่เป็นของคนนี้ (ไม่รวมอาหารในบิลเดียวกัน · ไม่รวมค่าบริการท้ายบิล)
+  revenue: number
+  /// นาทีรวม = Σ (quantity × MenuItem.durationMinutes) — โปรแกรมที่ไม่ได้ตั้งนาทีนับเป็น 0
+  minutes: number
+}
+
+/// ยอด/จำนวนครั้ง/นาทีรวม ต่อพนักงานนวด ในช่วงวันที่เลือก (Phase 20c)
+///
+/// อ่านจาก `SaleItem.therapistId` ที่ snapshot ไว้ตอนปิดบิล — **ไม่ใช่** `MobileOrderItem` ที่ยังเปลี่ยนได้
+/// จึงตรงกับเงินที่เก็บได้จริงเสมอ · นับเฉพาะบิล `COMPLETED` (บิลที่ void หายจากรายงานทันทีตามกติกาเดิม)
+/// ⚠️ raw SQL ไม่ผ่าน forStore() — ต้องกรอง `s."storeId"` เองและใช้ชื่อตารางจริง (snake_case)
+export async function getTherapistSalesReport(
+  storeId: string,
+  range: { from: string; to: string },
+): Promise<TherapistReportRow[]> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const rows = await db.$queryRaw<
+    { id: string; code: string; name: string; nickname: string | null; isActive: boolean; services: bigint | null; bills: bigint | null; revenue: string | null; minutes: bigint | null }[]
+  >`
+    SELECT t."id"        AS id,
+           t."code"      AS code,
+           t."name"      AS name,
+           t."nickname"  AS nickname,
+           t."isActive"  AS "isActive",
+           COALESCE(SUM(i."quantity"), 0)::bigint                             AS services,
+           COUNT(DISTINCT s."id")::bigint                                     AS bills,
+           COALESCE(SUM(i."subtotal"), 0)::text                               AS revenue,
+           COALESCE(SUM(i."quantity" * COALESCE(m."durationMinutes", 0)), 0)::bigint AS minutes
+    FROM "therapist" t
+    -- จับ sale_item กับ sale เป็นคู่ใน JOIN วงเล็บก่อน แล้วค่อย LEFT JOIN เข้าพนักงาน —
+    -- ถ้าเอาเงื่อนไขบิลไปไว้ใน ON ของ LEFT JOIN "sale" ตรง ๆ บรรทัดของบิล void/นอกช่วงยังถูก SUM อยู่
+    LEFT JOIN ("sale_item" i
+               JOIN "sale" s ON s."id" = i."saleId"
+                            AND s."storeId" = ${storeId}
+                            AND s."status" = 'COMPLETED'
+                            AND s."createdAt" >= ${start}
+                            AND s."createdAt" < ${end})
+           ON i."therapistId" = t."id"
+    LEFT JOIN "menu_item" m ON m."id" = i."menuItemId"
+    WHERE t."storeId" = ${storeId}
+    GROUP BY t."id", t."code", t."name", t."nickname", t."isActive"
+    ORDER BY COALESCE(SUM(i."subtotal"), 0) DESC, t."code" ASC
+  `
+
+  // LEFT JOIN ทำให้พนักงานที่ไม่มีงานในช่วงนี้ยังมีแถว (ยอด 0) — ต้องเห็นเพื่อรู้ว่าใครว่างงาน
+  return rows.map((row) => ({
+    therapistId: row.id,
+    code: row.code,
+    label: `${row.code} ${row.nickname ?? row.name}`,
+    isActive: row.isActive,
+    services: Number(row.services ?? 0),
+    bills: Number(row.bills ?? 0),
+    revenue: toNumber(row.revenue ?? "0"),
+    minutes: Number(row.minutes ?? 0),
+  }))
+}
+
+export type TherapistHistoryRow = {
+  saleId: string
+  saleNumber: string
+  soldAt: Date
+  menuItemName: string
+  quantity: number
+  minutes: number
+  subtotal: number
+  /// ห้อง/โต๊ะของบิลนั้น (บิลกลับบ้าน/หน้าร้านไม่มี)
+  tableCode: string | null
+}
+
+/// ประวัติรายบรรทัดของพนักงานนวดคนหนึ่งในช่วงวันที่เลือก (Phase 20c)
+export async function getTherapistHistory(
+  storeId: string,
+  therapistId: string,
+  range: { from: string; to: string },
+  limit = 200,
+): Promise<TherapistHistoryRow[]> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const rows = await db.$queryRaw<
+    { saleId: string; saleNumber: string; soldAt: Date; name: string; quantity: number; minutes: number | null; subtotal: string; tableCode: string | null }[]
+  >`
+    SELECT s."id"         AS "saleId",
+           s."saleNumber" AS "saleNumber",
+           s."createdAt"  AS "soldAt",
+           i."name"       AS name,
+           i."quantity"   AS quantity,
+           m."durationMinutes" AS minutes,
+           i."subtotal"::text  AS subtotal,
+           rt."code"      AS "tableCode"
+    FROM "sale_item" i
+    JOIN "sale" s ON s."id" = i."saleId"
+    LEFT JOIN "menu_item" m ON m."id" = i."menuItemId"
+    LEFT JOIN "table_session" ts ON ts."id" = s."tableSessionId"
+    LEFT JOIN "restaurant_table" rt ON rt."id" = ts."tableId"
+    WHERE s."storeId" = ${storeId}
+      AND i."therapistId" = ${therapistId}
+      AND s."status" = 'COMPLETED'
+      AND s."createdAt" >= ${start}
+      AND s."createdAt" < ${end}
+    ORDER BY s."createdAt" DESC
+    LIMIT ${limit}
+  `
+
+  return rows.map((row) => ({
+    saleId: row.saleId,
+    saleNumber: row.saleNumber,
+    soldAt: row.soldAt,
+    menuItemName: row.name,
+    quantity: row.quantity,
+    minutes: (row.minutes ?? 0) * row.quantity,
+    subtotal: toNumber(row.subtotal),
+    tableCode: row.tableCode,
+  }))
+}
+
+/// พนักงานนวดคนเดียว (หน้าประวัติรายคน) — คืน null เมื่อไม่ใช่ของร้านนี้
+export async function getTherapistById(storeId: string, therapistId: string): Promise<TherapistRow | null> {
+  const rows = await listTherapists(storeId)
+  return rows.find((t) => t.id === therapistId) ?? null
+}

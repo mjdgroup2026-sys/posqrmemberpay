@@ -967,8 +967,20 @@ enum ResourceKey {
 - [x] migration 3 ไฟล์ `20260922120000_add_spa_resources` (ADD VALUE แยกไฟล์) → `20260922120100_add_spa_option_and_therapist` (additive) → `20260922120200_backfill_spa_permissions`
       · `Therapist` อยู่ใน `STORE_SCOPED_MODELS` · ไม่มี env ใหม่
 - [x] เทส `spa-therapist.test.ts` 10 เคส · tenant-isolation +2 query · +5 action · +1 FK ข้ามร้าน (therapist ในตะกร้า / ทักษะ / ประเภทห้อง)
-- [ ] **20b** กะ (`TherapistShift`) + จองล่วงหน้า (`Booking` · advisory lock กันซ้อนต่อพนักงาน/ห้อง + buffer นาที) + `/spa/bookings` ตารางเวลา + `/spa/board` กระดานว่าง/ไม่ว่าง + เช็กอินเปิด session/ออร์เดอร์
-- [ ] **20c** รายงานต่อพนักงานนวด (ยอด/จำนวน/นาที) จาก `SaleItem.therapistId` + ประวัติในหน้าพนักงาน
+- [x] **20b** กะ (`TherapistShift`) + จองล่วงหน้า (`Booking` · advisory lock กันซ้อนต่อพนักงาน/ห้อง + buffer นาที) + `/spa/bookings` ตารางเวลา + `/spa/board` กระดานว่าง/ไม่ว่าง + เช็กอินเปิด session/ออร์เดอร์
+- [x] **20c** รายงานต่อพนักงานนวด (ยอด/จำนวน/นาที) จาก `SaleItem.therapistId` + ประวัติในหน้าพนักงาน — ดู F29
+
+### F29 — รายงานต่อพนักงานนวด (Phase 20c)
+> ค่ามือยังไม่คิดในระบบ (ตัดสินใจ 2026-09-22) — รายงานนี้ให้ตัวเลขดิบไปคำนวณเอง
+
+- [x] `getTherapistSalesReport(storeId, { from, to })` — ต่อคน: ยอดบริการ · จำนวนครั้ง (Σ quantity) · จำนวนบิล · นาทีรวม (Σ quantity × `MenuItem.durationMinutes`)
+      · อ่านจาก **`SaleItem.therapistId` ของบิล `COMPLETED` เท่านั้น** (บิล void หายเอง) · ไม่รวมอาหารในบิลเดียวกันและไม่รวมค่าบริการท้ายบิล
+      · พนักงานที่ไม่มีงานในช่วงนั้นยังมีแถวยอด 0 · ช่วงวันตัดตามเวลาไทย ปลายช่วงนับทั้งวัน · raw SQL กรอง `storeId` เอง
+- [x] `/spa/reports?from=&to=` — การ์ดสรุป + ตารางจัดอันดับตามยอด (ค่าเริ่มต้น 30 วันล่าสุด · ห้ามอนาคต · `resolveDayRange()` ใน `lib/day.ts` ปัด/สลับค่าให้เอง)
+      · สิทธิ์ `SPA_THERAPISTS` **หรือ** `REPORTS` (ตัดสินใจ 2026-09-23) · ไม่มี query ข้ามร้านใหม่
+- [x] `/spa/therapists/[therapistId]?from=&to=` — ประวัติรายคน (เลขบิล · โปรแกรม · ห้อง · นาที · ยอด ล่าสุด 200 บรรทัด) · ปุ่ม "ประวัติ" ในตารางพนักงาน
+      · id จาก URL อ่านใต้ร้านนี้เท่านั้น (`getTherapistById` → 404 เมื่อเป็นของร้านอื่น)
+- [x] เทส `therapist-report.test.ts` 6 · `day.test.ts` +1 · tenant-isolation +3 query
 
 ### F28 — กะพนักงานนวด + จองล่วงหน้า + กระดานว่าง/ไม่ว่าง (Phase 20b)
 > เจ้าของสั่ง 2026-09-22 ข้อ (5)(6): "จัดการว่าง/ไม่ว่าง ช่วงวันเวลา รายการนวด/นาที ห้อง และจองล่วงหน้าได้" + "รู้ว่าใครว่าง/ไม่ว่าง"
@@ -1110,7 +1122,9 @@ enum ResourceKey {
 - `/spa/shifts?week=YYYY-MM-DD` — ตารางกะรายสัปดาห์ + คัดลอกไปทั้งสัปดาห์ (F28 · สิทธิ์ `SPA_THERAPISTS`)
 - `/spa/bookings?date=YYYY-MM-DD` — ตารางจองรายวัน + ฟอร์มจอง + เช็กอิน (F28 · สิทธิ์ `SPA_BOOKINGS`) — **ยอมให้เลือกวันอนาคต**
 - `/spa/board` — กระดานสด ใครว่าง/ห้องไหนใช้อยู่ (F28 · สิทธิ์ `SPA_BOOKINGS`)
-> ทั้งสี่หน้าเด้งกลับพร้อมคำแนะนำเมื่อร้านยังไม่เปิดตัวเลือกร้านนวด · ปิดบิลของคิวนวดใช้ `/mobile-order/tables/[tableId]/billing` เดิม
+- `/spa/reports?from=&to=` — รายงานยอด/ครั้ง/นาทีต่อพนักงานนวด (F29 · สิทธิ์ `SPA_THERAPISTS` หรือ `REPORTS`)
+- `/spa/therapists/[therapistId]?from=&to=` — ประวัติการให้บริการรายคน (F29 · สิทธิ์เดียวกับรายงาน)
+> ทุกหน้า (ยกเว้นประวัติรายคน)เด้งกลับพร้อมคำแนะนำเมื่อร้านยังไม่เปิดตัวเลือกร้านนวด · ปิดบิลของคิวนวดใช้ `/mobile-order/tables/[tableId]/billing` เดิม
 
 ### Kitchen
 - `/mobile-order/kitchen` — Kitchen Display System (F18) แสดงเฉพาะเมื่อ `StoreSettings.hasKDS = true` —
@@ -2124,21 +2138,22 @@ enum ResourceKey {
 - [x] `Sale.channel = TAKEAWAY` โผล่เป็นป้าย "อาหารกลับบ้าน" ใน `/pos/history`
 
 
-### 🔧 Phase 20 — ตัวเลือกร้านนวด / สปา (F27–F29) — 20a โค้ดเสร็จ 2026-09-22 (รอ deploy) · 20b–20c ยังไม่เริ่ม
+### 🔧 Phase 20 — ตัวเลือกร้านนวด / สปา (F27–F29) — 20a+20b ขึ้น production แล้ว 2026-09-23 (PR #26) · 20c เสร็จในเครื่อง รอ PR
 > **ที่มา (เจ้าของสั่ง 2026-09-22)**: (1) ประวัติพนักงานนวด (2) เมนู → โปรแกรมนวดแยกตามราคา (3) พนักงานนวดผูกกับรายการ (4) โต๊ะ → ห้องนวด
 > (5) จัดการว่าง/ไม่ว่าง ช่วงวันเวลา รายการนวด/นาที ห้อง และจองล่วงหน้าได้ (6) รู้ว่าใครว่าง/ไม่ว่าง
 > · **การตัดสินใจ**: "ใช้ร่วมกันได้กรณีร้านนวด" → สวิตช์ `spaEnabled` เปิดเพิ่มจากของเดิม ไม่ใช่โหมดสลับ · `MenuItem.itemType FOOD/SERVICE` · `Table.kind TABLE/ROOM` ·
 > ประเภทครัว (Phase 19) = ประเภทบริการ ผูกทั้งโปรแกรม/ห้อง/ทักษะ · พนักงานนวดไม่ล็อกอิน · ลูกค้ายังไม่จองเอง · ค่ามือค่อยทำ (20c) · ห้องละ 1 คน ·
 > POS/สต็อกยังใช้ตามเดิม · ปิดบิล/รายงาน/ปิดรอบ ใช้เส้นทางเดิมทั้งหมด (เก็บแค่ `SaleItem.therapistId`)
 
-#### 20a — สวิตช์ + พนักงานนวด + โปรแกรม/ห้องมีชนิด + ขายบริการ ✅ (โค้ด)
+#### 20a — สวิตช์ + พนักงานนวด + โปรแกรม/ห้องมีชนิด + ขายบริการ ✅ (ขึ้น production แล้ว 2026-09-23)
 - [x] schema: `Therapist` (+ m:n `_TherapistSkills`) · `MenuItem.itemType/durationMinutes` · `Table.kind/stationId` · `MobileOrderItem.therapistId` · `SaleItem.therapistId` ·
       `StoreSettings.spaEnabled` · `ResourceKey` +`SPA_THERAPISTS`,`SPA_BOOKINGS` — migration 3 ไฟล์ (ADD VALUE แยก · additive · backfill สิทธิ์) · ซ้อมบน dev+test แล้ว diff สะอาด
 - [x] F27 ทั้งหมด (ดู §5) · เทส 623/623
 - [x] เอกสาร §2/§5/§8 · CLAUDE.md กติกาข้อ 5 (FK ใหม่: therapistId/skillIds/stationId ของห้อง) + สถานะ
-- [ ] deploy: ไม่มี env ใหม่ · ซ้อม migration บนสำเนา production ก่อน merge ตามขั้นตอนเดิม · หลัง deploy ตรวจ `\d therapist` + `role_permission` มี SPA_* + เปิดสวิตช์ในร้านทดลอง
+- [x] **deploy 2026-09-23 (ขึ้นพร้อม 20b ใน PR #26)** — ไม่มี env ใหม่ · ตรวจในฐานจริงแล้ว: `therapist` มีตาราง · `role_permission` มี `SPA_THERAPISTS`/`SPA_BOOKINGS` ครบ 12/12 บทบาท
+      · ทุกร้าน `spaEnabled = false` ตามค่าเริ่มต้น (ร้านอาหารเดิมไม่เห็นความเปลี่ยนแปลง) — เหลือเปิดสวิตช์ในร้านทดลองแล้วลองใช้จริง
 
-#### 20b — กะ + จองล่วงหน้า + กระดานว่าง/ไม่ว่าง (F28) ✅ (โค้ดเสร็จ 2026-09-23 · รอ deploy)
+#### 20b — กะ + จองล่วงหน้า + กระดานว่าง/ไม่ว่าง (F28) ✅ (ขึ้น production แล้ว 2026-09-23)
 - [x] `TherapistShift` (รายวัน + คัดลอกทั้งสัปดาห์ · unique therapistId+workDate) · `Booking` + enum `BookingStatus` · `StoreSettings.bookingBufferMinutes` (default 10)
       — migration `20260923090000_add_therapist_shift_and_booking` **additive ล้วน ไฟล์เดียว** (สร้าง TYPE ใหม่ทำในทรานแซคชันเดียวกับที่ใช้ได้ ข้อห้ามมีเฉพาะ `ALTER TYPE … ADD VALUE`)
       · `migrate diff` = No difference detected · `TherapistShift`/`Booking` อยู่ใน `STORE_SCOPED_MODELS`
@@ -2148,10 +2163,17 @@ enum ResourceKey {
       เช็กอินผ่าน `requireSellingStore()` + `openOrReuseSession` + `buildOrderLines` → ปิดบิลหน้าเดิม · เตือนคิวใกล้ถึง 15 นาทีในหน้าแจ้งเตือน + badge
 - [x] `/spa/board` กระดานสด (พนักงาน 6 สถานะ + การ์ดห้อง · คำนวณสดล้วน) · SSE topic `bookings` + polling สำรอง · สถานะจองเดินตามงานจริง (เริ่มนวด/เสร็จ/ปิดบิล)
 - [x] resource `SPA_BOOKINGS` (มาจาก 20a ไม่มี migration สิทธิ์ใหม่) · tenant-isolation +6 query +6 action · เทสใหม่ 16 (651 ทั้งชุด) · เอกสาร §2/§5 F28/§6a/§8
-- [ ] deploy: ไม่มี env ใหม่ · migration additive ล้วน (ซ้อมบนสำเนา production ก่อนตามขั้นตอนเดิม) · หลัง deploy ตรวจ `\d booking` + `\d therapist_shift` และเปิด `/spa/bookings` จริง
+- [x] **deploy 2026-09-23 (PR #26 · CI run 35819853906)** — backup `posmobileorderdb-20260923-114231.dump` → ซ้อม `migrate deploy` บนสำเนา production ในเครื่อง
+      (25 → 29 migration · `migrate diff` = No difference detected) → merge → CI เขียวครบ 3 job · สลับ blue → **green**
+      · ตรวจในฐานจริง: `_prisma_migrations` = 29 · `booking`/`therapist_shift` มีตาราง (0 แถว) · `store_settings.bookingBufferMinutes` = 10 ทุกร้าน
+      · ยืนยันโค้ดใหม่ในคอนเทนเนอร์ที่รับ traffic: `ls .next/server/app/(staff)/(app)/spa` → board/bookings/shifts/therapists
+      > ⚠️ **กับดักใหม่**: Prisma 7 ไม่มี `migrate diff --from-url` แล้ว ใส่ไปได้หน้า help + **exit 0 เหมือนผ่าน** — ต้องใช้ `--from-config-datasource`
+      > โดยตั้ง `DATABASE_URL` ของฐานที่จะตรวจเป็น env นำหน้าคำสั่ง (`prisma7.config.ts` โหลด dotenv ซึ่งไม่ override env เดิม)
 
-#### 20c — รายงานต่อพนักงานนวด (F29) — ยังไม่เริ่ม
-- [ ] ยอด/จำนวนครั้ง/นาทีรวม ต่อคน ต่อช่วงวัน จาก `SaleItem.therapistId` (+ `MenuItem.durationMinutes`) · แท็บประวัติในหน้าพนักงาน · ไม่มี query ข้ามร้านใหม่
+#### 20c — รายงานต่อพนักงานนวด (F29) — เสร็จในเครื่อง รอ PR
+- [x] ยอด/จำนวนครั้ง/นาทีรวม ต่อคน ต่อช่วงวัน จาก `SaleItem.therapistId` (+ `MenuItem.durationMinutes`) · หน้าประวัติรายคน · ไม่มี query ข้ามร้านใหม่
+- [x] `/spa/reports` + `/spa/therapists/[therapistId]` + `components/day-range-picker.tsx` · เมนู "รายงานพนักงานนวด" ใน sidebar · **ไม่มี migration ไม่มี env ใหม่**
+- [ ] deploy (merge → CI → ตรวจ `ls .next/server/app/(staff)/(app)/spa/reports` ในคอนเทนเนอร์ที่รับ traffic)
 
 #### 20d — ปรับหน้าจอร้านสปาหลังเจ้าของทดลองใช้ (เจ้าของสั่ง 2026-09-23 · 7 ข้อ)
 - [x] (1)(4)(6) ร้านที่เปิด `spaEnabled` เห็นชื่อหน้า/เมนู "จัดการเมนูอาหาร/ร้านสปา" · "ขายอาหาร/ร้านสปา" · "ผังโต๊ะอาหาร/ห้องสปา"
