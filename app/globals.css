@@ -808,3 +808,25 @@
     width: 100%;
   }
 }
+
+/* ไว้นอก @layer โดยตั้งใจ — ต้องชนะ utility ของ Tailwind (bg-muted/50) ใน components/ui ที่อยู่ layer utilities */
+/* ───────────── หน้าต่างที่เด้งขึ้น (dialog) — เลื่อนได้เมื่อเนื้อหายาวกว่าจอ (เจ้าของสั่ง 2026-09-24) ─────────────
+   shadcn วาง dialog ไว้กลางจอแบบ fixed โดยไม่จำกัดความสูง → จอเล็ก/มือถือแนวนอน ฟอร์มจองล้นจอจนกดบันทึกไม่ได้
+   แก้ที่นี่ที่เดียวแทนการแก้ components/ui (ห้ามแก้มือ) · ครอบทั้ง Dialog และ AlertDialog ทุกตัวในระบบ
+   แถบปุ่มท้าย (footer) ติดขอบล่างเสมอ เลื่อนเนื้อหาไปถึงไหนก็ยังเห็นปุ่มบันทึก/ยกเลิก */
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"] {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+[data-slot="dialog-footer"],
+[data-slot="alert-dialog-footer"] {
+  position: sticky;
+  /* content มี padding 1rem และ footer ดึงตัวลง -1rem (-mb-4) — ติดที่ -1rem จึงชิดขอบล่างพอดี */
+  bottom: -1rem;
+  z-index: 1;
+  /* พื้นทึบ — ของเดิมโปร่ง 50% พอเลื่อนแล้วเนื้อหาจะโผล่ทะลุปุ่ม */
+  background: var(--surface-2);
+}
