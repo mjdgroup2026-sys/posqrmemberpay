@@ -26,9 +26,10 @@ export const RESOURCE_ACTIONS: Record<ResourceKey, PermissionAction[]> = {
   DASHBOARD: ["VIEW"],
   PRODUCTS: ["VIEW", "ADD", "EDIT", "DELETE"],
   CATEGORIES: ["VIEW", "ADD", "EDIT", "DELETE"],
-  // ledger เป็น append-only จึงไม่มี EDIT/DELETE (กติกาข้อ 3)
-  STOCK_IN: ["VIEW", "ADD"],
-  STOCK_OUT: ["VIEW", "ADD"],
+  // ledger เป็น append-only จึงไม่มี EDIT (กติกาข้อ 3) · Phase 21: ใบรับ/ใบเบิก ADD = บันทึกเอกสาร ·
+  // DELETE = ยกเลิกเอกสาร (สร้างรายการชดเชย ไม่ลบ ledger)
+  STOCK_IN: ["VIEW", "ADD", "DELETE"],
+  STOCK_OUT: ["VIEW", "ADD", "DELETE"],
   // ADD = ทำการขาย/checkout
   POS: ["VIEW", "ADD"],
   // DELETE = สิทธิ์กดปุ่ม void บิล
@@ -53,14 +54,16 @@ export const RESOURCE_ACTIONS: Record<ResourceKey, PermissionAction[]> = {
   // Phase 20 — ร้านนวด (เห็นเมนูเมื่อร้านเปิด spaEnabled): พนักงานนวด = master data เหมือนเมนู · จอง: ADD = จอง/เช็กอิน · EDIT = แก้/ย้ายเวลา/มอบหมาย · DELETE = ยกเลิก/no-show
   SPA_THERAPISTS: ["VIEW", "ADD", "EDIT", "DELETE"],
   SPA_BOOKINGS: ["VIEW", "ADD", "EDIT", "DELETE"],
+  // Phase 21 — ปรับยอดสต็อก: ADD = บันทึกใบปรับ · DELETE = ยกเลิกใบปรับ (สร้างรายการชดเชย)
+  STOCK_ADJUST: ["VIEW", "ADD", "DELETE"],
 }
 
 export const RESOURCE_LABEL: Record<ResourceKey, string> = {
   DASHBOARD: "แดชบอร์ด",
   PRODUCTS: "สินค้า",
   CATEGORIES: "หมวดหมู่",
-  STOCK_IN: "รับสินค้าเข้า",
-  STOCK_OUT: "เบิกจ่ายสินค้า",
+  STOCK_IN: "ใบรับสินค้า",
+  STOCK_OUT: "ใบเบิกสินค้า",
   POS: "ขายหน้าร้าน",
   POS_HISTORY: "ประวัติการขาย",
   POS_CLOSING: "ปิดยอดประจำวัน",
@@ -74,6 +77,7 @@ export const RESOURCE_LABEL: Record<ResourceKey, string> = {
   MO_POS: "ขายอาหารหน้าร้าน",
   SPA_THERAPISTS: "พนักงานนวด (ร้านนวด)",
   SPA_BOOKINGS: "ตารางจองและกระดานห้องนวด (ร้านนวด)",
+  STOCK_ADJUST: "ปรับยอดสต็อก",
 }
 
 export const ACTION_LABEL: Record<PermissionAction, string> = {
@@ -86,6 +90,10 @@ export const ACTION_LABEL: Record<PermissionAction, string> = {
 /// คำอธิบายว่า action นั้นหมายถึงอะไรจริง ๆ กับ resource ที่ความหมายไม่ตรงตัว
 export const ACTION_HINT: Partial<Record<`${ResourceKey}:${PermissionAction}`, string>> = {
   "POS:ADD": "ทำการขาย/ปิดการขาย",
+  "STOCK_IN:DELETE": "ยกเลิกใบรับสินค้า",
+  "STOCK_OUT:DELETE": "ยกเลิกใบเบิกสินค้า",
+  "STOCK_ADJUST:ADD": "บันทึกใบปรับยอดสต็อก",
+  "STOCK_ADJUST:DELETE": "ยกเลิกใบปรับยอดสต็อก",
   "POS_HISTORY:DELETE": "ยกเลิก (void) บิล",
   "POS_CLOSING:ADD": "กดปิดยอดประจำวัน",
   "USERS:EDIT": "แก้ผู้ใช้และจัดการบทบาท/สิทธิ์",

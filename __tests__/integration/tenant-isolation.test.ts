@@ -74,6 +74,8 @@ type StoreFixture = {
   bookingId: string
   roomId: string
   bookingCustomer: string
+  /// Phase 21 — ใบรับสินค้า 1 ใบ
+  stockDocId: string
 }
 
 describe.skipIf(!dbReady)("การแยกข้อมูลตามร้าน (Phase 13 — tenant isolation)", () => {
@@ -100,7 +102,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       roles: await import("@/app/actions/roles"),
       sales: await import("@/app/actions/sales"),
       settings: await import("@/app/actions/settings"),
-      stock: await import("@/app/actions/stock"),
+      "stock-docs": await import("@/app/actions/stock-docs"),
       "store-members": await import("@/app/actions/store-members"),
       tables: await import("@/app/actions/tables"),
       onboarding: await import("@/app/actions/onboarding"),
@@ -142,7 +144,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
 
     const staff = await ensureTestUser(`staff-${suffix}`, `พนักงานร้าน ${tag}`, { storeId, role: "STAFF" })
 
-    const category = await db.category.create({ data: { storeId, name: `หมวดร้าน ${tag}` } })
+    // เปิดขายที่หน้าขายอาหาร (Phase 21b) — ให้ listPosProducts มีของทั้งสองร้าน จะได้พิสูจน์ว่ากรองร้านจริง
+    const category = await db.category.create({ data: { storeId, name: `หมวดร้าน ${tag}`, sellableAtPos: true } })
     const product = await db.product.create({
       data: {
         storeId,
@@ -160,6 +163,17 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     })
     await db.stockTransaction.create({
       data: { storeId, productId: product.id, type: "OUT", quantity: 2, note: `เบิกร้าน ${tag}` },
+    })
+    const stockDoc = await db.stockDocument.create({
+      data: {
+        storeId,
+        type: "RECEIPT",
+        docNumber: "GR-000001",
+        docDate: new Date(`${businessDayKey()}T00:00:00.000Z`),
+        supplierName: `ผู้ขายร้าน ${tag}`,
+        createdById: ownerId,
+        lines: { create: [{ lineNo: 1, productId: product.id, quantity: 3 }] },
+      },
     })
 
     const sale = await db.sale.create({
@@ -363,6 +377,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       bookingId: booking.id,
       roomId: room.id,
       bookingCustomer: `ลูกค้าจองร้าน ${tag}`,
+      stockDocId: stockDoc.id,
     }
   }
 
@@ -399,6 +414,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       f.bookingId,
       f.roomId,
       f.bookingCustomer,
+      f.stockDocId,
       `ร้าน ${f.tag}`,
     ]
   }
@@ -490,6 +506,14 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getTopItemsByKind", (q, a) => q.getTopItemsByKind(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() }, "PRODUCT")],
     ["listSalesForExport", (q, a) => q.listSalesForExport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() }, null)],
     ["getPaymentBreakdown", (q, a) => q.getPaymentBreakdown(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    // Phase 21 — เอกสารคลัง (id ของร้าน B ต้องได้ null)
+    ["listStockDocuments", (q, a) => q.listStockDocuments(a.storeId, "RECEIPT", { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getStockDocument", (q, a, b) => q.getStockDocument(a.storeId, b.stockDocId)],
+    // Phase 21b — สินค้าที่ขายได้ที่จอขายอาหาร
+    ["listPosProducts", (q, a) => q.listPosProducts(a.storeId)],
+    // Phase 21c — รายงานสต็อก (raw SQL ทุกตัว ต้องกรอง storeId เอง)
+    ["getStockSalesReport", (q, a) => q.getStockSalesReport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getReorderReport", (q, a) => q.getReorderReport(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -588,8 +612,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "getScbTestStatus",
     // Phase 17a: อัปโหลดรูปเข้าร้านที่ทำงานอยู่เสมอ (ไม่รับ id ของร้านอื่น)
     "uploadStoreAsset",
-    // Phase 17c: ขายกลับบ้านไม่มีโต๊ะ — id เดียวที่รับคือ menuItemId ซึ่งถูกกรองด้วย forStore() อยู่แล้ว
-    // (เมนูของร้านอื่น → buildOrderLines หาไม่เจอ → ปฏิเสธ · เทสอยู่ที่ takeaway-sale.test.ts)
+    // Phase 17c: ขายกลับบ้านไม่มีโต๊ะ — id ที่รับคือ menuItemId/productId (21b) ซึ่งถูกกรองด้วย forStore() อยู่แล้ว
+    // (ของร้านอื่น → buildOrderLines/buildProductLines หาไม่เจอ → ปฏิเสธ · เทสด้านล่าง + takeaway-sale.test.ts)
     "createTakeawaySale",
     // QR พร้อมเพย์ของร้านที่ทำงานอยู่ — รับแค่ยอดเงิน ไม่รับ id (เทสอยู่ที่ takeaway-sale.test.ts)
     "buildStorePromptPayQr",
@@ -626,15 +650,31 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       (b) => makeFormData({ id: b.productId }),
       async (b) => expect(await testPrisma().product.count({ where: { id: b.productId } })).toBe(1),
     ],
+    // Phase 21 — เอกสารคลัง: productId ของร้าน B ในบรรทัด (FK จากฟอร์ม) ต้องถูกปฏิเสธ · ยกเลิกเอกสารของ B ต้องไม่ถึง
     [
-      "stockIn",
-      (b) => makeFormData({ productId: b.productId, quantity: 5, note: "" }),
+      "createStockReceipt",
+      (b) => makeFormData({ docDate: businessDayKey(), lines: JSON.stringify([{ productId: b.productId, quantity: 5 }]) }),
       async (b) => expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10),
     ],
     [
-      "stockOut",
-      (b) => makeFormData({ productId: b.productId, quantity: 1, note: "" }),
+      "createStockIssue",
+      (b) => makeFormData({ docDate: businessDayKey(), requesterName: "ร้าน A", lines: JSON.stringify([{ productId: b.productId, quantity: 1 }]) }),
       async (b) => expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10),
+    ],
+    [
+      "createStockAdjustment",
+      (b) => makeFormData({ docDate: businessDayKey(), reason: "นับ", lines: JSON.stringify([{ productId: b.productId, countedQty: 0 }]) }),
+      async (b) => expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10),
+    ],
+    [
+      "setCategorySellable",
+      (b) => makeFormData({ id: b.categoryId, sellable: "false" }),
+      async (b) => expect((await testPrisma().category.findUniqueOrThrow({ where: { id: b.categoryId } })).sellableAtPos).toBe(true),
+    ],
+    [
+      "voidStockDoc",
+      (b) => makeFormData({ id: b.stockDocId, reason: "ร้าน A พยายามยกเลิก" }),
+      async (b) => expect((await testPrisma().stockDocument.findUniqueOrThrow({ where: { id: b.stockDocId } })).status).toBe("POSTED"),
     ],
     [
       "createSale",

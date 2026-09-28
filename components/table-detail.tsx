@@ -301,6 +301,7 @@ export function TableDetail({
                         {formatNumber(item.quantity)}×
                       </span>{" "}
                       <span style={{ fontWeight: 500 }}>{item.menuItemName}</span>
+                      {item.itemType === "PRODUCT" ? <span className="t-caption"> · สินค้าในสต็อก</span> : null}
                       {item.options.length > 0 ? (
                         <span className="t-caption"> ({item.options.map((o) => o.optionName).join(", ")})</span>
                       ) : null}
@@ -308,7 +309,8 @@ export function TableDetail({
                     <span className="row" style={{ gap: 10 }}>
                       <span className={`chip ${ITEM_STATUS[item.status].chip}`}>
                         <span className="dot" />
-                        {ITEM_STATUS[item.status].label}
+                        {/* สินค้าในสต็อก (Phase 21b) ไม่ผ่านครัว — "เสิร์ฟแล้ว" ของมันคือหยิบให้ลูกค้าแล้ว */}
+                        {item.itemType === "PRODUCT" && item.status === "SERVED" ? "ส่งแล้ว (ตัดสต็อก)" : ITEM_STATUS[item.status].label}
                       </span>
                       <span className="num" style={{ fontWeight: 600 }}>
                         ฿{formatBaht(item.subtotal)}
@@ -353,7 +355,9 @@ export function TableDetail({
 
                   <div className="row" style={{ gap: 6 }}>
                     {/* ปุ่มยกเลิกโผล่เฉพาะตอนยังรอครัวรับ — server ก็ปฏิเสธซ้ำอีกชั้นด้วย conditional update */}
-                    {item.status === "AWAITING_KITCHEN" && allowed.includes("DELETE") ? (
+                    {/* สินค้าในสต็อก (Phase 21b) ยกเลิกได้จนกว่าจะปิดบิล — server คืนสต็อกให้ด้วยรายการชดเชย */}
+                    {(item.status === "AWAITING_KITCHEN" || (item.itemType === "PRODUCT" && item.status === "SERVED")) &&
+                    allowed.includes("DELETE") ? (
                       <button
                         type="button"
                         className="btn btn-danger btn-sm"
@@ -368,7 +372,7 @@ export function TableDetail({
                     ) : null}
 
                     {/* ลดจำนวน (F13) — เฉพาะรายการที่ครัวยังไม่รับและมีมากกว่า 1 · สิทธิ์เดียวกับยกเลิกรายการ */}
-                    {item.status === "AWAITING_KITCHEN" && item.quantity > 1 && allowed.includes("DELETE") ? (
+                    {item.status === "AWAITING_KITCHEN" && item.itemType !== "PRODUCT" && item.quantity > 1 && allowed.includes("DELETE") ? (
                       <button
                         type="button"
                         className="btn btn-subtle btn-sm"

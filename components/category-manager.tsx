@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { createCategory, updateCategory, deleteCategory } from "@/app/actions/categories"
+import { createCategory, updateCategory, deleteCategory, setCategorySellable } from "@/app/actions/categories"
 import { formatDate, formatNumber } from "@/lib/format"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
 import { IconEdit, IconPlus, IconSpinner, IconTrash } from "@/components/icons"
@@ -29,6 +29,8 @@ import {
 export type CategoryRow = {
   id: string
   name: string
+  /// Phase 21b — ขายที่หน้าขายอาหารได้ (ตัดสต็อกจริง)
+  sellableAtPos: boolean
   createdAt: Date
   productCount: number
 }
@@ -91,6 +93,26 @@ export function CategoryManager({ categories, allowed = FULL_ACCESS }: { categor
     }
   }
 
+  async function handleSellable(category: CategoryRow, sellable: boolean) {
+    setPending(true)
+    const formData = new FormData()
+    formData.set("id", category.id)
+    formData.set("sellable", String(sellable))
+    try {
+      const result = await setCategorySellable(formData)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(`${category.name} — ${result.message}`)
+      router.refresh()
+    } catch {
+      toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+    } finally {
+      setPending(false)
+    }
+  }
+
   const dialogOpen = creating || editing !== null
 
   return (
@@ -100,7 +122,7 @@ export function CategoryManager({ categories, allowed = FULL_ACCESS }: { categor
           <p className="t-eyebrow">คลังสินค้า</p>
           <h1 className="t-h1">หมวดหมู่สินค้า</h1>
           <p className="t-body" style={{ marginTop: 4 }}>
-            หมวดหมู่เป็นข้อมูลหลักที่ฟอร์มสินค้าเลือกใช้ — ลบไม่ได้ถ้ายังมีสินค้าผูกอยู่
+            หมวดหมู่เป็นข้อมูลหลักที่ฟอร์มสินค้าเลือกใช้ — ลบไม่ได้ถ้ายังมีสินค้าผูกอยู่ · เปิด “ขายที่หน้าขายอาหาร” เพื่อให้สินค้าในหมวดนั้นขายได้ที่จอขาย (ตัดสต็อกจริง)
           </p>
         </div>
         {allowed.includes("ADD") ? (
@@ -124,6 +146,7 @@ export function CategoryManager({ categories, allowed = FULL_ACCESS }: { categor
               <tr style={{ textAlign: "left", color: "var(--ink-3)", background: "var(--surface-2)" }}>
                 <th style={{ padding: "10px 24px", fontWeight: 500 }}>ชื่อหมวดหมู่</th>
                 <th style={{ padding: "10px 12px", fontWeight: 500, textAlign: "right" }}>สินค้าที่ผูกอยู่</th>
+                <th style={{ padding: "10px 12px", fontWeight: 500 }}>ขายที่หน้าขายอาหาร</th>
                 <th style={{ padding: "10px 12px", fontWeight: 500 }}>สร้างเมื่อ</th>
                 <th style={{ padding: "10px 24px", fontWeight: 500, textAlign: "right" }}>จัดการ</th>
               </tr>
@@ -131,7 +154,7 @@ export function CategoryManager({ categories, allowed = FULL_ACCESS }: { categor
             <tbody>
               {categories.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ padding: 28, textAlign: "center" }} className="t-body">
+                  <td colSpan={5} style={{ padding: 28, textAlign: "center" }} className="t-body">
                     ยังไม่มีหมวดหมู่ — กด “เพิ่มหมวดหมู่” เพื่อเริ่มต้น
                   </td>
                 </tr>
@@ -141,6 +164,21 @@ export function CategoryManager({ categories, allowed = FULL_ACCESS }: { categor
                     <td style={{ padding: "12px 24px", fontWeight: 500 }}>{c.name}</td>
                     <td className="num" style={{ padding: "12px", textAlign: "right" }}>
                       {formatNumber(c.productCount)}
+                    </td>
+                    <td style={{ padding: "12px" }}>
+                      <label className="checkbox-row" style={{ cursor: allowed.includes("EDIT") ? "pointer" : "default" }}>
+                        <input
+                          type="checkbox"
+                          checked={c.sellableAtPos}
+                          disabled={pending || !allowed.includes("EDIT")}
+                          aria-label={`ขาย ${c.name} ที่หน้าขายอาหาร`}
+                          onChange={(e) => handleSellable(c, e.target.checked)}
+                        />
+                        <span className={`chip ${c.sellableAtPos ? "chip-success" : "chip-neutral"}`}>
+                          <span className="dot" />
+                          {c.sellableAtPos ? "เปิดขาย" : "ไม่ขาย"}
+                        </span>
+                      </label>
                     </td>
                     <td className="t-caption num" style={{ padding: "12px" }}>
                       {formatDate(c.createdAt)}

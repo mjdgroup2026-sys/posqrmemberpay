@@ -98,7 +98,7 @@ export async function resetDb(): Promise<void> {
   await db.$executeRawUnsafe(
     [
       "TRUNCATE TABLE",
-      '"sale_item", "stock_transaction", "cashier_closing", "member_point_transaction", "sale",',
+      '"sale_item", "stock_transaction", "stock_document_line", "stock_document", "cashier_closing", "member_point_transaction", "sale",',
       '"mobile_order_item", "mobile_order", "notification", "line_notification_log",',
       '"payment_intent", "table_session",',
       '"qr_code", "restaurant_table", "modifier_option", "modifier_group", "menu_item",',
@@ -161,8 +161,9 @@ const FULL_PERMISSIONS = [
   { resource: "DASHBOARD", actions: ["VIEW"] },
   { resource: "PRODUCTS", actions: ["VIEW", "ADD", "EDIT", "DELETE"] },
   { resource: "CATEGORIES", actions: ["VIEW", "ADD", "EDIT", "DELETE"] },
-  { resource: "STOCK_IN", actions: ["VIEW", "ADD"] },
-  { resource: "STOCK_OUT", actions: ["VIEW", "ADD"] },
+  { resource: "STOCK_IN", actions: ["VIEW", "ADD", "DELETE"] },
+  { resource: "STOCK_OUT", actions: ["VIEW", "ADD", "DELETE"] },
+  { resource: "STOCK_ADJUST", actions: ["VIEW", "ADD", "DELETE"] },
   { resource: "POS", actions: ["VIEW", "ADD"] },
   { resource: "POS_HISTORY", actions: ["VIEW", "DELETE"] },
   { resource: "POS_CLOSING", actions: ["VIEW", "ADD"] },

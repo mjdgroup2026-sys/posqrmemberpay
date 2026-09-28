@@ -11,6 +11,7 @@ import { idSchema, cancelOrderItemSchema, reduceOrderItemSchema, assignTherapist
 import type { OrderItemStatus } from "@/generated/prisma/client"
 import { isPrinterConfigured, printKitchenTicket } from "@/lib/kitchen-printer"
 import type { ActionResult } from "@/lib/types"
+import { putStock } from "@/lib/stock-moves"
 
 
 /// ดึงชื่อ modifier ออกจาก JSON snapshot สำหรับพิมพ์ทิกเก็ต
@@ -64,9 +65,11 @@ async function transition(
   const db = forStore(storeId)
   const item = await db.mobileOrderItem.findFirst({
     where: { id: itemId, order: { storeId } },
-    select: { id: true, status: true, menuItem: { select: { name: true } } },
+    select: { id: true, status: true, menuItem: { select: { name: true } }, product: { select: { name: true } } },
   })
   if (!item) return { ok: false, error: "ไม่พบรายการอาหารนี้" }
+  // บรรทัดสินค้าในสต็อก (Phase 21b) ไม่มีเมนู — ใช้ชื่อสินค้าแทน
+  const name = item.menuItem?.name ?? item.product?.name ?? "รายการ"
 
   const updated = await db.mobileOrderItem.updateMany({
     where: { id: itemId, order: { storeId }, status: { in: from } },
@@ -80,12 +83,12 @@ async function transition(
     })
     return {
       ok: false,
-      error: `เปลี่ยนสถานะ ${item.menuItem.name} ไม่ได้ — ตอนนี้เป็น "${STATUS_LABEL[current?.status ?? "CANCELLED"]}" แล้ว`,
+      error: `เปลี่ยนสถานะ ${name} ไม่ได้ — ตอนนี้เป็น "${STATUS_LABEL[current?.status ?? "CANCELLED"]}" แล้ว`,
     }
   }
 
   revalidateOrderPages(storeId)
-  return { ok: true, message: `${item.menuItem.name} — ${STATUS_LABEL[to]}` }
+  return { ok: true, message: `${name} — ${STATUS_LABEL[to]}` }
 }
 
 /// เลื่อนสถานะของการจองตามงานจริงหน้าห้อง (Phase 20b) — ออร์เดอร์กลับบ้านไม่มี session จึงข้ามไป
@@ -181,7 +184,7 @@ export async function startServiceItem(formData: FormData): Promise<ActionResult
     select: { therapistId: true, menuItem: { select: { itemType: true } }, order: { select: { tableSessionId: true } } },
   })
   if (!item) return { ok: false, error: "ไม่พบรายการบริการนี้" }
-  if (item.menuItem.itemType !== "SERVICE") return { ok: false, error: "รายการนี้เป็นอาหาร ให้ครัวกดเริ่มทำจาก KDS แทน" }
+  if (item.menuItem?.itemType !== "SERVICE") return { ok: false, error: "รายการนี้ไม่ใช่โปรแกรมนวด ให้ครัวกดเริ่มทำจาก KDS แทน" }
   if (!item.therapistId) return { ok: false, error: "กรุณามอบหมายพนักงานนวดก่อนเริ่มนวด" }
 
   const result = await transition(storeId, parsed.data.id, ["AWAITING_KITCHEN"], "COOKING")
@@ -216,10 +219,11 @@ export async function assignOrderItemTherapist(formData: FormData): Promise<Acti
     }),
   ])
   if (!item) return { ok: false, error: "ไม่พบรายการบริการนี้" }
-  if (item.menuItem.itemType !== "SERVICE") return { ok: false, error: `${item.menuItem.name} ไม่ใช่โปรแกรมนวด มอบหมายพนักงานไม่ได้` }
+  const menu = item.menuItem
+  if (!menu || menu.itemType !== "SERVICE") return { ok: false, error: `${menu?.name ?? "รายการนี้"} ไม่ใช่โปรแกรมนวด มอบหมายพนักงานไม่ได้` }
   if (!therapist || !therapist.isActive) return { ok: false, error: "ไม่พบพนักงานนวดคนนี้ หรือปิดใช้งานแล้ว" }
-  if (item.menuItem.stationId && !therapist.skills.some((s) => s.id === item.menuItem.stationId)) {
-    return { ok: false, error: `พนักงาน ${therapist.code} ไม่มีทักษะ "${item.menuItem.station?.name ?? ""}"` }
+  if (menu.stationId && !therapist.skills.some((s) => s.id === menu.stationId)) {
+    return { ok: false, error: `พนักงาน ${therapist.code} ไม่มีทักษะ "${menu.station?.name ?? ""}"` }
   }
 
   // เปลี่ยนได้เฉพาะรายการที่ยังไม่จบ (conditional update — กติกาข้อ 7)
@@ -227,10 +231,10 @@ export async function assignOrderItemTherapist(formData: FormData): Promise<Acti
     where: { id: item.id, order: { storeId }, status: { in: ["AWAITING_KITCHEN", "COOKING"] } },
     data: { therapistId: therapist.id },
   })
-  if (updated.count === 0) return { ok: false, error: `${item.menuItem.name} เสร็จหรือถูกยกเลิกไปแล้ว เปลี่ยนพนักงานไม่ได้` }
+  if (updated.count === 0) return { ok: false, error: `${menu.name} เสร็จหรือถูกยกเลิกไปแล้ว เปลี่ยนพนักงานไม่ได้` }
 
   revalidateOrderPages(storeId)
-  return { ok: true, message: `มอบหมาย ${item.menuItem.name} ให้พนักงาน ${therapist.code} ${therapist.nickname ?? therapist.name} แล้ว` }
+  return { ok: true, message: `มอบหมาย ${menu.name} ให้พนักงาน ${therapist.code} ${therapist.nickname ?? therapist.name} แล้ว` }
 }
 
 /// ยกเลิกรายการอาหารทีละรายการ — อนุญาตเฉพาะตอนยังเป็น AWAITING_KITCHEN เท่านั้น (กติกาข้อ 7)
@@ -256,11 +260,58 @@ export async function cancelOrderItem(formData: FormData): Promise<ActionResult>
     }
   }
 
+  const product = await forStore(storeId).mobileOrderItem.findFirst({
+    where: { id: parsed.data.id, order: { storeId }, productId: { not: null } },
+    select: { id: true },
+  })
+  if (product) return cancelProductLine(storeId, parsed.data.id, user.id, parsed.data.reason)
+
   return transition(storeId, parsed.data.id, ["AWAITING_KITCHEN"], "CANCELLED", {
     cancelledAt: new Date(),
     cancelledById: user.id,
     cancelReason: parsed.data.reason,
   })
+}
+
+/// ยกเลิกบรรทัดสินค้าในสต็อกบนโต๊ะ (Phase 21b) — สินค้าเป็น SERVED ตั้งแต่ส่ง (ไม่มีครัว) จึงยกเลิกได้จนกว่าจะปิดบิล
+/// · conditional update `status: SERVED` กันกดซ้ำพร้อมกันคืนสต็อกสองรอบ · คืนสต็อกด้วยรายการชดเชยใน tx เดียวกัน
+async function cancelProductLine(storeId: string, itemId: string, userId: string, reason: string): Promise<ActionResult> {
+  const db = forStore(storeId)
+  try {
+    const name = await db.$transaction(async (tx) => {
+      const item = await tx.mobileOrderItem.findFirst({
+        where: { id: itemId, order: { storeId } },
+        select: { productId: true, quantity: true, product: { select: { name: true } }, order: { select: { saleId: true } } },
+      })
+      if (!item?.productId) throw new CancelAbort("ไม่พบรายการสินค้านี้")
+      // บิลกลับบ้านจ่ายเงินไปแล้ว — ต้อง void ทั้งบิลที่ประวัติการขายแทน (void คืนสต็อกให้เอง)
+      if (item.order.saleId) throw new CancelAbort("รายการนี้อยู่ในบิลที่ชำระแล้ว — ยกเลิกทั้งบิลที่หน้าประวัติการขายแทน")
+
+      const cancelled = await tx.mobileOrderItem.updateMany({
+        where: { id: itemId, order: { storeId, saleId: null }, status: "SERVED" },
+        data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: userId, cancelReason: reason },
+      })
+      if (cancelled.count === 0) throw new CancelAbort(`${item.product?.name ?? "รายการนี้"} ถูกยกเลิกไปแล้ว`)
+
+      await putStock(tx, storeId, item.productId, item.quantity, {
+        orderItemId: itemId,
+        note: `ยกเลิกรายการบนโต๊ะ — ${reason}`,
+      })
+      return item.product?.name ?? "สินค้า"
+    })
+    revalidateOrderPages(storeId)
+    revalidatePath("/products")
+    return { ok: true, message: `${name} — ยกเลิกแล้ว และคืนสต็อกเรียบร้อย` }
+  } catch (error) {
+    if (error instanceof CancelAbort) return { ok: false, error: error.reason }
+    return { ok: false, error: "ยกเลิกรายการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
+}
+
+class CancelAbort extends Error {
+  constructor(readonly reason: string) {
+    super("CANCEL_ABORT")
+  }
 }
 
 /// ลดจำนวนรายการอาหารหลังส่งครัวแล้ว (F13 — ตัดสินใจ 2026-09-17)
@@ -314,6 +365,9 @@ export async function reduceOrderItemQuantity(formData: FormData): Promise<Actio
         },
       })
       if (!item) return { ok: false as const, error: "ไม่พบรายการอาหารนี้" }
+      // บรรทัดสินค้าในสต็อก (Phase 21b) ไม่มีครัว — ลดจำนวนไม่ได้ ให้ยกเลิกทั้งบรรทัด (คืนสต็อก) แล้วสั่งใหม่
+      if (!item.menuItem) return { ok: false as const, error: "รายการสินค้าลดจำนวนไม่ได้ — กดยกเลิกรายการ (คืนสต็อกให้) แล้วสั่งใหม่ตามจำนวนที่ต้องการ" }
+      const itemName = item.menuItem.name
 
       if (quantity >= item.quantity) {
         return {
@@ -335,7 +389,7 @@ export async function reduceOrderItemQuantity(formData: FormData): Promise<Actio
       if (cancelled.count === 0) {
         return {
           ok: false as const,
-          error: `ลดจำนวน ${item.menuItem.name} ไม่ได้ — ครัวรับรายการนี้ไปแล้ว (ตอนนี้เป็น "${STATUS_LABEL[item.status]}")`,
+          error: `ลดจำนวน ${itemName} ไม่ได้ — ครัวรับรายการนี้ไปแล้ว (ตอนนี้เป็น "${STATUS_LABEL[item.status]}")`,
         }
       }
 
@@ -352,7 +406,7 @@ export async function reduceOrderItemQuantity(formData: FormData): Promise<Actio
         },
       })
 
-      return { ok: true as const, name: item.menuItem.name, from: item.quantity }
+      return { ok: true as const, name: itemName, from: item.quantity }
     })
 
     if (!outcome.ok) return { ok: false, error: outcome.error }
@@ -458,7 +512,8 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
     include: {
       session: { select: { table: { select: { code: true } } } },
       items: {
-        where: { status: { not: "CANCELLED" } },
+        // ทิกเก็ตครัวพิมพ์เฉพาะอาหาร — สินค้าในสต็อก (Phase 21b) และโปรแกรมนวดไม่เข้าครัว
+        where: { status: { not: "CANCELLED" }, menuItem: { itemType: "FOOD" } },
         include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } } } } },
       },
     },
@@ -483,11 +538,11 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
     submittedAt: order.submittedAt,
     items: order.items.map((item) => ({
       quantity: item.quantity,
-      name: item.menuItem.name,
+      name: item.menuItem?.name ?? "",
       options: parseOptionNames(item.selectedOptionsSnapshot),
       note: item.note,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
     })),
   })
 

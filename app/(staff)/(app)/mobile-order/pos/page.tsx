@@ -1,6 +1,6 @@
 import { formatBusinessDate } from "@/lib/format"
 import { spaAwareMetadata } from "@/lib/spa-title"
-import { getStoreSettings, listMenu, listTablesForPos, listTherapistOptions } from "@/lib/queries"
+import { getStoreSettings, listMenu, listPosProducts, listTablesForPos, listTherapistOptions } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { MenuPos } from "@/components/menu-pos"
 
@@ -12,7 +12,14 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้ (Phase 17b)
   const { storeId, granted } = await requirePageAccess("MO_POS")
 
-  const [menu, tables, params, settings] = await Promise.all([listMenu(storeId), listTablesForPos(storeId), searchParams, getStoreSettings(storeId)])
+  const [menu, tables, params, settings, products] = await Promise.all([
+    listMenu(storeId),
+    listTablesForPos(storeId),
+    searchParams,
+    getStoreSettings(storeId),
+    // Phase 21b — สินค้าในสต็อกเฉพาะหมวดที่เปิดขายที่หน้าขายอาหาร (ว่าง = ไม่มีแท็บสินค้า)
+    listPosProducts(storeId),
+  ])
   // ร้านนวด (Phase 20): โปรแกรมนวดต้องเลือกพนักงานก่อนใส่ตะกร้า — ร้านที่ไม่เปิดตัวเลือกไม่ต้องโหลด
   const therapists = settings?.spaEnabled ? await listTherapistOptions(storeId) : []
   // ?table=<id> มาจากปุ่ม "สั่งเพิ่ม" บนหน้าโต๊ะ (F13) — เลือกโต๊ะนั้นให้เลย · id แปลก ๆ ถูกกรองด้วยรายชื่อโต๊ะของร้านนี้
@@ -27,6 +34,7 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
   return (
     <MenuPos
       menu={menu}
+      products={products}
       tables={tables}
       allowed={granted.MO_POS ?? []}
       initialTableId={initialTableId}

@@ -25,8 +25,10 @@ export const SYSTEM_ROLE_PRESETS: RolePreset[] = [
       DASHBOARD: ["VIEW"],
       PRODUCTS: ["VIEW", "ADD", "EDIT", "DELETE"],
       CATEGORIES: ["VIEW", "ADD", "EDIT", "DELETE"],
-      STOCK_IN: ["VIEW", "ADD"],
-      STOCK_OUT: ["VIEW", "ADD"],
+      // Phase 21 — ร้านใหม่: ผู้ดูแลระบบยกเลิกเอกสาร + ปรับยอดได้ (ร้านเดิมไม่ backfill — เจ้าของติ๊กเองใน /roles)
+      STOCK_IN: ["VIEW", "ADD", "DELETE"],
+      STOCK_OUT: ["VIEW", "ADD", "DELETE"],
+      STOCK_ADJUST: ["VIEW", "ADD", "DELETE"],
       POS: ["VIEW", "ADD"],
       POS_HISTORY: ["VIEW", "DELETE"],
       POS_CLOSING: ["VIEW", "ADD"],

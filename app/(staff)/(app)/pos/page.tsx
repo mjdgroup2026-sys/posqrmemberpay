@@ -1,18 +1,7 @@
-import { formatBusinessDate } from "@/lib/format"
-import { listProductOptions, listCategoryOptions } from "@/lib/queries"
-import { PosTerminal } from "@/components/pos-terminal"
-import { requirePageAccess } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 
-export const metadata = { title: "ขายหน้าร้าน (POS)" }
-
-export default async function PosPage() {
-  // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId, granted } = await requirePageAccess("POS")
-
-  const [products, categories] = await Promise.all([listProductOptions(storeId), listCategoryOptions(storeId)])
-
-  // Phase 19 — วันที่ขาย (วันทางธุรกิจ เวลาไทย) จัดรูปแบบฝั่ง server จะได้ไม่ต่างกันระหว่างเครื่องแคชเชียร์
-  const dateLabel = formatBusinessDate(new Date())
-
-  return <PosTerminal products={products} categories={categories} allowed={granted.POS ?? []} dateLabel={dateLabel} />
+/// Phase 21 (เจ้าของสั่ง 2026-09-28) — ปิดหน้าขายหน้าร้าน (POS) ให้ไปขายที่จอขายอาหารแทน
+/// ซึ่งขายสินค้าในสต็อกได้แล้ว (เฉพาะหมวดที่เปิด "ขายที่หน้าขายอาหาร") · บิล RETAIL_POS เก่ายังดู/void ได้ที่ /pos/history
+export default function PosPage() {
+  redirect("/mobile-order/pos")
 }

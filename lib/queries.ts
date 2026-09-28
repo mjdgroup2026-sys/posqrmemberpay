@@ -12,6 +12,7 @@ import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFr
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import { bucketByChannel, CLOSING_CHANNELS, type ClosingChannel } from "@/lib/closing-channels"
 import type { PaymentMethodValue } from "@/lib/types"
+import { daysOfStockLeft, REORDER_LOOKBACK_DAYS, suggestReorderQty } from "@/lib/reorder"
 import { Prisma } from "@/generated/prisma/client"
 import type { PaymentMode, PermissionAction as PermissionActionValue, ResourceKey } from "@/generated/prisma/client"
 
@@ -122,6 +123,7 @@ export async function listCategoriesWithCount(storeId: string) {
     select: {
       id: true,
       name: true,
+      sellableAtPos: true,
       createdAt: true,
       _count: { select: { products: true } },
     },
@@ -129,6 +131,7 @@ export async function listCategoriesWithCount(storeId: string) {
   return rows.map((c) => ({
     id: c.id,
     name: c.name,
+    sellableAtPos: c.sellableAtPos,
     createdAt: c.createdAt,
     productCount: c._count.products,
   }))
@@ -1035,7 +1038,8 @@ export type OrderItemRow = {
   stationId: string | null
   stationName: string | null
   /// Phase 20 — FOOD/SERVICE · นาที · พนักงานนวด (SERVICE เท่านั้น; null = ยังไม่มอบหมาย)
-  itemType: "FOOD" | "SERVICE"
+  /// Phase 21b — PRODUCT = สินค้าในสต็อกที่พนักงานขายจากจอขายอาหาร (ตัดสต็อกแล้ว ไม่เข้าครัว เป็น SERVED ตั้งแต่ส่ง)
+  itemType: "FOOD" | "SERVICE" | "PRODUCT"
   durationMinutes: number | null
   therapistId: string | null
   therapistLabel: string | null
@@ -1121,7 +1125,7 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
           include: {
             items: {
               orderBy: { createdAt: "asc" },
-              include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
+              include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, product: { select: { name: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
             },
           },
         },
@@ -1146,7 +1150,7 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
     printedAt: order.printedAt,
     items: order.items.map<OrderItemRow>((item) => ({
       id: item.id,
-      menuItemName: item.menuItem.name,
+      menuItemName: item.menuItem?.name ?? item.product?.name ?? "",
       quantity: item.quantity,
       unitPrice: toNumber(item.unitPrice),
       subtotal: toNumber(item.unitPrice) * item.quantity,
@@ -1154,10 +1158,10 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
-      itemType: item.menuItem.itemType,
-      durationMinutes: item.menuItem.durationMinutes,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
+      itemType: item.menuItem?.itemType ?? "PRODUCT",
+      durationMinutes: item.menuItem?.durationMinutes ?? null,
       therapistId: item.therapist?.id ?? null,
       therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
@@ -1214,7 +1218,7 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
       items: {
         where: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY", "CANCELLED"] }, menuItem: { itemType: "FOOD" } },
         orderBy: { createdAt: "asc" },
-        include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
+        include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, product: { select: { name: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
       },
     },
   })
@@ -1233,7 +1237,7 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
     printedAt: order.printedAt,
     items: order.items.map<OrderItemRow>((item) => ({
       id: item.id,
-      menuItemName: item.menuItem.name,
+      menuItemName: item.menuItem?.name ?? item.product?.name ?? "",
       quantity: item.quantity,
       unitPrice: toNumber(item.unitPrice),
       subtotal: toNumber(item.unitPrice) * item.quantity,
@@ -1241,10 +1245,10 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
-      itemType: item.menuItem.itemType,
-      durationMinutes: item.menuItem.durationMinutes,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
+      itemType: item.menuItem?.itemType ?? "PRODUCT",
+      durationMinutes: item.menuItem?.durationMinutes ?? null,
       therapistId: item.therapist?.id ?? null,
       therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
@@ -1449,7 +1453,7 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
       orders: {
         orderBy: { orderNumber: "asc" },
         include: {
-          items: { orderBy: { createdAt: "asc" }, include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } } },
+          items: { orderBy: { createdAt: "asc" }, include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, product: { select: { name: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } } },
         },
       },
     },
@@ -1462,7 +1466,7 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
     submittedAt: order.submittedAt,
     items: order.items.map<OrderItemRow>((item) => ({
       id: item.id,
-      menuItemName: item.menuItem.name,
+      menuItemName: item.menuItem?.name ?? item.product?.name ?? "",
       quantity: item.quantity,
       unitPrice: toNumber(item.unitPrice),
       subtotal: toNumber(item.unitPrice) * item.quantity,
@@ -1470,10 +1474,10 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
-      itemType: item.menuItem.itemType,
-      durationMinutes: item.menuItem.durationMinutes,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
+      itemType: item.menuItem?.itemType ?? "PRODUCT",
+      durationMinutes: item.menuItem?.durationMinutes ?? null,
       therapistId: item.therapist?.id ?? null,
       therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
@@ -1595,6 +1599,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
                 unitPrice: true,
                 selectedOptionsSnapshot: true,
                 menuItem: { select: { name: true } },
+                product: { select: { name: true } },
               },
             },
           },
@@ -1618,7 +1623,8 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
   for (const item of raw) {
     const options = parseOptions(item.selectedOptionsSnapshot).map((o) => o.optionName)
     const unitPrice = toNumber(item.unitPrice)
-    const key = `${item.menuItem.name}|${unitPrice.toFixed(2)}|${options.join(",")}`
+    const itemName = item.menuItem?.name ?? item.product?.name ?? ""
+    const key = `${itemName}|${unitPrice.toFixed(2)}|${options.join(",")}`
     const existing = grouped.get(key)
     if (existing) {
       existing.quantity += item.quantity
@@ -1627,7 +1633,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
     }
     grouped.set(key, {
       id: item.id,
-      name: item.menuItem.name,
+      name: itemName,
       quantity: item.quantity,
       unitPrice,
       subtotal: round2(unitPrice * item.quantity),
@@ -1830,11 +1836,11 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
     items: order.items.map((item) => ({
       id: item.id,
       quantity: item.quantity,
-      name: item.menuItem.name,
+      name: item.menuItem?.name ?? "",
       options: parseOptions(item.selectedOptionsSnapshot).map((o) => o.optionName),
       note: item.note,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
     })),
     stationOrder,
   }
@@ -2736,7 +2742,7 @@ export async function getSpaBoard(storeId: string, now: Date = new Date()) {
       label: `${t.code} ${t.nickname ?? t.name}`,
       state,
       roomCode: working?.order.session?.table.code ?? null,
-      programName: working?.menuItem.name ?? null,
+      programName: working?.menuItem?.name ?? null,
       busyUntil: working && current ? current.endAt : null,
       shiftStartMinute: shift && !shift.isOff ? shift.startMinute : null,
       shiftEndMinute: shift && !shift.isOff ? shift.endMinute : null,
@@ -2842,7 +2848,7 @@ export async function listServicesAwaitingStart(storeId: string): Promise<Servic
         tableCode: session.table.code,
         sessionId: session.id,
         customerLabel: session.customerLabel,
-        menuItemName: row.menuItem.name,
+        menuItemName: row.menuItem?.name ?? "",
         therapistId: row.therapistId,
         therapistLabel: row.therapist ? `${row.therapist.code} ${row.therapist.nickname ?? row.therapist.name}` : null,
         orderedAt: row.createdAt,
@@ -3338,4 +3344,409 @@ export async function listSalesForExport(
 export async function getTherapistById(storeId: string, therapistId: string): Promise<TherapistRow | null> {
   const rows = await listTherapists(storeId)
   return rows.find((t) => t.id === therapistId) ?? null
+}
+
+// ───────────────────── เอกสารคลัง รับ/เบิก/ปรับ (Phase 21 · F30) ─────────────────────
+
+export type StockDocListRow = {
+  id: string
+  docNumber: string
+  docDate: string
+  status: "POSTED" | "VOIDED"
+  /// ผู้ขาย (ใบรับ) · ผู้เบิก (ใบเบิก) · เหตุผล (ใบปรับ) — คอลัมน์ "คู่ค้า/ผู้เกี่ยวข้อง" ของตารางรายการ
+  party: string | null
+  referenceNo: string | null
+  lineCount: number
+  totalQuantity: number
+  totalCost: number | null
+  createdByName: string
+  createdAt: Date
+}
+
+/// รายการเอกสารของประเภทหนึ่งในช่วงวัน (ตามวันที่ของเอกสาร ไม่ใช่วันบันทึก) — ใหม่สุดก่อน
+export async function listStockDocuments(
+  storeId: string,
+  type: "RECEIPT" | "ISSUE" | "ADJUST",
+  range: { from: string; to: string },
+): Promise<StockDocListRow[]> {
+  const db = forStore(storeId)
+  const rows = await db.stockDocument.findMany({
+    where: { type, docDate: { gte: dateOnlyFromKey(range.from), lte: dateOnlyFromKey(range.to) } },
+    orderBy: [{ docDate: "desc" }, { docNumber: "desc" }],
+    take: 500,
+    select: {
+      id: true,
+      docNumber: true,
+      docDate: true,
+      status: true,
+      supplierName: true,
+      requesterName: true,
+      reason: true,
+      referenceNo: true,
+      totalCost: true,
+      createdAt: true,
+      createdBy: { select: { name: true } },
+      lines: { select: { quantity: true } },
+    },
+  })
+  return rows.map((doc) => ({
+    id: doc.id,
+    docNumber: doc.docNumber,
+    docDate: doc.docDate.toISOString().slice(0, 10),
+    status: doc.status,
+    party: type === "RECEIPT" ? doc.supplierName : type === "ISSUE" ? doc.requesterName : doc.reason,
+    referenceNo: doc.referenceNo,
+    lineCount: doc.lines.length,
+    // ใบปรับรวมส่วนต่างแบบมีเครื่องหมาย (+ เพิ่ม / − ลด) · ใบรับ/เบิกเป็นจำนวนบวกเสมอ
+    totalQuantity: doc.lines.reduce((sum, line) => sum + line.quantity, 0),
+    totalCost: doc.totalCost === null ? null : toNumber(doc.totalCost),
+    createdByName: doc.createdBy.name,
+    createdAt: doc.createdAt,
+  }))
+}
+
+export type StockDocDetail = {
+  id: string
+  type: "RECEIPT" | "ISSUE" | "ADJUST"
+  docNumber: string
+  docDate: string
+  status: "POSTED" | "VOIDED"
+  supplierName: string | null
+  referenceNo: string | null
+  requesterName: string | null
+  reason: string | null
+  note: string | null
+  totalCost: number | null
+  createdByName: string
+  createdAt: Date
+  voidedAt: Date | null
+  voidedByName: string | null
+  voidReason: string | null
+  storeName: string
+  lines: {
+    lineNo: number
+    productId: string
+    sku: string
+    name: string
+    unit: string
+    quantity: number
+    unitCost: number | null
+    lineTotal: number | null
+    systemQty: number | null
+    countedQty: number | null
+  }[]
+}
+
+export async function getStockDocument(storeId: string, id: string): Promise<StockDocDetail | null> {
+  const db = forStore(storeId)
+  const [doc, settings] = await Promise.all([
+    db.stockDocument.findUnique({
+      where: { id },
+      include: {
+        createdBy: { select: { name: true } },
+        voidedBy: { select: { name: true } },
+        lines: { orderBy: { lineNo: "asc" }, include: { product: { select: { sku: true, name: true, unit: true } } } },
+      },
+    }),
+    db.storeSettings.findUnique({ where: { storeId }, select: { storeName: true } }),
+  ])
+  if (!doc) return null
+  return {
+    id: doc.id,
+    type: doc.type,
+    docNumber: doc.docNumber,
+    docDate: doc.docDate.toISOString().slice(0, 10),
+    status: doc.status,
+    supplierName: doc.supplierName,
+    referenceNo: doc.referenceNo,
+    requesterName: doc.requesterName,
+    reason: doc.reason,
+    note: doc.note,
+    totalCost: doc.totalCost === null ? null : toNumber(doc.totalCost),
+    createdByName: doc.createdBy.name,
+    createdAt: doc.createdAt,
+    voidedAt: doc.voidedAt,
+    voidedByName: doc.voidedBy?.name ?? null,
+    voidReason: doc.voidReason,
+    storeName: settings?.storeName ?? "MJD Mobile Order",
+    lines: doc.lines.map((line) => ({
+      lineNo: line.lineNo,
+      productId: line.productId,
+      sku: line.product.sku,
+      name: line.product.name,
+      unit: line.product.unit,
+      quantity: line.quantity,
+      unitCost: line.unitCost === null ? null : toNumber(line.unitCost),
+      lineTotal: line.lineTotal === null ? null : toNumber(line.lineTotal),
+      systemQty: line.systemQty,
+      countedQty: line.countedQty,
+    })),
+  }
+}
+
+// ───────────────────── สินค้าในสต็อกบนจอขายอาหาร (Phase 21b · F31) ─────────────────────
+
+export type PosProductCard = {
+  id: string
+  sku: string
+  name: string
+  unit: string
+  price: number
+  quantity: number
+  categoryName: string
+}
+
+/// สินค้าที่ขายได้ที่จอขายอาหาร = อยู่ในหมวดที่เปิด "ขายที่หน้าขายอาหาร" · รวมตัวที่หมดสต็อก (จอขายโชว์เป็นปุ่มปิด)
+/// ด่านจริงอยู่ที่ `buildProductLines()` ตอนขาย — รายการนี้เป็นแค่ตัวเลือกบนจอ
+export async function listPosProducts(storeId: string): Promise<PosProductCard[]> {
+  const db = forStore(storeId)
+  const rows = await db.product.findMany({
+    where: { category: { sellableAtPos: true } },
+    orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
+    select: { id: true, sku: true, name: true, unit: true, price: true, quantity: true, category: { select: { name: true } } },
+  })
+  return rows.map((p) => ({
+    id: p.id,
+    sku: p.sku,
+    name: p.name,
+    unit: p.unit,
+    price: toNumber(p.price),
+    quantity: p.quantity,
+    categoryName: p.category.name,
+  }))
+}
+
+// ───────────────────── รายงานสต็อก (Phase 21c · F32–F33) ─────────────────────
+
+/// วันแบบเวลาไทยของรายการ ledger — createdAt เป็น timestamp ไม่มี TZ (เก็บเป็น UTC) เหมือน SALE_DAY_SQL
+const LEDGER_DAY_SQL = Prisma.sql`to_char((t."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`
+
+/// ที่มาของรายการ ledger — เอกสารใช้ประเภทของเอกสาร · มีบิล/บรรทัดโต๊ะ = การขาย (รวมคืนจาก void/ยกเลิก) · ที่เหลือ = ก่อนมีเอกสาร
+const LEDGER_SOURCE_SQL = Prisma.sql`COALESCE(d."type"::text, CASE WHEN t."saleId" IS NOT NULL OR t."orderItemId" IS NOT NULL THEN 'SALE' ELSE 'OTHER' END)`
+
+type LedgerNetRow = { day: string; productId: string; source: "SALE" | "RECEIPT" | "ISSUE" | "ADJUST" | "OTHER"; net: bigint }
+
+/// ยอดสุทธิของ ledger (เข้า = บวก · ออก = ลบ) แยกวัน × สินค้า × ที่มา — raw SQL ต้องกรอง storeId เอง (กติกาข้อ 5)
+async function ledgerNetByDay(storeId: string, start: Date, end: Date, productIds?: string[]): Promise<LedgerNetRow[]> {
+  const productFilter = productIds ? Prisma.sql`AND t."productId" IN (${Prisma.join(productIds.length ? productIds : [""])})` : Prisma.empty
+  return forStore(storeId).$queryRaw<LedgerNetRow[]>`
+    SELECT ${LEDGER_DAY_SQL}    AS day,
+           t."productId"        AS "productId",
+           ${LEDGER_SOURCE_SQL} AS source,
+           SUM(CASE WHEN t."type" = 'IN' THEN t."quantity" ELSE -t."quantity" END)::bigint AS net
+    FROM "stock_transaction" t
+    LEFT JOIN "stock_document" d ON d."id" = t."documentId"
+    WHERE t."storeId" = ${storeId}
+      AND t."createdAt" >= ${start}
+      AND t."createdAt" < ${end}
+      ${productFilter}
+    GROUP BY 1, 2, 3
+  `
+}
+
+export type StockSalesRow = {
+  productId: string
+  sku: string
+  name: string
+  unit: string
+  /// ขายสุทธิ (หักคืนจาก void/ยกเลิกรายการแล้ว) — นับจาก ledger ตามวันที่ตัดสต็อกจริง
+  soldQty: number
+  /// ยอดเงินจากบิลที่ปิดแล้ว (SaleItem ประเภทสินค้า ตามวันที่ออกบิล)
+  soldAmount: number
+  receivedQty: number
+  issuedQty: number
+  /// ส่วนต่างจากใบปรับ (+ เพิ่ม / − ลด)
+  adjustedQty: number
+  /// รายการก่อนมีเอกสาร (รับเข้า/เบิกทีละรายการแบบเดิม) — สุทธิแบบมีเครื่องหมาย
+  otherQty: number
+  /// ยอดคงเหลือปัจจุบัน (ไม่ใช่ ณ สิ้นวัน)
+  onHand: number
+}
+
+export type StockSalesReport = {
+  from: string
+  to: string
+  days: { day: string; rows: StockSalesRow[]; soldQty: number; soldAmount: number }[]
+  totals: StockSalesRow[]
+  soldQty: number
+  soldAmount: number
+}
+
+/// รายงานการขายสินค้าที่ตัดสต็อกรายวัน (F32) — วัน × สินค้า พร้อมรับ/เบิก/ปรับของวันเดียวกัน
+export async function getStockSalesReport(storeId: string, range: { from: string; to: string }): Promise<StockSalesReport> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const [ledger, revenue] = await Promise.all([
+    ledgerNetByDay(storeId, start, end),
+    db.$queryRaw<{ day: string; productId: string; amount: string }[]>`
+      SELECT ${SALE_DAY_SQL}          AS day,
+             i."productId"          AS "productId",
+             SUM(i."subtotal")::text AS amount
+      FROM "sale_item" i
+      JOIN "sale" s ON s."id" = i."saleId"
+      WHERE s."storeId" = ${storeId}
+        AND s."status" = 'COMPLETED'
+        AND s."createdAt" >= ${start}
+        AND s."createdAt" < ${end}
+        AND i."kind" = 'PRODUCT'
+        AND i."productId" IS NOT NULL
+      GROUP BY 1, 2
+    `,
+  ])
+
+  const productIds = [...new Set([...ledger.map((r) => r.productId), ...revenue.map((r) => r.productId)])]
+  const products = productIds.length
+    ? await db.product.findMany({ where: { id: { in: productIds } }, select: { id: true, sku: true, name: true, unit: true, quantity: true } })
+    : []
+  const productById = new Map(products.map((p) => [p.id, p]))
+
+  const blank = (productId: string): StockSalesRow => {
+    const p = productById.get(productId)
+    return {
+      productId,
+      sku: p?.sku ?? "",
+      name: p?.name ?? "(สินค้าถูกลบ)",
+      unit: p?.unit ?? "",
+      soldQty: 0,
+      soldAmount: 0,
+      receivedQty: 0,
+      issuedQty: 0,
+      adjustedQty: 0,
+      otherQty: 0,
+      onHand: p?.quantity ?? 0,
+    }
+  }
+  const byDay = new Map<string, Map<string, StockSalesRow>>()
+  const totals = new Map<string, StockSalesRow>()
+  const rowOf = (day: string, productId: string) => {
+    const dayMap = byDay.get(day) ?? new Map<string, StockSalesRow>()
+    byDay.set(day, dayMap)
+    const row = dayMap.get(productId) ?? blank(productId)
+    dayMap.set(productId, row)
+    const total = totals.get(productId) ?? blank(productId)
+    totals.set(productId, total)
+    return [row, total] as const
+  }
+
+  for (const r of ledger) {
+    const net = Number(r.net)
+    for (const row of rowOf(r.day, r.productId)) {
+      if (r.source === "SALE") row.soldQty -= net
+      else if (r.source === "RECEIPT") row.receivedQty += net
+      else if (r.source === "ISSUE") row.issuedQty -= net
+      else if (r.source === "ADJUST") row.adjustedQty += net
+      else row.otherQty += net
+    }
+  }
+  for (const r of revenue) {
+    const amount = toNumber(r.amount)
+    for (const row of rowOf(r.day, r.productId)) row.soldAmount = round2(row.soldAmount + amount)
+  }
+
+  const byName = (a: StockSalesRow, b: StockSalesRow) => b.soldQty - a.soldQty || a.name.localeCompare(b.name, "th")
+  const days = [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? 1 : -1))
+    .map(([day, rows]) => {
+      const list = [...rows.values()].sort(byName)
+      return {
+        day,
+        rows: list,
+        soldQty: list.reduce((sum, r) => sum + r.soldQty, 0),
+        soldAmount: round2(list.reduce((sum, r) => sum + r.soldAmount, 0)),
+      }
+    })
+  const totalRows = [...totals.values()].sort(byName)
+  return {
+    from: range.from,
+    to: range.to,
+    days,
+    totals: totalRows,
+    soldQty: totalRows.reduce((sum, r) => sum + r.soldQty, 0),
+    soldAmount: round2(totalRows.reduce((sum, r) => sum + r.soldAmount, 0)),
+  }
+}
+
+export type ReorderRow = {
+  productId: string
+  sku: string
+  name: string
+  unit: string
+  categoryName: string
+  quantity: number
+  reorderPoint: number
+  /// ขายสุทธิเฉลี่ยต่อวันย้อนหลัง REORDER_LOOKBACK_DAYS วัน (ทศนิยม 2 ตำแหน่ง)
+  avgDailySold: number
+  daysLeft: number | null
+  suggestedQty: number
+  /// จากใบรับล่าสุดที่ยังไม่ถูกยกเลิก — ช่วยให้รู้ว่าสั่งจากใคร ราคาเท่าไร
+  lastSupplier: string | null
+  lastUnitCost: number | null
+  estimatedCost: number | null
+}
+
+/// รายงานสินค้าใกล้หมด/ต้องสั่งซื้อ (F33) — คงเหลือ ≤ จุดสั่งซื้อ · เรียงตัวที่หมดเร็วสุดก่อน
+export async function getReorderReport(storeId: string): Promise<{ rows: ReorderRow[]; lookbackDays: number }> {
+  const db = forStore(storeId)
+  const low = await db.$queryRaw<
+    { id: string; sku: string; name: string; unit: string; quantity: number; reorderPoint: number; categoryName: string }[]
+  >`
+    SELECT p."id", p."sku", p."name", p."unit", p."quantity", p."reorderPoint", c."name" AS "categoryName"
+    FROM "product" p
+    JOIN "category" c ON c."id" = p."categoryId"
+    WHERE p."storeId" = ${storeId} AND p."quantity" <= p."reorderPoint"
+  `
+  if (low.length === 0) return { rows: [], lookbackDays: REORDER_LOOKBACK_DAYS }
+
+  const ids = low.map((p) => p.id)
+  const today = businessDayKey()
+  const { start, end } = reportRange(addDays(today, -(REORDER_LOOKBACK_DAYS - 1)), today)
+  const [ledger, lastReceipts] = await Promise.all([
+    ledgerNetByDay(storeId, start, end, ids),
+    db.$queryRaw<{ productId: string; supplierName: string | null; unitCost: string | null }[]>`
+      SELECT DISTINCT ON (l."productId") l."productId" AS "productId", d."supplierName" AS "supplierName", l."unitCost"::text AS "unitCost"
+      FROM "stock_document_line" l
+      JOIN "stock_document" d ON d."id" = l."documentId"
+      WHERE d."storeId" = ${storeId}
+        AND d."type" = 'RECEIPT'
+        AND d."status" = 'POSTED'
+        AND l."productId" IN (${Prisma.join(ids)})
+      ORDER BY l."productId", d."docDate" DESC, d."createdAt" DESC
+    `,
+  ])
+
+  const sold = new Map<string, number>()
+  for (const r of ledger) if (r.source === "SALE") sold.set(r.productId, (sold.get(r.productId) ?? 0) - Number(r.net))
+  const lastById = new Map(lastReceipts.map((r) => [r.productId, r]))
+
+  const rows = low.map<ReorderRow>((p) => {
+    const avgDailySold = round2(Math.max(sold.get(p.id) ?? 0, 0) / REORDER_LOOKBACK_DAYS)
+    const suggestedQty = suggestReorderQty({ quantity: p.quantity, reorderPoint: p.reorderPoint, avgDailySold })
+    const last = lastById.get(p.id)
+    const lastUnitCost = last?.unitCost ? toNumber(last.unitCost) : null
+    return {
+      productId: p.id,
+      sku: p.sku,
+      name: p.name,
+      unit: p.unit,
+      categoryName: p.categoryName,
+      quantity: p.quantity,
+      reorderPoint: p.reorderPoint,
+      avgDailySold,
+      daysLeft: daysOfStockLeft(p.quantity, avgDailySold),
+      suggestedQty,
+      lastSupplier: last?.supplierName ?? null,
+      lastUnitCost,
+      estimatedCost: lastUnitCost === null ? null : round2(lastUnitCost * suggestedQty),
+    }
+  })
+  // หมดแล้วก่อน → อยู่ได้น้อยวันก่อน → ต่ำกว่าจุดสั่งซื้อมากก่อน
+  rows.sort(
+    (a, b) =>
+      Number(b.quantity <= 0) - Number(a.quantity <= 0) ||
+      (a.daysLeft ?? Number.MAX_SAFE_INTEGER) - (b.daysLeft ?? Number.MAX_SAFE_INTEGER) ||
+      a.quantity - a.reorderPoint - (b.quantity - b.reorderPoint) ||
+      a.name.localeCompare(b.name, "th"),
+  )
+  return { rows, lookbackDays: REORDER_LOOKBACK_DAYS }
 }

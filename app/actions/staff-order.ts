@@ -5,7 +5,8 @@ import { forStore, type StoreTx } from "@/lib/db"
 import { requireSellingStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
-import { buildOrderLines, OrderLineError, type OrderLine } from "@/lib/order-lines"
+import { buildOrderLines, buildProductLines, OrderLineError, type OrderLine, type ProductLine } from "@/lib/order-lines"
+import { StockMissing, StockShortage, takeStock } from "@/lib/stock-moves"
 import { LIVE_SESSION_STATUS, openOrReuseSession, SessionError } from "@/lib/table-session"
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
 import { nextSaleNumber } from "@/lib/sale-number"
@@ -79,6 +80,7 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
     newCustomer: formData.get("newCustomer") === "true",
     billLabel: formData.get("billLabel") ?? undefined,
     items: parseCartJson(formData.get("items")),
+    products: parseCartJson(formData.get("products")),
   })
   if (!parsed.success) {
     return {
@@ -88,7 +90,7 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
     }
   }
 
-  const { tableId, items, sessionId, newCustomer, billLabel } = parsed.data
+  const { tableId, items, products, sessionId, newCustomer, billLabel } = parsed.data
 
   try {
     const created = await db.$transaction(async (tx) => {
@@ -122,7 +124,9 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
       }
 
       // จอขายพนักงาน: บรรทัดบริการต้องมีพนักงานนวดตั้งแต่ตอนส่ง (Phase 20) — ลูกค้าสั่งเองผ่าน QR ไม่บังคับ
-      const rows = await buildOrderLines(tx, items, { requireTherapistForService: true })
+      const rows = items.length > 0 ? await buildOrderLines(tx, items, { requireTherapistForService: true }) : []
+      // สินค้าในสต็อก (Phase 21b) — เฉพาะหมวดที่เปิดขายที่หน้าขายอาหาร
+      const productRows = await buildProductLines(tx, products)
 
       // เลขรอบสั่งต่อ session — unique (tableSessionId, orderNumber) เป็นด่านจริงถ้ากดส่งซ้อนกัน
       const last = await tx.mobileOrder.findFirst({
@@ -151,20 +155,31 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
         select: { id: true, orderNumber: true, submittedAt: true },
       })
 
+      // ★ สินค้าในสต็อก (Phase 21b): หยิบให้ลูกค้าทันที จึงตัดสต็อกตอนส่ง ไม่ใช่ตอนปิดบิล · ไม่เข้าครัว = SERVED ตั้งแต่แรก
+      //   ตัดผ่าน takeStock (updateMany gte · กติกาข้อ 4) ผูก ledger กับบรรทัด — ยกเลิกรายการ/โต๊ะคืนสต็อกจาก orderItemId นี้
+      await addProductLines(tx, storeId, order.id, productRows, `โต๊ะ ${session.tableCode} ออร์เดอร์ที่ ${order.orderNumber}`)
+
       // โต๊ะเปลี่ยนเป็น "สั่งแล้ว" ในทรานแซคชันเดียวกับการสร้างออร์เดอร์เสมอ (denormalized field)
       await tx.table.update({ where: { id: session.tableId }, data: { status: "ORDERED" } })
 
-      return { order, rows, session }
+      return { order, rows, productRows, session }
     })
 
     // พิมพ์ทิกเก็ตหลัง commit — พิมพ์ไม่ผ่านต้องไม่ทำให้ออร์เดอร์หาย
     const printed = await printTicketAfterCommit(db, created.order, created.session.tableCode, created.rows)
 
     revalidateStaffOrderPages(storeId)
-    const total = round2(created.rows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0))
+    const total = round2(
+      created.rows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0) +
+        created.productRows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0),
+    )
+    if (created.productRows.length > 0) revalidatePath("/products")
     return {
       ok: true,
-      message: `ส่งออร์เดอร์ที่ ${created.order.orderNumber} ของโต๊ะ ${created.session.tableCode} เข้าครัวแล้ว`,
+      message:
+        created.rows.length > 0
+          ? `ส่งออร์เดอร์ที่ ${created.order.orderNumber} ของโต๊ะ ${created.session.tableCode} เข้าครัวแล้ว`
+          : `เพิ่มสินค้า ${created.productRows.length} รายการเข้าโต๊ะ ${created.session.tableCode} แล้ว (ตัดสต็อกแล้ว)`,
       data: {
         orderId: created.order.id,
         orderNumber: created.order.orderNumber,
@@ -181,8 +196,35 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
     // ทั้งสองตัวเก็บข้อความไทยพร้อมแสดงไว้ในตัวเองแล้ว
     if (error instanceof SessionError) return { ok: false, error: error.reason }
     if (error instanceof OrderLineError) return { ok: false, error: error.reason }
+    const stockError = stockErrorMessage(error)
+    if (stockError) return { ok: false, error: stockError }
     return { ok: false, error: "ส่งออร์เดอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
+}
+
+/// สร้างบรรทัดสินค้าในออร์เดอร์ + ตัดสต็อกทีละบรรทัด (Phase 21b) — ต้องอยู่ใน tx เดียวกับออร์เดอร์
+/// ตัดตามลำดับ productId เสมอ กันสองจอขายที่มีสินค้าชุดเดียวกันล็อกแถวสลับลำดับจน deadlock
+async function addProductLines(tx: StoreTx, storeId: string, orderId: string, rows: ProductLine[], note: string): Promise<void> {
+  for (const row of [...rows].sort((a, b) => (a.productId < b.productId ? -1 : 1))) {
+    const item = await tx.mobileOrderItem.create({
+      data: {
+        mobileOrderId: orderId,
+        productId: row.productId,
+        quantity: row.quantity,
+        unitPrice: row.unitPrice.toFixed(2),
+        status: "SERVED",
+      },
+      select: { id: true },
+    })
+    await takeStock(tx, storeId, row.productId, row.quantity, { orderItemId: item.id, note })
+  }
+}
+
+/// สต็อกไม่พอ/ไม่พบสินค้า → ข้อความไทย · null = ไม่ใช่ข้อผิดพลาดเรื่องสต็อก
+function stockErrorMessage(error: unknown): string | null {
+  if (error instanceof StockShortage) return `สต็อก${error.reason} — ยังไม่ได้บันทึกรายการ`
+  if (error instanceof StockMissing) return "มีสินค้าบางรายการไม่พบในร้านนี้ กรุณาตรวจตะกร้าอีกครั้ง"
+  return null
 }
 
 /// พิมพ์ทิกเก็ตครัวหลัง commit แล้วบันทึกเวลาพิมพ์ — คืน false เมื่อไม่ได้ตั้งเครื่องพิมพ์ไว้หรือพิมพ์ไม่ผ่าน
@@ -233,8 +275,9 @@ async function nextTakeawayNumber(tx: StoreTx, storeId: string): Promise<number>
 }
 
 export type TakeawaySaleResult = {
-  orderId: string
-  orderNumber: number
+  /// null = บิลมีแต่สินค้าในสต็อก (Phase 21b) ไม่มีอาหารให้ครัวทำ จึงไม่มีออร์เดอร์ครัว
+  orderId: string | null
+  orderNumber: number | null
   receipt: ReceiptData
   printed: boolean
 }
@@ -243,7 +286,8 @@ export type TakeawaySaleResult = {
 ///
 /// ต่างจากบิลของโต๊ะตรงที่ **ไม่มี TableSession** จึงใช้ `channel = TAKEAWAY` (กติกาข้อ 8 สงวน
 /// MOBILE_ORDER ไว้ให้บิลที่มี tableSessionId เสมอ) · **ไม่คิดค่าบริการ** เพราะค่าบริการเป็นของการนั่งกินที่ร้าน
-/// · เมนูอาหารไม่มีสต็อกในระบบ จึงไม่ตัด `Product.quantity` และไม่มี `StockTransaction`
+/// · เมนูอาหารไม่มีสต็อกในระบบ · **สินค้าในสต็อก (Phase 21b) ตัดสต็อกจริงในทรานแซคชันเดียวกับบิล** (ledger ผูก saleId —
+///   void บิลคืนสต็อกจาก SaleItem.productId ตามเดิม)
 export async function createTakeawaySale(formData: FormData): Promise<ActionResult<TakeawaySaleResult>> {
   let ctx: StoreContext
   try {
@@ -257,6 +301,7 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
 
   const parsed = takeawaySaleSchema.safeParse({
     items: parseCartJson(formData.get("items")),
+    products: parseCartJson(formData.get("products")),
     paymentMethod: formData.get("paymentMethod") ?? "",
     amountReceived: formData.get("amountReceived") ?? 0,
     customerLabel: formData.get("customerLabel") ?? undefined,
@@ -269,14 +314,18 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
     }
   }
 
-  const { items, paymentMethod, amountReceived, customerLabel } = parsed.data
+  const { items, products, paymentMethod, amountReceived, customerLabel } = parsed.data
 
   // เลขบิลชนกันได้ถ้ามีคนกดรับเงินพร้อมกัน — เจอ P2002 แล้ว retry ทั้งทรานแซคชันใหม่ (เหมือน createSale)
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const created = await db.$transaction(async (tx) => {
-        const rows = await buildOrderLines(tx, items)
-        const total = round2(rows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0))
+        const rows = items.length > 0 ? await buildOrderLines(tx, items) : []
+        const productRows = await buildProductLines(tx, products)
+        const total = round2(
+          rows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0) +
+            productRows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0),
+        )
 
         if (paymentMethod === "CASH" && amountReceived < total) {
           throw new StaffOrderAbort(`เงินที่รับไม่พอ — ต้องชำระ ${total.toFixed(2)} บาท`)
@@ -301,27 +350,42 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
             note: customerLabel ? `กลับบ้าน · ${customerLabel}` : "กลับบ้าน",
             cashierId: ctx.user.id,
             items: {
-              create: rows.map((row) => ({
-                menuItemId: row.menuItemId,
-                name: row.menuItemName,
-                kind: row.itemType,
-                quantity: row.quantity,
-                unitPrice: row.unitPrice.toFixed(2),
-                subtotal: round2(row.unitPrice * row.quantity).toFixed(2),
-              })),
+              create: [
+                ...rows.map((row) => ({
+                  menuItemId: row.menuItemId,
+                  name: row.menuItemName,
+                  kind: row.itemType,
+                  quantity: row.quantity,
+                  unitPrice: row.unitPrice.toFixed(2),
+                  subtotal: round2(row.unitPrice * row.quantity).toFixed(2),
+                })),
+                ...productRows.map((row) => ({
+                  productId: row.productId,
+                  name: row.name,
+                  kind: "PRODUCT" as const,
+                  quantity: row.quantity,
+                  unitPrice: row.unitPrice.toFixed(2),
+                  subtotal: round2(row.unitPrice * row.quantity).toFixed(2),
+                })),
+              ],
             },
           },
           select: { id: true, saleNumber: true, createdAt: true },
         })
 
-        const orderNumber = await nextTakeawayNumber(tx, storeId)
-        const order = await tx.mobileOrder.create({
+        // ★ ตัดสต็อกสินค้าใน tx เดียวกับบิล (กติกาข้อ 2) — ไม่พอ = StockShortage → rollback ทั้งบิล
+        for (const row of [...productRows].sort((a, b) => (a.productId < b.productId ? -1 : 1))) {
+          await takeStock(tx, storeId, row.productId, row.quantity, { saleId: sale.id, note: `ขาย ${sale.saleNumber}` })
+        }
+
+        // บิลที่มีแต่สินค้า ไม่มีอะไรให้ครัวทำ — ไม่ต้องมีออร์เดอร์ครัว (ไม่กินเลขคิว "กลับบ้าน #n")
+        const order = rows.length === 0 ? null : await tx.mobileOrder.create({
           data: {
             storeId,
             orderType: "TAKEAWAY",
             saleId: sale.id,
             customerLabel: customerLabel ?? null,
-            orderNumber,
+            orderNumber: await nextTakeawayNumber(tx, storeId),
             items: {
               create: rows.map((row) => ({
                 menuItemId: row.menuItemId,
@@ -340,13 +404,24 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
           saleNumber: sale.saleNumber,
           createdAt: sale.createdAt.toISOString(),
           cashierName: ctx.user.name,
-          items: rows.map((row) => ({
-            productId: row.menuItemId,
-            name: row.menuItemName,
-            quantity: row.quantity,
-            unitPrice: row.unitPrice,
-            subtotal: round2(row.unitPrice * row.quantity),
-          })),
+          items: [
+            ...rows.map((row) => ({
+              productId: row.menuItemId,
+              name: row.menuItemName,
+              quantity: row.quantity,
+              unitPrice: row.unitPrice,
+              subtotal: round2(row.unitPrice * row.quantity),
+            })),
+            ...productRows.map((row) => ({
+              productId: row.productId,
+              sku: row.sku,
+              unit: row.unit,
+              name: row.name,
+              quantity: row.quantity,
+              unitPrice: row.unitPrice,
+              subtotal: round2(row.unitPrice * row.quantity),
+            })),
+          ],
           subtotal: total,
           discount: 0,
           total,
@@ -356,24 +431,25 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
           note: customerLabel ? `กลับบ้าน · ${customerLabel}` : "กลับบ้าน",
         }
 
-        return { order, rows, receipt }
+        return { order, rows, productRows, receipt }
       })
 
-      const label = orderTicketLabel({
-        orderType: "TAKEAWAY",
-        tableCode: null,
-        orderNumber: created.order.orderNumber,
-        customerLabel,
-      })
-      const printed = await printTicketAfterCommit(db, created.order, label, created.rows)
+      const order = created.order
+      const label = order
+        ? orderTicketLabel({ orderType: "TAKEAWAY", tableCode: null, orderNumber: order.orderNumber, customerLabel })
+        : null
+      const printed = order && label ? await printTicketAfterCommit(db, order, label, created.rows) : false
 
       revalidateTakeawayPages(storeId)
+      if (created.productRows.length > 0) revalidatePath("/products")
       return {
         ok: true,
-        message: `รับเงินและส่งเข้าครัวแล้ว — บิล ${created.receipt.saleNumber} (${label})`,
+        message: label
+          ? `รับเงินและส่งเข้าครัวแล้ว — บิล ${created.receipt.saleNumber} (${label})`
+          : `รับเงินแล้ว — บิล ${created.receipt.saleNumber} (ตัดสต็อกแล้ว)`,
         data: {
-          orderId: created.order.id,
-          orderNumber: created.order.orderNumber,
+          orderId: order?.id ?? null,
+          orderNumber: order?.orderNumber ?? null,
           receipt: created.receipt,
           printed,
         },
@@ -381,6 +457,8 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
     } catch (error) {
       if (error instanceof StaffOrderAbort) return { ok: false, error: error.reason }
       if (error instanceof OrderLineError) return { ok: false, error: error.reason }
+      const stockError = stockErrorMessage(error)
+      if (stockError) return { ok: false, error: stockError }
       // เลขบิลชนกัน — วนไปออกเลขใหม่ (ทุกอย่างถูก rollback ไปแล้ว)
       if ((error as { code?: string }).code === "P2002") continue
       return { ok: false, error: "รับเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }

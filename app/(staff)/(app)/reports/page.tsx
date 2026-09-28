@@ -67,6 +67,13 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
         </div>
         <div className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <DayRangePicker basePath="/reports" from={range.from} to={range.to} today={businessDayKey()} />
+          {/* Phase 21c — รายงานสต็อกแยกหน้า */}
+          <Link href={`/reports/stock-sales?from=${range.from}&to=${range.to}`} className="btn btn-subtle">
+            ขายตัดสต็อกรายวัน
+          </Link>
+          <Link href="/reports/reorder" className="btn btn-subtle">
+            สินค้าต้องสั่งซื้อ
+          </Link>
           <a href={exportHref()} className="btn btn-subtle" download>
             <IconDownload size={17} aria-hidden />
             ดาวน์โหลด CSV

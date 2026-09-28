@@ -99,7 +99,33 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `quantity` | Int | > 0 | จำนวนที่รับเข้า/เบิกออก |
 | `note` | String? | optional | หมายเหตุ (ผู้เบิก/แผนก/เหตุผล/เอกสารอ้างอิง) |
 | `saleId` | String? | optional, FK → Sale | ระบุถ้ารายการนี้เกิดจากการขาย POS (checkout สร้าง OUT, void สร้าง IN ชดเชย) — `null` หากเป็น Stock In/Out ที่คีย์ด้วยมือ |
+| `documentId` | String? | optional, FK → StockDocument (RESTRICT) | *(Phase 21)* เอกสารรับ/เบิก/ปรับที่ทำให้เกิดรายการนี้ (รวมรายการชดเชยตอนยกเลิกเอกสาร) |
+| `orderItemId` | String? | optional, FK → MobileOrderItem (SetNull) | *(Phase 21b)* บรรทัดสินค้าบนโต๊ะที่ตัดสต็อกตอนส่ง (ยังไม่มีบิล) + รายการคืนตอนยกเลิกรายการ/โต๊ะ |
 | `createdAt` | DateTime | auto | เวลาบันทึกรายการ |
+
+> **ที่มาของรายการ ledger (Phase 21)** — มี `documentId` = ตามประเภทเอกสาร · มี `saleId`/`orderItemId` = การขาย (รวมคืนจาก void/ยกเลิก) ·
+> ไม่มีทั้งหมด = รายการก่อนมีเอกสาร (หน้ารับเข้า/เบิกจ่ายทีละรายการเดิม ปิดแล้ว) · ขยับยอดทุกทางใหม่ผ่าน `lib/stock-moves.ts` (`takeStock`/`putStock`) ที่เดียว
+
+### StockDocument *(Phase 21 — หัวเอกสารคลัง)*
+| ฟิลด์ | ชนิด | เงื่อนไข | คำอธิบาย |
+|---|---|---|---|
+| `type` | `StockDocType` | enum {RECEIPT, ISSUE, ADJUST} | ใบรับ / ใบเบิก / ใบปรับยอด |
+| `docNumber` | String | unique (storeId, docNumber) | `GR-000001` / `GI-000001` / `ADJ-000001` เดินแยกต่อร้าน+ประเภท ใต้ advisory lock 720_005 |
+| `docDate` | Date | ≤ วันนี้ (เวลาไทย) | วันที่ของเอกสาร (บันทึกย้อนหลังได้ ห้ามอนาคต) |
+| `status` | `StockDocStatus` | {POSTED, VOIDED} | บันทึกแล้วมีผลทันที · ยกเลิก = สร้างรายการชดเชย ไม่ลบ |
+| `supplierName` / `referenceNo` | String? | ใบรับ | ผู้ขาย + เลขใบกำกับ/ใบส่งของ |
+| `requesterName` | String? | **บังคับในใบเบิก** | ชื่อผู้เบิก (พิมพ์เอง ไม่ผูกบัญชีผู้ใช้) |
+| `reason` | String? | **บังคับในใบปรับ** | เหตุผลการปรับยอด |
+| `totalCost` | Decimal? | ใบรับ | มูลค่ารวมจากราคาทุนที่กรอก (null = ไม่ได้กรอกเลย) |
+| `createdById` / `voidedById` / `voidedAt` / `voidReason` | | | ผู้บันทึก / ผู้ยกเลิก |
+
+### StockDocumentLine *(Phase 21 — บรรทัดเอกสาร)*
+| ฟิลด์ | ชนิด | คำอธิบาย |
+|---|---|---|
+| `lineNo` · `productId` (RESTRICT) | | สินค้าซ้ำในเอกสารเดียวไม่ได้ |
+| `quantity` | Int | ใบรับ/เบิก: จำนวน > 0 · **ใบปรับ: ส่วนต่างมีเครื่องหมาย** (นับได้ − ในระบบ) |
+| `unitCost` / `lineTotal` | Decimal? | ใบรับ: ราคาทุน (ไม่บังคับ) |
+| `systemQty` / `countedQty` | Int? | ใบปรับ: ยอดในระบบ ณ ตอนบันทึก (อ่านใต้ `SELECT … FOR UPDATE`) และยอดที่นับได้ |
 
 ### Sale
 | ฟิลด์ | ชนิด | เงื่อนไข | คำอธิบาย |
@@ -675,8 +701,9 @@ enum ResourceKey {
 | `DASHBOARD` | ✅ | – | – | – | ดูอย่างเดียวเสมอ |
 | `PRODUCTS` | ✅ | ✅ | ✅ | ✅ | CRUD ครบตาม F1 |
 | `CATEGORIES` | ✅ | ✅ | ✅ | ✅ | CRUD ครบตาม F8 |
-| `STOCK_IN` | ✅ | ✅ | – | – | ledger ไม่ลบ/แก้ย้อนหลัง (F2) |
-| `STOCK_OUT` | ✅ | ✅ | – | – | ledger ไม่ลบ/แก้ย้อนหลัง (F3) |
+| `STOCK_IN` | ✅ | ✅ | – | ✅ | ใบรับสินค้า (F30) · DELETE = ยกเลิกเอกสาร (สร้างรายการชดเชย ledger ยังไม่ลบ/ไม่แก้) |
+| `STOCK_OUT` | ✅ | ✅ | – | ✅ | ใบเบิกสินค้า (F30) · DELETE = ยกเลิกเอกสาร |
+| `STOCK_ADJUST` | ✅ | ✅ | – | ✅ | *(Phase 21)* ใบปรับยอดสต็อก · **ไม่ backfill ให้บทบาทเดิม** — ร้านเดิมมีแค่ OWNER จนกว่าจะติ๊กใน `/roles` · ร้านใหม่: preset "ผู้ดูแลระบบ" ได้เต็ม |
 | `POS` | ✅ | ✅ | – | – | Add = ทำการขาย/checkout (F5) |
 | `POS_HISTORY` | ✅ | – | – | ✅ | Delete = สิทธิ์กดปุ่ม **Void** บิล (F6) |
 | `POS_CLOSING` | ✅ | ✅ | – | – | Add = สิทธิ์กดปิดยอด (F9) |
@@ -1010,6 +1037,30 @@ enum ResourceKey {
 - [x] **เตือนคิวใกล้ถึงเวลา** — `listUpcomingBookings()` (ก่อนถึงเวลา 15 นาที ถึงเลยเวลา 3 ชม. และยังไม่เช็กอิน) ขึ้นบน
       `/mobile-order/notifications` และรวมใน badge ของ sidebar — คำนวณสดเหมือนใบ "รอธนาคารยืนยัน" จึงหายเองเมื่อเช็กอิน/ยกเลิก ไม่มีปุ่มรับทราบ
 - [x] เทส `booking.test.ts` 12 · `therapist-shift.test.ts` 4 · tenant-isolation +6 query +6 action (651 ทั้งชุด)
+
+### F30 — เอกสารคลัง รับ/เบิก/ปรับ แบบ Header + Detail (Phase 21a)
+- ใบรับสินค้า (ผู้ขาย · เลขใบส่งของ · ราคาทุนต่อบรรทัดไม่บังคับ) · ใบเบิก (**ชื่อผู้เบิกบังคับ**) · ใบปรับ (กรอกยอดที่นับได้ ระบบคิดส่วนต่าง · เหตุผลบังคับ)
+- บันทึกแล้วมีผลทันที · ทั้งใบอยู่ในทรานแซคชันเดียว — **บรรทัดใดของไม่พอ = ไม่บันทึกทั้งใบ** · เบิกพร้อมกัน 10 ใบจากสต็อก 8 ผ่าน 4 (กติกาข้อ 4)
+- แก้เอกสารไม่ได้ ยกเลิกได้ (สิทธิ์ DELETE ของ resource นั้น) = สร้างรายการชดเชยทุกบรรทัด · ยกเลิกใบรับที่ของถูกขาย/เบิกไปแล้วจนไม่พอ = ปฏิเสธ
+- ใบปรับต้องมี `STOCK_ADJUST` — มีแค่สิทธิ์รับ/เบิกปรับยอดไม่ได้
+- `/stock-in` `/stock-out` เดิม redirect ไป `/stock/receipts` `/stock/issues` · ประวัติ ledger เดิมอยู่ครบ
+
+### F31 — ขายสินค้าในสต็อกจากหน้าขายอาหาร (Phase 21b)
+- หมวดหมู่มีสวิตช์ "ขายที่หน้าขายอาหาร" (`Category.sellableAtPos` ค่าเริ่มต้นปิด) · จอขายอาหารมีแท็บ "สินค้า" เฉพาะหมวดที่เปิด (ค้น/สแกน SKU ได้)
+- **server ตรวจหมวดทุกครั้ง** (`buildProductLines`) · สินค้าร้านอื่นขายไม่ได้ · ลูกค้าสแกน QR ส่งสินค้าไม่ได้ (schema แยก)
+- กลับบ้าน: ตัดสต็อกใน tx เดียวกับบิล · บิลมีแต่สินค้า = ไม่มีออร์เดอร์ครัว · void คืนสต็อก
+- เข้าโต๊ะ: **ตัดสต็อกตอนส่งรายการ** (ของหยิบให้ลูกค้าแล้ว) · บรรทัดสินค้าเป็น SERVED ไม่ขึ้น KDS/ทิกเก็ต · ยกเลิกรายการ/ยกเลิกโต๊ะคืนสต็อก ·
+  ปิดบิลคัดลง `SaleItem(kind PRODUCT, productId)` ไม่ตัดซ้ำ · void บิลคืนสต็อก
+- ปิดเมนู "ขายหน้าร้าน (POS)" — `/pos` redirect ไปจอขายอาหาร · `/pos/history` `/pos/closing` ยังใช้ร่วมทุกช่องทาง
+
+### F32 — รายงานขายตัดสต็อกรายวัน (Phase 21c)
+- `/reports/stock-sales?from=&to=` — สรุปทั้งช่วงต่อสินค้า + รายวัน: ขาย (สุทธิหักคืน) · ยอดขาย (บาท) · รับ · เบิก · ปรับ · อื่น ๆ (ก่อนมีเอกสาร) + CSV
+- จำนวนนับจาก ledger ตามวันที่ตัดสต็อก · ยอดเงินจากบิลที่ปิดแล้วตามวันออกบิล (โต๊ะที่ข้ามเที่ยงคืนอาจตกคนละวัน)
+
+### F33 — รายงานสินค้าใกล้หมด/ต้องสั่งซื้อ (Phase 21c)
+- `/reports/reorder` — สินค้าคงเหลือ ≤ จุดสั่งซื้อ: ขายเฉลี่ย 30 วัน · อยู่ได้อีกกี่วัน · **จำนวนแนะนำ** · ผู้ขาย/ทุนจากใบรับล่าสุดที่ไม่ถูกยกเลิก · ประมาณการ
+- สูตร `lib/reorder.ts`: มียอดขาย → จุดสั่งซื้อ + ceil(เฉลี่ย × 14) − คงเหลือ · ไม่มียอดขาย → 2 × จุดสั่งซื้อ − คงเหลือ · อย่างน้อย 1
+- พิมพ์เป็นใบสั่งซื้อร่างได้ · ปุ่ม "สร้างใบรับสินค้าจากรายการนี้" เติมบรรทัดตามจำนวนแนะนำ (แก้ได้ก่อนบันทึก)
 
 ---
 
@@ -2252,6 +2303,66 @@ enum ResourceKey {
       ท้ายหน้า `/pos/closing` เห็นเฉพาะ `REPORTS:VIEW` · อ่านอย่างเดียว ไม่มีปิดยอดรวม
 - [x] เทส `closing.test.ts` +3 · `payment.test.ts` ปรับ · tenant-isolation +1 query · **717 ทั้งชุดผ่าน** · `pnpm build` ผ่าน
 - [ ] deploy: backup ใหม่ก่อน merge (มี migration) → merge → CI → ตรวจ `\d cashier_closing` มี `totalPromptPay` + `counted*` · เจ้าของลองปิดรอบจริง
+
+### 🔧 Phase 21 — เอกสารคลังสินค้า (รับ/เบิก/ปรับ) + ขายสินค้าในสต็อกจากหน้าขายอาหาร + รายงานสต็อก (F30–F33) — โค้ดเสร็จ 2026-09-28 รอ deploy
+> **ที่มา (เจ้าของสั่ง 2026-09-28 · 9 ข้อ)**: (1) ใบรับสินค้าแบบเอกสารซื้อ Header/Detail (2) ใบเบิกมีชื่อผู้เบิก Header/Detail
+> (3) เอกสาร Adjust Header/Detail + กำหนดสิทธิ์ผู้ Adjust ได้ (4) ปิด "รับสินค้าเข้า"/"เบิกจ่ายสินค้า" เดิม (5) หมวดหมู่มีฟิลด์ "ขายหน้าร้านได้"
+> (6) หน้าขายอาหารขายสินค้าในสต็อกได้เฉพาะหมวดที่เปิดขาย และตัดสต็อกจริง (7) ปิดเมนู POS หน้าร้าน ให้ใช้หน้าขายอาหารแทน
+> (8) รายงานการขายสินค้าที่ตัดสต็อกรายวัน (9) รายงานสินค้าใกล้หมด/ต้องสั่งซื้อ
+>
+> **ตรวจของเดิม (2026-09-28)**: ข้อ 1–3 ❌ มีแค่ `StockTransaction` ทีละ 1 สินค้า ไม่มีหัวเอกสาร/เลขที่/ผู้เบิก/Adjust ·
+> ข้อ 5–6 ❌ `Category` มีแค่ชื่อ · จอขายอาหาร (`menu-pos.tsx`) ขายเฉพาะ `MenuItem` และ `createTakeawaySale` ไม่แตะสต็อก ·
+> ข้อ 8 ⚠️ มีแค่กราฟ IN/OUT รวม 30 วัน (`getMovementReport`) ไม่แยกสินค้า/ไม่แยกว่ามาจากการขาย ·
+> ข้อ 9 ⚠️ มี `getLowStockProducts()` + badge แต่ไม่มีหน้ารายงาน/จำนวนที่ควรสั่ง
+>
+> **ทำจริง**: 3 commit ใน PR เดียว (21a → 21b → 21c) — migration ของ 21a/21b รวมไฟล์เดียวกัน deploy/backup/ซ้อมรอบเดียว
+
+#### 21a — เอกสารรับ/เบิก/ปรับ แบบ Header + Detail (F30)
+- [x] schema: enum `StockDocType { RECEIPT ISSUE ADJUST }` · `StockDocStatus { POSTED VOIDED }` ·
+      `StockDocument` (header: `storeId` · `docNumber` unique ต่อร้าน `GR-/GI-/ADJ-000001` เดินแยกต่อประเภท · `docDate` · `type` · `status` ·
+      `supplierName?` + `referenceNo?` (เลขใบกำกับ/ใบส่งของ — ใบรับ) · `requesterName` (ใบเบิก บังคับ) · `reason?` (ใบปรับ) · `note?` ·
+      `totalCost?` · `createdById` · `voidedAt/voidedById/voidReason`) ·
+      `StockDocumentLine` (detail: `productId` · `quantity` (ใบรับ/ใบเบิก > 0) · `unitCost?`/`lineTotal?` (ใบรับ) · ใบปรับเก็บ `systemQty` snapshot + `countedQty` + `diffQty`) ·
+      `StockTransaction.documentId?` (FK) — ledger ยังเป็น IN/OUT ตามเดิม รายงานเดิมจึงไม่เพี้ยน
+- [x] resource ใหม่ `STOCK_ADJUST` (VIEW/ADD/DELETE) — migration 2 ไฟล์ (ADD VALUE แยกจากที่ใช้) · **ไม่ backfill ให้บทบาทใด** = ตอน deploy มีแค่ OWNER ที่ปรับยอดได้
+      จนกว่าเจ้าของจะติ๊กให้ใน `/roles` · ใบรับใช้ `STOCK_IN` · ใบเบิกใช้ `STOCK_OUT` (สิทธิ์เดิมตามคนเดิม)
+- [x] `lib/stock-docs.ts` ที่เดียว: `nextDocNumber()` ใต้ advisory lock (namespace ใหม่ 720_005 ต่อร้าน+ประเภท) · `postReceipt/postIssue/postAdjust` ·
+      ใบเบิกตัดทุกบรรทัดด้วย `updateMany where quantity gte` (กติกาข้อ 4) บรรทัดไหนไม่พอ = rollback ทั้งใบ บอกชื่อสินค้าที่ไม่พอ ·
+      ใบปรับ `SELECT … FOR UPDATE` แถวสินค้าแล้วคิด `diff = นับได้ − ในระบบ` ในทรานแซคชันเดียว (diff 0 = ไม่เขียน ledger) ·
+      **ยกเลิกเอกสาร = สร้าง StockTransaction ชดเชยทุกบรรทัด** (ledger append-only) · ยกเลิกใบรับที่ของถูกขายไปแล้วจนยอดไม่พอ = ปฏิเสธ
+- [x] `app/actions/stock-docs.ts` (`createReceipt`/`createIssue`/`createAdjustment`/`voidStockDocument`) — `requireStoreAccess` ตาม resource + zod + FK `productId` ทุกบรรทัดต้องเป็นของร้าน
+- [x] หน้า `/stock/receipts` · `/stock/issues` · `/stock/adjustments` (รายการเอกสาร + กรองวันที่) · `…/new` (ฟอร์มหัว + ตารางบรรทัดเพิ่ม/ลบได้ · ค้นสินค้า/บาร์โค้ด)
+      · `…/[id]` (ดูเอกสาร + พิมพ์ได้ + ปุ่มยกเลิกพร้อมเหตุผล) · component ฟอร์มร่วม `components/stock-doc-form.tsx`
+- [x] **ข้อ 4 ปิดของเดิม**: sidebar ถอด "รับสินค้าเข้า"/"เบิกจ่ายสินค้า" ใส่ "ใบรับสินค้า"/"ใบเบิกสินค้า"/"ปรับยอดสต็อก" · `/stock-in` `/stock-out` redirect ไปหน้าใหม่ ·
+      ลบ action `stockIn`/`stockOut` + `components/stock-move-form.tsx` · ประวัติเดิมใน ledger คงอยู่ (ไม่มี documentId = "รายการก่อนมีเอกสาร")
+- [x] เทส `stock-docs.test.ts`: เลขเอกสารไม่ชนเมื่อยิงพร้อมกัน · ใบเบิกหลายบรรทัด rollback ทั้งใบ · **concurrent เบิก 10 ใบจากสต็อก 8 ผ่าน 4** (ย้ายจาก `stock-out.test.ts`) ·
+      ใบปรับขึ้น/ลง · ยกเลิกเอกสารคืนยอด · STAFF ไม่มี `STOCK_ADJUST` โดนปฏิเสธ · tenant-isolation เพิ่ม query/action ใหม่ทั้งหมด
+
+#### 21b — ขายสินค้าในสต็อกจากหน้าขายอาหาร + ปิด POS หน้าร้าน (F31)
+- [x] schema: `Category.sellableAtPos Boolean @default(false)` · `MobileOrderItem.menuItemId` เป็น optional + `productId?` (บรรทัดสินค้า ต้องมีอย่างใดอย่างหนึ่ง — CHECK constraint)
+      · `StockTransaction.orderItemId?` (ผูกการตัดสต็อกของบรรทัดบนโต๊ะ)
+- [x] `/categories` มีสวิตช์ "ขายที่หน้าขายอาหาร" ต่อหมวด (`CATEGORIES:EDIT`)
+- [x] จอขาย `/mobile-order/pos` แท็บใหม่ "สินค้า" แสดงเฉพาะสินค้าในหมวดที่เปิดขาย + ยอดคงเหลือ · หมด = กดไม่ได้ · ค้นหา/สแกนบาร์โค้ด(SKU)ได้
+- [x] **ตัดสต็อกตอนส่งรายการ ไม่ใช่ตอนปิดบิล** (ของหยิบให้ลูกค้าไปแล้ว):
+      กลับบ้าน — `createTakeawaySale` ตัดใน tx เดียวกับบิล (`updateMany gte` + ledger OUT ผูก `saleId` · `SaleItem.kind = PRODUCT`) · ไม่เข้าครัว ·
+      มีโต๊ะ — `createStaffTableOrder` ตัดใน tx เดียวกับออร์เดอร์ (ledger ผูก `orderItemId`) บรรทัดสินค้าเป็น `SERVED` ทันที ไม่ขึ้น KDS/ทิกเก็ต ·
+      ปิดบิล (`close-session.ts`) คัด `productId` ลง `SaleItem(kind PRODUCT)` · **ยกเลิกรายการบนโต๊ะ / ยกเลิกโต๊ะ = คืนสต็อกด้วยรายการชดเชย** ·
+      void บิลคืนสต็อกจาก `SaleItem.productId` ตามเดิม (ครอบทั้งกลับบ้านและโต๊ะ)
+- [x] server ตรวจเองว่าสินค้าอยู่ในหมวดที่เปิดขาย (ไม่เชื่อ client) · ลูกค้าสแกน QR **ไม่เห็นสินค้า** (เฉพาะจอพนักงาน)
+- [x] **ข้อ 7 ปิด POS หน้าร้าน**: ถอดเมนู "ขายหน้าร้าน (POS)" จาก sidebar · `/pos` redirect ไป `/mobile-order/pos` · `/pos/history` และ `/pos/closing` คงไว้ (ใช้ร่วมทุกช่องทาง)
+      · บิล RETAIL_POS เก่ายังดู/void ได้ตามเดิม
+- [x] เทส: ขายสินค้ากลับบ้านตัดสต็อก · **concurrent ขายสินค้าจากสต็อก 8 ยิง 10 ผ่าน 4** · สินค้านอกหมวดที่เปิดถูกปฏิเสธ · ยกเลิกรายการบนโต๊ะคืนสต็อก ·
+      ปิดบิลโต๊ะได้ SaleItem PRODUCT + void คืนสต็อก · KDS ไม่เห็นบรรทัดสินค้า
+
+#### 21c — รายงานสต็อก (F32–F33)
+- [x] `/reports/stock-sales?from=&to=` — ขายสินค้าที่ตัดสต็อกรายวัน: วัน × สินค้า (จำนวนขายสุทธิหลังหักคืนจาก void/ยกเลิก · ยอดเงินจาก SaleItem PRODUCT)
+      + สรุปต่อวันของรับ/เบิก/ปรับ · อ่านจาก ledger (แยกที่มาด้วย `saleId`/`orderItemId`/`documentId`) · วันแบบเวลาไทย (`SALE_DAY_SQL`) · CSV ได้
+- [x] `/reports/reorder` — สินค้าคงเหลือ ≤ จุดสั่งซื้อ: คงเหลือ · จุดสั่งซื้อ · ขายเฉลี่ย/วัน (30 วัน) · อยู่ได้อีกกี่วัน · **จำนวนแนะนำให้สั่ง** ·
+      พิมพ์ได้ · ปุ่ม "สร้างใบรับสินค้าจากรายการนี้" (เติมบรรทัดให้ในฟอร์มใบรับ)
+- [x] สิทธิ์ `REPORTS:VIEW` · เพิ่มลิงก์ในหน้า `/reports` + sidebar · raw SQL ใหม่ทุกจุดมี `WHERE "storeId"` · tenant-isolation + เทสตัวเลขรายงาน
+
+#### เอกสาร
+- [x] §2 Data Model (`StockDocument`/`StockDocumentLine`/ฟิลด์ใหม่) · §4 resource `STOCK_ADJUST` · §5 F30–F33 · §6 routes · CLAUDE.md สถานะ + รายการ raw SQL + ที่เดียวของ `lib/stock-docs.ts`
 
 ### ✅ Phase 19 — ปรับปรุงครัว + ปิดรอบ (F24–F26) — ขึ้น production แล้ว 2026-09-22 (PR #24 · CI run 35708166462)
 > **ที่มา (เจ้าของสั่ง 2026-09-22)**: (1) หน้าขายไม่มีวันที่ และปิดรอบเลือกวันไม่ได้ (2) ครัวต้องทำ/เสิร์ฟ/ยกเลิกทีละรายการได้ ไม่ต้องทั้งรอบ

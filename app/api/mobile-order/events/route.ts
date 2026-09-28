@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
         updatedAt: true,
         mobileOrderId: true,
         menuItem: { select: { name: true } },
+        product: { select: { name: true } },
       },
     }),
     prisma.notification.findMany({
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest) {
       status: i.status,
       updatedAt: i.updatedAt,
       orderId: i.mobileOrderId,
-      menuItemName: i.menuItem.name,
+      menuItemName: i.menuItem?.name ?? i.product?.name ?? "",
     })),
     notifications: notifications.map((n) => ({
       id: n.id,

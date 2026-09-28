@@ -88,7 +88,7 @@ describe.skipIf(!dbReady)("ขายอาหารกลับบ้าน (Pha
     expect(sale.items[0].productId).toBeNull()
 
     const order = await db.mobileOrder.findUniqueOrThrow({
-      where: { id: result.data!.orderId },
+      where: { id: result.data!.orderId! },
       include: { items: true },
     })
     expect(order.orderType).toBe("TAKEAWAY")
@@ -205,7 +205,7 @@ describe.skipIf(!dbReady)("ขายอาหารกลับบ้าน (Pha
     const voided = await voidSale(makeFormData({ id: sold.data!.receipt.id, reason: "ลูกค้าไม่มารับ" }))
 
     expect(voided.ok).toBe(true)
-    const items = await db.mobileOrderItem.findMany({ where: { mobileOrderId: sold.data!.orderId } })
+    const items = await db.mobileOrderItem.findMany({ where: { mobileOrderId: sold.data!.orderId! } })
     expect(items.every((i) => i.status === "CANCELLED")).toBe(true)
     expect(items[0].cancelReason).toContain("ยกเลิกบิล")
     expect(await queries.listKitchenTickets(TEST_STORE_ID)).toHaveLength(0)

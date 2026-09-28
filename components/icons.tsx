@@ -64,4 +64,8 @@ export {
   // Phase 20 — ร้านนวด
   HandHeart as IconTherapist,
   BedDouble as IconRoom,
+  // Phase 21 — เอกสารคลัง / ปรับยอด / รายงานสั่งซื้อ
+  FileText as IconDocument,
+  SlidersHorizontal as IconStockAdjust,
+  ShoppingBasket as IconReorder,
 } from "lucide-react"

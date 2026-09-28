@@ -18,6 +18,7 @@ import {
   TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
+import { businessDayKey } from "@/lib/day"
 import { setActiveTestStore, setTestUser } from "../helpers/session-mock"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
@@ -29,7 +30,8 @@ const dbReady = await isTestDbReachable()
 describe.skipIf(!dbReady)("ระบบสิทธิ์ตามบทบาท (§4) — บทบาทเป็นของร้าน (Phase 13)", () => {
   let createProduct: (formData: FormData) => Promise<ActionResult>
   let deleteProduct: (formData: FormData) => Promise<ActionResult>
-  let stockIn: (formData: FormData) => Promise<ActionResult>
+  let createStockReceipt: (formData: FormData) => Promise<ActionResult<unknown>>
+  let createStockAdjustment: (formData: FormData) => Promise<ActionResult<unknown>>
   let assignUserRole: (formData: FormData) => Promise<ActionResult>
   let updateRole: (formData: FormData) => Promise<ActionResult>
   let deleteRole: (formData: FormData) => Promise<ActionResult>
@@ -37,12 +39,13 @@ describe.skipIf(!dbReady)("ระบบสิทธิ์ตามบทบา�
 
   beforeAll(async () => {
     const products = await import("@/app/actions/products")
-    const stock = await import("@/app/actions/stock")
+    const stock = await import("@/app/actions/stock-docs")
     const roles = await import("@/app/actions/roles")
     permissions = await import("@/lib/permissions")
     createProduct = products.createProduct
     deleteProduct = products.deleteProduct
-    stockIn = stock.stockIn
+    createStockReceipt = stock.createStockReceipt
+    createStockAdjustment = stock.createStockAdjustment
     assignUserRole = roles.assignUserRole
     updateRole = roles.updateRole
     deleteRole = roles.deleteRole
@@ -140,12 +143,30 @@ describe.skipIf(!dbReady)("ระบบสิทธิ์ตามบทบา�
       await giveRole("พนักงานคลัง", { STOCK_IN: ["VIEW", "ADD"] })
       const product = await createTestProduct({ quantity: 0 })
 
-      const received = await stockIn(makeFormData({ productId: product.id, quantity: "5" }))
+      const received = await createStockReceipt(
+        makeFormData({ docDate: businessDayKey(), lines: JSON.stringify([{ productId: product.id, quantity: 5 }]) }),
+      )
       expect(received.ok).toBe(true)
 
       const category = await createTestCategory("หมวดอื่น")
       const blocked = await createProduct(productForm(category.id, "ของใหม่"))
       expect(blocked.ok).toBe(false)
+    })
+
+    it("ปรับยอดสต็อกต้องมี STOCK_ADJUST — มีแค่รับ/เบิกก็ปรับยอดไม่ได้ (Phase 21)", async () => {
+      await giveRole("พนักงานคลังไม่มีสิทธิ์ปรับ", { STOCK_IN: ["VIEW", "ADD", "DELETE"], STOCK_OUT: ["VIEW", "ADD", "DELETE"] })
+      const product = await createTestProduct({ quantity: 10 })
+      const form = () =>
+        makeFormData({ docDate: businessDayKey(), reason: "นับสต็อก", lines: JSON.stringify([{ productId: product.id, countedQty: 3 }]) })
+
+      const blocked = await createStockAdjustment(form())
+      expect(blocked.ok).toBe(false)
+      expect((await testPrisma().product.findUniqueOrThrow({ where: { id: product.id } })).quantity).toBe(10)
+
+      await giveRole("ผู้ปรับยอด", { STOCK_ADJUST: ["VIEW", "ADD"] })
+      const allowed = await createStockAdjustment(form())
+      expect(allowed.ok).toBe(true)
+      expect((await testPrisma().product.findUniqueOrThrow({ where: { id: product.id } })).quantity).toBe(3)
     })
 
     it("บทบาทผูกกับร้าน — สิทธิ์เต็มในร้าน A ไม่ติดตัวไปร้าน B", async () => {
@@ -186,9 +207,10 @@ describe.skipIf(!dbReady)("ระบบสิทธิ์ตามบทบา�
       expect(guard.ok).toBe(false)
     })
 
-    it("RESOURCE_ACTIONS ตรงกับตารางใน §4 — ledger ไม่มี EDIT/DELETE", () => {
-      expect(permissions.RESOURCE_ACTIONS.STOCK_IN).toEqual(["VIEW", "ADD"])
-      expect(permissions.RESOURCE_ACTIONS.STOCK_OUT).toEqual(["VIEW", "ADD"])
+    it("RESOURCE_ACTIONS ตรงกับตารางใน §4 — เอกสารคลังไม่มี EDIT (แก้ไม่ได้ ยกเลิกด้วย DELETE เท่านั้น · Phase 21)", () => {
+      expect(permissions.RESOURCE_ACTIONS.STOCK_IN).toEqual(["VIEW", "ADD", "DELETE"])
+      expect(permissions.RESOURCE_ACTIONS.STOCK_OUT).toEqual(["VIEW", "ADD", "DELETE"])
+      expect(permissions.RESOURCE_ACTIONS.STOCK_ADJUST).toEqual(["VIEW", "ADD", "DELETE"])
       expect(permissions.RESOURCE_ACTIONS.DASHBOARD).toEqual(["VIEW"])
       expect(permissions.RESOURCE_ACTIONS.REPORTS).toEqual(["VIEW"])
       expect(permissions.RESOURCE_ACTIONS.POS_HISTORY).toEqual(["VIEW", "DELETE"])
@@ -218,14 +240,14 @@ describe.skipIf(!dbReady)("ระบบสิทธิ์ตามบทบา�
         makeFormData({
           id: target.id,
           name: "บทบาททดสอบ",
-          // STOCK_IN ไม่รองรับ EDIT/DELETE — ต้องเหลือแค่ VIEW/ADD
+          // STOCK_IN ไม่รองรับ EDIT (เอกสารแก้ไม่ได้) — ต้องเหลือแค่ VIEW/ADD/DELETE
           permissions: JSON.stringify([{ resource: "STOCK_IN", actions: ["VIEW", "ADD", "EDIT", "DELETE"] }]),
         }),
       )
       expect(result.ok).toBe(true)
 
       const saved = await db.rolePermission.findFirstOrThrow({ where: { roleId: target.id } })
-      expect(saved.actions).toEqual(["VIEW", "ADD"])
+      expect(saved.actions).toEqual(["VIEW", "ADD", "DELETE"])
     })
 
     it("แก้/ลบบทบาทของร้านอื่นไม่ได้ — ตอบไม่พบ ไม่ใช่สำเร็จ", async () => {
