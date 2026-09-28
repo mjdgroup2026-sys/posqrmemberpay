@@ -62,6 +62,9 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    `next-env.d.ts`) — ตรวจด้วย `/check`
 2. **ทุกการเปลี่ยนยอดสต็อกต้องผ่าน `StockTransaction`** และเขียนใน `prisma.$transaction` เดียวกันกับการอัปเดต
    `product.quantity` เสมอ ห้ามแก้ `quantity` ตรง ๆ จากที่อื่น (รวมถึงฟอร์มแก้ไขสินค้า)
+   · **(Phase 21) ทางใหม่ทุกทางขยับยอดผ่าน `takeStock`/`putStock` ใน `lib/stock-moves.ts` ที่เดียว** (เขียน ledger คู่ + ด่าน gte ให้เอง ·
+   ผูกที่มาด้วย `saleId`/`documentId`/`orderItemId` — รายงาน F32 แยกประเภทจากสามคอลัมน์นี้) · เอกสารรับ/เบิก/ปรับอยู่ที่ `lib/stock-docs.ts` ห้ามลอก ·
+   ตัดหลายสินค้าในทรานแซคชันเดียวต้องเรียงตาม `productId` เสมอ (กัน deadlock) · `createSale` เดิม (POS หน้าร้านที่ปิดเมนูแล้ว) ยังเขียน ledger เองแบบเก่า
 3. **`StockTransaction` เป็น ledger แบบ append-only** — ไม่ลบ ไม่แก้ย้อนหลัง ถ้าต้องกลับรายการให้สร้างรายการชดเชยใหม่
 4. **กันเบิก/ขายเกินสต็อกด้วย `updateMany` + `where: { quantity: { gte: n } }`** ไม่ใช่แค่ `if` ก่อนหน้า —
    เป็นด่านเดียวที่กัน race condition ได้จริงตอนมีคำขอพร้อมกัน · ต้องมีเทส concurrent พิสูจน์ (เช่น ยิงพร้อมกัน
@@ -71,7 +74,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    · แล้วทุก query ต้องผ่าน `forStore(storeId)` จาก `lib/db.ts` ไม่ใช่ `prisma` ตรง ๆ (ESLint บังคับใน
    `app/actions/**` และ `lib/queries.ts`) · **raw SQL ต้องเติม `WHERE "storeId" = ${storeId}` เอง** เพราะ
    extension ช่วยไม่ได้ · `findUnique` ด้วย id จากผู้ใช้ปลอดภัยเพราะ extension ยัด storeId เข้า where ให้ —
-   แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId` · Phase 19–20: `stationId` ของเมนู/ห้อง · `therapistId` ในตะกร้า/มอบหมาย/การจอง · `skillIds` ของพนักงานนวด · `menuItemId`/`tableId` ของการจอง) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
+   แต่ **FK ที่รับจากฟอร์ม (เช่น `categoryId` · Phase 19–20: `stationId` ของเมนู/ห้อง · `therapistId` ในตะกร้า/มอบหมาย/การจอง · `skillIds` ของพนักงานนวด · `menuItemId`/`tableId` ของการจอง · Phase 21: `productId` ทุกบรรทัดของเอกสารคลังและตะกร้าสินค้าบนจอขายอาหาร) ต้องเช็คเองว่าเป็นของร้านนี้** (เทส `tenant-isolation` เคยจับได้)
    · เพิ่ม query/action ใหม่ต้องเพิ่มในตารางของ `__tests__/integration/tenant-isolation.test.ts` ไม่งั้นเทสแดง
    · **การค้นข้ามร้านทำได้ 4 ที่เท่านั้น** (Phase 13–14c): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
    qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้ · **Phase 17a เพิ่ม `findAssetById()`** — `<img src="/api/assets/<id>">`
@@ -313,7 +316,8 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   ```bash
   grep -rn '\$queryRaw\|\$executeRaw' --include='*.ts' . --exclude-dir=node_modules --exclude-dir=generated
   ```
-  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (15 จุด — รวมรายงานพนักงานนวด Phase 20c 2 จุด + รายงานแยกประเภท/CSV 20e 5 จุด · วันแบบเวลาไทยใช้ `SALE_DAY_SQL` เพราะ `createdAt` เป็น timestamp ไม่มี TZ), `app/actions/products.ts` (1 จุด — `nextSku()`),
+  ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (19 จุด — รวมรายงานพนักงานนวด Phase 20c 2 จุด + รายงานแยกประเภท/CSV 20e 5 จุด + รายงานสต็อก Phase 21c 4 จุด · วันแบบเวลาไทยใช้ `SALE_DAY_SQL`/`LEDGER_DAY_SQL` เพราะ `createdAt` เป็น timestamp ไม่มี TZ),
+  `lib/stock-docs.ts` (3 จุด — advisory lock เลขเอกสาร namespace 720_005 ต่อร้าน+ประเภท · `nextDocNumber()` · `SELECT … FOR UPDATE` แถวสินค้าของใบปรับ, Phase 21), `app/actions/products.ts` (1 จุด — `nextSku()`),
   `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
   `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
   `lib/table-session.ts` (1 จุด — `lockTableRow()` `SELECT … FOR UPDATE` แถว `restaurant_table` ก่อนคืนห้อง/เปิดบิลแยก, 2026-09-23)
@@ -607,6 +611,13 @@ CSV `GET /api/reports/sales-csv` (`lib/sales-csv.ts` · BOM + กันสูต
 `CashierClosing.totalPromptPay` แยกจาก `totalCard` + ยอดจริงที่กรอกไม่บังคับ `counted{Transfer,QR,PromptPay,Card}` (null = ไม่ได้ตรวจ · ส่วนต่างคำนวณตอนแสดง) ·
 **วิธีชำระลงถังไหนตัดสินที่ `bucketByChannel()` ใน `lib/closing-channels.ts` ที่เดียว** (เพิ่ม `PaymentMethod` ใหม่ต้องเพิ่มช่องที่นี่ ไม่งั้นตกถังบัตร) ·
 `getStoreDaySummary()` สรุปทั้งร้านรายวัน รวมบิลที่ธนาคารปิดเอง (`SYSTEM_USER_ID` ไม่มีรอบของตัวเอง) — ท้าย `/pos/closing` เฉพาะ `REPORTS:VIEW` · 717 เทสผ่าน
+
+**🔧 Phase 21 เอกสารคลัง + ขายสินค้าจากจอขายอาหาร + รายงานสต็อก — โค้ดเสร็จ 2026-09-28 (branch `feat/stock-documents` · รอ PR/deploy · migration 2 ไฟล์ · ไม่มี env ใหม่)**:
+**21a** `StockDocument`/`StockDocumentLine` (ใบรับ GR- · ใบเบิก GI- มีชื่อผู้เบิก · ใบปรับ ADJ- กรอกยอดนับได้) · หน้า `/stock/[kind]` (receipts/issues/adjustments) รายการ/สร้าง/ดู+พิมพ์/ยกเลิก ·
+resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเดิมมีแค่ OWNER) · `STOCK_IN/OUT` ได้ DELETE = ยกเลิกเอกสาร · `/stock-in` `/stock-out` redirect · ลบ `stockIn`/`stockOut` เดิม ·
+**21b** `Category.sellableAtPos` · จอขายอาหารแท็บ "สินค้า" (`buildProductLines` ใน `lib/order-lines.ts` ตรวจหมวดที่ server) · กลับบ้านตัดสต็อกใน tx บิล · เข้าโต๊ะตัดตอนส่ง
+(`MobileOrderItem.productId` + CHECK เมนูหรือสินค้าอย่างใดอย่างหนึ่ง · SERVED ทันที ไม่เข้าครัว) · ยกเลิกรายการ/โต๊ะคืนสต็อก · `/pos` redirect ไปจอขายอาหาร ·
+**21c** `/reports/stock-sales` (+ CSV) · `/reports/reorder` (สูตร `lib/reorder.ts`) · เทสใหม่ stock-docs 12 · pos-products 10 · stock-report 2 · reorder unit 4 · tenant-isolation +7 query/+5 action
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

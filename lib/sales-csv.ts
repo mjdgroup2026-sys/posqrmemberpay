@@ -1,4 +1,4 @@
-import type { SaleKind, SalesExportRow } from "@/lib/queries"
+import type { SaleKind, SalesExportRow, StockSalesReport } from "@/lib/queries"
 import { PAYMENT_METHOD_LABEL, type PaymentMethodValue } from "@/lib/types"
 import { businessDayKey, formatHhMm, minuteOfBusinessDay } from "@/lib/day"
 
@@ -51,4 +51,21 @@ export function buildSalesCsv(rows: SalesExportRow[]): string {
     )
   }
   return `﻿${lines.join("\r\n")}\r\n`
+}
+
+const STOCK_SALES_HEADER = ["วันที่", "SKU", "สินค้า", "หน่วย", "ขาย (ตัดสต็อก)", "ยอดขาย (บาท)", "รับเข้า", "เบิกออก", "ปรับยอด", "อื่น ๆ"]
+
+/// CSV รายงานขายตัดสต็อกรายวัน (Phase 21c · F32) — 1 แถว = วัน × สินค้า เรียงวันเก่าไปใหม่ · BOM + กันสูตร Excel เหมือนไฟล์ขาย
+export function buildStockSalesCsv(report: StockSalesReport): string {
+  const lines = [STOCK_SALES_HEADER.map(csvCell).join(",")]
+  for (const day of [...report.days].reverse()) {
+    for (const row of day.rows) {
+      lines.push(
+        [day.day, row.sku, row.name, row.unit, row.soldQty, row.soldAmount.toFixed(2), row.receivedQty, row.issuedQty, row.adjustedQty, row.otherQty]
+          .map((cell) => csvCell(cell))
+          .join(","),
+      )
+    }
+  }
+  return `\uFEFF${lines.join("\r\n")}\r\n`
 }

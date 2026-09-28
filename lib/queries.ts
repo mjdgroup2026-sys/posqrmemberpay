@@ -12,6 +12,7 @@ import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFr
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import { bucketByChannel, CLOSING_CHANNELS, type ClosingChannel } from "@/lib/closing-channels"
 import type { PaymentMethodValue } from "@/lib/types"
+import { daysOfStockLeft, REORDER_LOOKBACK_DAYS, suggestReorderQty } from "@/lib/reorder"
 import { Prisma } from "@/generated/prisma/client"
 import type { PaymentMode, PermissionAction as PermissionActionValue, ResourceKey } from "@/generated/prisma/client"
 
@@ -3513,4 +3514,239 @@ export async function listPosProducts(storeId: string): Promise<PosProductCard[]
     quantity: p.quantity,
     categoryName: p.category.name,
   }))
+}
+
+// ───────────────────── รายงานสต็อก (Phase 21c · F32–F33) ─────────────────────
+
+/// วันแบบเวลาไทยของรายการ ledger — createdAt เป็น timestamp ไม่มี TZ (เก็บเป็น UTC) เหมือน SALE_DAY_SQL
+const LEDGER_DAY_SQL = Prisma.sql`to_char((t."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`
+
+/// ที่มาของรายการ ledger — เอกสารใช้ประเภทของเอกสาร · มีบิล/บรรทัดโต๊ะ = การขาย (รวมคืนจาก void/ยกเลิก) · ที่เหลือ = ก่อนมีเอกสาร
+const LEDGER_SOURCE_SQL = Prisma.sql`COALESCE(d."type"::text, CASE WHEN t."saleId" IS NOT NULL OR t."orderItemId" IS NOT NULL THEN 'SALE' ELSE 'OTHER' END)`
+
+type LedgerNetRow = { day: string; productId: string; source: "SALE" | "RECEIPT" | "ISSUE" | "ADJUST" | "OTHER"; net: bigint }
+
+/// ยอดสุทธิของ ledger (เข้า = บวก · ออก = ลบ) แยกวัน × สินค้า × ที่มา — raw SQL ต้องกรอง storeId เอง (กติกาข้อ 5)
+async function ledgerNetByDay(storeId: string, start: Date, end: Date, productIds?: string[]): Promise<LedgerNetRow[]> {
+  const productFilter = productIds ? Prisma.sql`AND t."productId" IN (${Prisma.join(productIds.length ? productIds : [""])})` : Prisma.empty
+  return forStore(storeId).$queryRaw<LedgerNetRow[]>`
+    SELECT ${LEDGER_DAY_SQL}    AS day,
+           t."productId"        AS "productId",
+           ${LEDGER_SOURCE_SQL} AS source,
+           SUM(CASE WHEN t."type" = 'IN' THEN t."quantity" ELSE -t."quantity" END)::bigint AS net
+    FROM "stock_transaction" t
+    LEFT JOIN "stock_document" d ON d."id" = t."documentId"
+    WHERE t."storeId" = ${storeId}
+      AND t."createdAt" >= ${start}
+      AND t."createdAt" < ${end}
+      ${productFilter}
+    GROUP BY 1, 2, 3
+  `
+}
+
+export type StockSalesRow = {
+  productId: string
+  sku: string
+  name: string
+  unit: string
+  /// ขายสุทธิ (หักคืนจาก void/ยกเลิกรายการแล้ว) — นับจาก ledger ตามวันที่ตัดสต็อกจริง
+  soldQty: number
+  /// ยอดเงินจากบิลที่ปิดแล้ว (SaleItem ประเภทสินค้า ตามวันที่ออกบิล)
+  soldAmount: number
+  receivedQty: number
+  issuedQty: number
+  /// ส่วนต่างจากใบปรับ (+ เพิ่ม / − ลด)
+  adjustedQty: number
+  /// รายการก่อนมีเอกสาร (รับเข้า/เบิกทีละรายการแบบเดิม) — สุทธิแบบมีเครื่องหมาย
+  otherQty: number
+  /// ยอดคงเหลือปัจจุบัน (ไม่ใช่ ณ สิ้นวัน)
+  onHand: number
+}
+
+export type StockSalesReport = {
+  from: string
+  to: string
+  days: { day: string; rows: StockSalesRow[]; soldQty: number; soldAmount: number }[]
+  totals: StockSalesRow[]
+  soldQty: number
+  soldAmount: number
+}
+
+/// รายงานการขายสินค้าที่ตัดสต็อกรายวัน (F32) — วัน × สินค้า พร้อมรับ/เบิก/ปรับของวันเดียวกัน
+export async function getStockSalesReport(storeId: string, range: { from: string; to: string }): Promise<StockSalesReport> {
+  const db = forStore(storeId)
+  const { start, end } = reportRange(range.from, range.to)
+
+  const [ledger, revenue] = await Promise.all([
+    ledgerNetByDay(storeId, start, end),
+    db.$queryRaw<{ day: string; productId: string; amount: string }[]>`
+      SELECT ${SALE_DAY_SQL}          AS day,
+             i."productId"          AS "productId",
+             SUM(i."subtotal")::text AS amount
+      FROM "sale_item" i
+      JOIN "sale" s ON s."id" = i."saleId"
+      WHERE s."storeId" = ${storeId}
+        AND s."status" = 'COMPLETED'
+        AND s."createdAt" >= ${start}
+        AND s."createdAt" < ${end}
+        AND i."kind" = 'PRODUCT'
+        AND i."productId" IS NOT NULL
+      GROUP BY 1, 2
+    `,
+  ])
+
+  const productIds = [...new Set([...ledger.map((r) => r.productId), ...revenue.map((r) => r.productId)])]
+  const products = productIds.length
+    ? await db.product.findMany({ where: { id: { in: productIds } }, select: { id: true, sku: true, name: true, unit: true, quantity: true } })
+    : []
+  const productById = new Map(products.map((p) => [p.id, p]))
+
+  const blank = (productId: string): StockSalesRow => {
+    const p = productById.get(productId)
+    return {
+      productId,
+      sku: p?.sku ?? "",
+      name: p?.name ?? "(สินค้าถูกลบ)",
+      unit: p?.unit ?? "",
+      soldQty: 0,
+      soldAmount: 0,
+      receivedQty: 0,
+      issuedQty: 0,
+      adjustedQty: 0,
+      otherQty: 0,
+      onHand: p?.quantity ?? 0,
+    }
+  }
+  const byDay = new Map<string, Map<string, StockSalesRow>>()
+  const totals = new Map<string, StockSalesRow>()
+  const rowOf = (day: string, productId: string) => {
+    const dayMap = byDay.get(day) ?? new Map<string, StockSalesRow>()
+    byDay.set(day, dayMap)
+    const row = dayMap.get(productId) ?? blank(productId)
+    dayMap.set(productId, row)
+    const total = totals.get(productId) ?? blank(productId)
+    totals.set(productId, total)
+    return [row, total] as const
+  }
+
+  for (const r of ledger) {
+    const net = Number(r.net)
+    for (const row of rowOf(r.day, r.productId)) {
+      if (r.source === "SALE") row.soldQty -= net
+      else if (r.source === "RECEIPT") row.receivedQty += net
+      else if (r.source === "ISSUE") row.issuedQty -= net
+      else if (r.source === "ADJUST") row.adjustedQty += net
+      else row.otherQty += net
+    }
+  }
+  for (const r of revenue) {
+    const amount = toNumber(r.amount)
+    for (const row of rowOf(r.day, r.productId)) row.soldAmount = round2(row.soldAmount + amount)
+  }
+
+  const byName = (a: StockSalesRow, b: StockSalesRow) => b.soldQty - a.soldQty || a.name.localeCompare(b.name, "th")
+  const days = [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? 1 : -1))
+    .map(([day, rows]) => {
+      const list = [...rows.values()].sort(byName)
+      return {
+        day,
+        rows: list,
+        soldQty: list.reduce((sum, r) => sum + r.soldQty, 0),
+        soldAmount: round2(list.reduce((sum, r) => sum + r.soldAmount, 0)),
+      }
+    })
+  const totalRows = [...totals.values()].sort(byName)
+  return {
+    from: range.from,
+    to: range.to,
+    days,
+    totals: totalRows,
+    soldQty: totalRows.reduce((sum, r) => sum + r.soldQty, 0),
+    soldAmount: round2(totalRows.reduce((sum, r) => sum + r.soldAmount, 0)),
+  }
+}
+
+export type ReorderRow = {
+  productId: string
+  sku: string
+  name: string
+  unit: string
+  categoryName: string
+  quantity: number
+  reorderPoint: number
+  /// ขายสุทธิเฉลี่ยต่อวันย้อนหลัง REORDER_LOOKBACK_DAYS วัน (ทศนิยม 2 ตำแหน่ง)
+  avgDailySold: number
+  daysLeft: number | null
+  suggestedQty: number
+  /// จากใบรับล่าสุดที่ยังไม่ถูกยกเลิก — ช่วยให้รู้ว่าสั่งจากใคร ราคาเท่าไร
+  lastSupplier: string | null
+  lastUnitCost: number | null
+  estimatedCost: number | null
+}
+
+/// รายงานสินค้าใกล้หมด/ต้องสั่งซื้อ (F33) — คงเหลือ ≤ จุดสั่งซื้อ · เรียงตัวที่หมดเร็วสุดก่อน
+export async function getReorderReport(storeId: string): Promise<{ rows: ReorderRow[]; lookbackDays: number }> {
+  const db = forStore(storeId)
+  const low = await db.$queryRaw<
+    { id: string; sku: string; name: string; unit: string; quantity: number; reorderPoint: number; categoryName: string }[]
+  >`
+    SELECT p."id", p."sku", p."name", p."unit", p."quantity", p."reorderPoint", c."name" AS "categoryName"
+    FROM "product" p
+    JOIN "category" c ON c."id" = p."categoryId"
+    WHERE p."storeId" = ${storeId} AND p."quantity" <= p."reorderPoint"
+  `
+  if (low.length === 0) return { rows: [], lookbackDays: REORDER_LOOKBACK_DAYS }
+
+  const ids = low.map((p) => p.id)
+  const today = businessDayKey()
+  const { start, end } = reportRange(addDays(today, -(REORDER_LOOKBACK_DAYS - 1)), today)
+  const [ledger, lastReceipts] = await Promise.all([
+    ledgerNetByDay(storeId, start, end, ids),
+    db.$queryRaw<{ productId: string; supplierName: string | null; unitCost: string | null }[]>`
+      SELECT DISTINCT ON (l."productId") l."productId" AS "productId", d."supplierName" AS "supplierName", l."unitCost"::text AS "unitCost"
+      FROM "stock_document_line" l
+      JOIN "stock_document" d ON d."id" = l."documentId"
+      WHERE d."storeId" = ${storeId}
+        AND d."type" = 'RECEIPT'
+        AND d."status" = 'POSTED'
+        AND l."productId" IN (${Prisma.join(ids)})
+      ORDER BY l."productId", d."docDate" DESC, d."createdAt" DESC
+    `,
+  ])
+
+  const sold = new Map<string, number>()
+  for (const r of ledger) if (r.source === "SALE") sold.set(r.productId, (sold.get(r.productId) ?? 0) - Number(r.net))
+  const lastById = new Map(lastReceipts.map((r) => [r.productId, r]))
+
+  const rows = low.map<ReorderRow>((p) => {
+    const avgDailySold = round2(Math.max(sold.get(p.id) ?? 0, 0) / REORDER_LOOKBACK_DAYS)
+    const suggestedQty = suggestReorderQty({ quantity: p.quantity, reorderPoint: p.reorderPoint, avgDailySold })
+    const last = lastById.get(p.id)
+    const lastUnitCost = last?.unitCost ? toNumber(last.unitCost) : null
+    return {
+      productId: p.id,
+      sku: p.sku,
+      name: p.name,
+      unit: p.unit,
+      categoryName: p.categoryName,
+      quantity: p.quantity,
+      reorderPoint: p.reorderPoint,
+      avgDailySold,
+      daysLeft: daysOfStockLeft(p.quantity, avgDailySold),
+      suggestedQty,
+      lastSupplier: last?.supplierName ?? null,
+      lastUnitCost,
+      estimatedCost: lastUnitCost === null ? null : round2(lastUnitCost * suggestedQty),
+    }
+  })
+  // หมดแล้วก่อน → อยู่ได้น้อยวันก่อน → ต่ำกว่าจุดสั่งซื้อมากก่อน
+  rows.sort(
+    (a, b) =>
+      Number(b.quantity <= 0) - Number(a.quantity <= 0) ||
+      (a.daysLeft ?? Number.MAX_SAFE_INTEGER) - (b.daysLeft ?? Number.MAX_SAFE_INTEGER) ||
+      a.quantity - a.reorderPoint - (b.quantity - b.reorderPoint) ||
+      a.name.localeCompare(b.name, "th"),
+  )
+  return { rows, lookbackDays: REORDER_LOOKBACK_DAYS }
 }

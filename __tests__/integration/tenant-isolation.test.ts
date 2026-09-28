@@ -511,6 +511,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getStockDocument", (q, a, b) => q.getStockDocument(a.storeId, b.stockDocId)],
     // Phase 21b — สินค้าที่ขายได้ที่จอขายอาหาร
     ["listPosProducts", (q, a) => q.listPosProducts(a.storeId)],
+    // Phase 21c — รายงานสต็อก (raw SQL ทุกตัว ต้องกรอง storeId เอง)
+    ["getStockSalesReport", (q, a) => q.getStockSalesReport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getReorderReport", (q, a) => q.getReorderReport(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {

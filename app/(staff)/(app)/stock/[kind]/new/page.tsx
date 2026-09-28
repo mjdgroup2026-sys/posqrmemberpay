@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
-import { listProductOptions, getLowStockProducts } from "@/lib/queries"
+import { listProductOptions, getReorderReport } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { stockDocKind } from "@/lib/stock-doc-kinds"
 import { businessDayKey } from "@/lib/day"
@@ -21,15 +21,12 @@ export default async function NewStockDocPage({ params, searchParams }: PageProp
   if (!granted[kind.resource]?.includes("ADD")) redirect(`/stock/${kind.slug}`)
 
   const query = await searchParams
-  const [products, lowStock] = await Promise.all([
+  const [products, reorder] = await Promise.all([
     listProductOptions(storeId),
-    kind.type === "RECEIPT" && query.from === "reorder" ? getLowStockProducts(storeId, 200) : Promise.resolve([]),
+    kind.type === "RECEIPT" && query.from === "reorder" ? getReorderReport(storeId) : Promise.resolve(null),
   ])
-  // จำนวนแนะนำ = เติมให้กลับไปเท่า 2 เท่าของจุดสั่งซื้อ (สูตรเดียวกับรายงานเมื่อยังไม่มียอดขาย) — ผู้ใช้แก้ในฟอร์มได้
-  const prefill: StockDocPrefill[] = lowStock.map((p) => ({
-    productId: p.id,
-    quantity: Math.max(1, p.reorderPoint * 2 - p.quantity),
-  }))
+  // จำนวนแนะนำชุดเดียวกับรายงานสินค้าต้องสั่งซื้อ (lib/reorder.ts) — ผู้ใช้แก้ในฟอร์มได้ก่อนบันทึก
+  const prefill: StockDocPrefill[] = (reorder?.rows ?? []).map((row) => ({ productId: row.productId, quantity: row.suggestedQty }))
 
   return (
     <>
