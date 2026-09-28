@@ -118,3 +118,48 @@ export async function buildOrderLines(
     }
   })
 }
+
+// ───────────────────── สินค้าในสต็อกบนจอขายอาหาร (Phase 21b · F31) ─────────────────────
+
+export type ProductCartInput = { productId: string; quantity: number }
+
+export type ProductLine = {
+  productId: string
+  name: string
+  sku: string
+  unit: string
+  quantity: number
+  /// ราคาขาย ณ ตอนสั่ง — snapshot ลง MobileOrderItem/SaleItem เหมือนเมนู
+  unitPrice: number
+}
+
+/// แปลงสินค้าในตะกร้าเป็นบรรทัดพร้อมราคา — **ขายได้เฉพาะสินค้าในหมวดที่เปิด "ขายที่หน้าขายอาหาร"**
+/// ตรวจที่นี่ทุกครั้งไม่เชื่อ UI (ปิดหมวดระหว่างที่จอขายยังเปิดค้าง = ขายไม่ได้ทันที) · tx มาจาก forStore
+/// สินค้าร้านอื่นจึงหาไม่เจอ (กติกาข้อ 5) · สินค้าซ้ำในตะกร้ารวมเป็นบรรทัดเดียว · **ยังไม่ตัดสต็อก** ผู้เรียกตัดเองผ่าน takeStock
+export async function buildProductLines(tx: StoreTx, items: ProductCartInput[]): Promise<ProductLine[]> {
+  if (items.length === 0) return []
+  const merged = new Map<string, number>()
+  for (const item of items) merged.set(item.productId, (merged.get(item.productId) ?? 0) + item.quantity)
+
+  const products = await tx.product.findMany({
+    where: { id: { in: [...merged.keys()] } },
+    select: { id: true, name: true, sku: true, unit: true, price: true, category: { select: { sellableAtPos: true } } },
+  })
+  const byId = new Map(products.map((p) => [p.id, p]))
+
+  return [...merged.entries()].map(([productId, quantity]) => {
+    const product = byId.get(productId)
+    if (!product) throw new OrderLineError("มีสินค้าบางรายการไม่พบในร้านนี้ กรุณาตรวจตะกร้าอีกครั้ง")
+    if (!product.category.sellableAtPos) {
+      throw new OrderLineError(`${product.name} อยู่ในหมวดที่ไม่ได้เปิดขายที่หน้าขายอาหาร`)
+    }
+    return {
+      productId,
+      name: product.name,
+      sku: product.sku,
+      unit: product.unit,
+      quantity,
+      unitPrice: toNumber(product.price),
+    }
+  })
+}

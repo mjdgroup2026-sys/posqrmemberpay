@@ -10,7 +10,7 @@ import type { ActionResult } from "@/lib/types"
 function revalidateCategoryPages() {
   revalidatePath("/categories")
   revalidatePath("/products")
-  revalidatePath("/pos")
+  revalidatePath("/mobile-order/pos")
 }
 
 export async function createCategory(formData: FormData): Promise<ActionResult> {
@@ -123,4 +123,23 @@ export async function deleteCategory(formData: FormData): Promise<ActionResult> 
 
   revalidateCategoryPages()
   return { ok: true, message: "ลบหมวดหมู่เรียบร้อยแล้ว" }
+}
+
+/// เปิด/ปิด "ขายที่หน้าขายอาหาร" ของหมวด (Phase 21b · F31) — สินค้าในหมวดที่เปิดโผล่ในแท็บ "สินค้า" ของจอขาย
+/// และขายได้แบบตัดสต็อกจริง · ด่านจริงอยู่ที่ตอนขาย (`lib/order-lines.ts` เช็คหมวดของสินค้าซ้ำทุกครั้ง)
+export async function setCategorySellable(formData: FormData): Promise<ActionResult> {
+  const guard = await guardAction("CATEGORIES", "EDIT")
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const db = forStore(guard.user.storeId)
+
+  const identity = idSchema.safeParse({ id: formData.get("id") })
+  if (!identity.success) return { ok: false, error: firstIssueMessage(identity.error) }
+  const sellable = formData.get("sellable") === "true"
+
+  // updateMany + forStore — id ของหมวดร้านอื่นได้ count 0 แทนการแก้ข้ามร้าน
+  const updated = await db.category.updateMany({ where: { id: identity.data.id }, data: { sellableAtPos: sellable } })
+  if (updated.count === 0) return { ok: false, error: "ไม่พบหมวดหมู่ที่ต้องการแก้ไข" }
+
+  revalidateCategoryPages()
+  return { ok: true, message: sellable ? "เปิดขายหมวดนี้ที่หน้าขายอาหารแล้ว" : "ปิดขายหมวดนี้ที่หน้าขายอาหารแล้ว" }
 }

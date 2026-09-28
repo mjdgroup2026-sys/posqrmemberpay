@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { buildStorePromptPayQr, createStaffTableOrder, createTakeawaySale, type StorePromptPayQr } from "@/app/actions/staff-order"
 import { formatBaht } from "@/lib/format"
-import type { MenuItemCard, PosTableOption, TherapistOption } from "@/lib/queries"
+import type { MenuItemCard, PosProductCard, PosTableOption, TherapistOption } from "@/lib/queries"
 import {
   FULL_ACCESS,
   PAYMENT_METHOD_LABEL,
@@ -15,7 +15,7 @@ import {
   type ReceiptData,
 } from "@/lib/types"
 import { Receipt } from "@/components/receipt"
-import { IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTherapist, IconTrash, IconTable, IconWallet } from "@/components/icons"
+import { IconBoxes, IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTherapist, IconTrash, IconTable, IconWallet } from "@/components/icons"
 import { SegmentTabs } from "@/components/segment-tabs"
 import { billLabel } from "@/components/bill-switcher"
 import {
@@ -31,11 +31,16 @@ import {
 ///
 /// ปิดบิลยังอยู่ที่หน้าเดิมของโต๊ะ (สั่งก่อน–ปิดบิลทีหลัง ตามที่ตกลงไว้ใน Phase 17)
 /// ราคาที่เห็นบนจอเป็นค่าประมาณให้พนักงานบอกลูกค้าได้ — ราคาจริงถูกคิดใหม่ฝั่ง server เสมอ
+/// Phase 21b — แท็บ "สินค้า" ขายสินค้าในสต็อก (เฉพาะหมวดที่เปิดขาย) ตัดสต็อกจริงตอนส่ง/รับเงิน · ไม่เข้าครัว
 
 type CartLine = {
   /// คีย์ของบรรทัด (เมนูเดียวกันแต่ตัวเลือกต่างกัน = คนละบรรทัด)
   key: string
+  /// บรรทัดเมนู = menuItemId · บรรทัดสินค้าในสต็อก = productId (Phase 21b) — มีอย่างใดอย่างหนึ่ง
   menuItemId: string
+  productId?: string
+  /// ยอดคงเหลือของสินค้า ณ ตอนโหลดจอ — กันกดเพิ่มเกินบนจอ (ด่านจริงคือ takeStock ฝั่ง server)
+  stock?: number
   name: string
   unitPrice: number
   quantity: number
@@ -53,6 +58,7 @@ function round2(value: number): number {
 
 export function MenuPos({
   menu,
+  products = [],
   tables,
   allowed = FULL_ACCESS,
   initialTableId,
@@ -63,6 +69,8 @@ export function MenuPos({
   initialSessionId,
 }: {
   menu: { featured: MenuItemCard[]; all: MenuItemCard[] }
+  /// สินค้าในสต็อกที่ขายได้ (Phase 21b) — ว่าง = ร้านยังไม่เปิดหมวดใดให้ขายที่หน้าขายอาหาร ไม่มีแท็บสินค้า
+  products?: PosProductCard[]
   tables: PosTableOption[]
   /// โต๊ะที่ถูกเลือกไว้ล่วงหน้า — มาจากปุ่ม "สั่งเพิ่ม" บนหน้าโต๊ะ (F13)
   initialTableId?: string
@@ -104,7 +112,15 @@ export function MenuPos({
 
   // ชิปกรองตามประเภทครัว (Phase 19) — "" = ทุกครัว · ช่วยพนักงานหาเมนูเร็วขึ้นบนจอเล็ก
   const [stationFilter, setStationFilter] = useState("")
-  const [kindTab, setKindTab] = useState<"FOOD" | "SERVICE">("FOOD")
+  const [kindTab, setKindTab] = useState<"FOOD" | "SERVICE" | "PRODUCT">("FOOD")
+  const hasProducts = products.length > 0
+  const showTabs = spaEnabled || hasProducts
+  const visibleProducts = useMemo(() => {
+    const keyword = search.trim().toLowerCase()
+    return products.filter(
+      (p) => !keyword || p.name.toLowerCase().includes(keyword) || p.sku.toLowerCase().includes(keyword),
+    )
+  }, [products, search])
   const ofKind = (item: MenuItemCard) => !spaEnabled || item.itemType === kindTab
   const stationChips = useMemo(() => {
     const seen = new Map<string, string>()
@@ -139,6 +155,64 @@ export function MenuPos({
   }
 
   const total = round2(cart.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0))
+  const menuLines = cart.filter((line) => !line.productId)
+  const productLines = cart.filter((line) => line.productId)
+  const onlyProducts = cart.length > 0 && menuLines.length === 0
+
+  /// สินค้าในสต็อก (Phase 21b) — กดครั้งละ 1 ชิ้น · เกินยอดคงเหลือบนจอไม่ได้
+  function addProduct(product: PosProductCard) {
+    const key = `product|${product.id}`
+    const inCart = cart.find((line) => line.key === key)?.quantity ?? 0
+    if (inCart + 1 > product.quantity) {
+      toast.error(`${product.name} เหลือ ${product.quantity} ${product.unit} — ใส่ตะกร้าเพิ่มไม่ได้`)
+      return
+    }
+    setCart((prev) =>
+      inCart > 0
+        ? prev.map((line) => (line.key === key ? { ...line, quantity: line.quantity + 1 } : line))
+        : [
+            ...prev,
+            {
+              key,
+              menuItemId: "",
+              productId: product.id,
+              stock: product.quantity,
+              name: product.name,
+              unitPrice: product.price,
+              quantity: 1,
+              optionIds: [],
+              optionNames: [],
+            },
+          ],
+    )
+  }
+
+  /// สแกนบาร์โค้ด (SKU) แล้ว Enter บนแท็บสินค้า = ใส่ตะกร้าทันทีถ้าตรงตัว
+  function onSearchEnter() {
+    if (kindTab !== "PRODUCT") return
+    const term = search.trim().toLowerCase()
+    const exact = products.find((p) => p.sku.toLowerCase() === term) ?? (visibleProducts.length === 1 ? visibleProducts[0] : null)
+    if (exact) {
+      addProduct(exact)
+      setSearch("")
+    }
+  }
+
+  function cartPayload(fd: FormData) {
+    fd.set(
+      "items",
+      JSON.stringify(
+        menuLines.map((line) => ({
+          menuItemId: line.menuItemId,
+          quantity: line.quantity,
+          optionIds: line.optionIds,
+          note: line.note,
+          therapistId: line.therapistId,
+        })),
+      ),
+    )
+    fd.set("products", JSON.stringify(productLines.map((line) => ({ productId: line.productId, quantity: line.quantity }))))
+  }
 
   function addLine(
     item: MenuItemCard,
@@ -176,6 +250,11 @@ export function MenuPos({
       setCart((prev) => prev.filter((line) => line.key !== key))
       return
     }
+    const line = cart.find((l) => l.key === key)
+    if (line?.stock !== undefined && quantity > line.stock) {
+      toast.error(`${line.name} เหลือ ${line.stock} — ใส่ตะกร้าเพิ่มไม่ได้`)
+      return
+    }
     setCart((prev) => prev.map((line) => (line.key === key ? { ...line, quantity } : line)))
   }
 
@@ -206,18 +285,7 @@ export function MenuPos({
         fd.set("newCustomer", "true")
         fd.set("billLabel", billName.trim())
       }
-      fd.set(
-        "items",
-        JSON.stringify(
-          cart.map((line) => ({
-            menuItemId: line.menuItemId,
-            quantity: line.quantity,
-            optionIds: line.optionIds,
-            note: line.note,
-            therapistId: line.therapistId,
-          })),
-        ),
-      )
+      cartPayload(fd)
 
       const result = await createStaffTableOrder(fd)
       if (!result.ok) {
@@ -258,18 +326,7 @@ export function MenuPos({
     setPending(true)
     try {
       const fd = new FormData()
-      fd.set(
-        "items",
-        JSON.stringify(
-          cart.map((line) => ({
-            menuItemId: line.menuItemId,
-            quantity: line.quantity,
-            optionIds: line.optionIds,
-            note: line.note,
-            therapistId: line.therapistId,
-          })),
-        ),
-      )
+      cartPayload(fd)
       fd.set("paymentMethod", paymentMethod)
       fd.set("amountReceived", paymentMethod === "CASH" ? String(received) : String(total))
       fd.set("customerLabel", customerLabel.trim())
@@ -340,7 +397,7 @@ export function MenuPos({
           ) : null}
         </div>
 
-        {spaEnabled ? (
+        {showTabs ? (
           <div style={{ marginTop: 12 }}>
             <SegmentTabs
               label="ชนิดรายการ"
@@ -350,8 +407,11 @@ export function MenuPos({
                 setStationFilter("")
               }}
               tabs={[
-                { key: "FOOD", label: "อาหาร", Icon: IconMenu, count: menu.all.filter((i) => i.itemType === "FOOD").length },
-                { key: "SERVICE", label: "นวดสปา", Icon: IconTherapist, count: menu.all.filter((i) => i.itemType === "SERVICE").length },
+                { key: "FOOD" as const, label: "อาหาร", Icon: IconMenu, count: menu.all.filter((i) => i.itemType === "FOOD").length },
+                ...(spaEnabled
+                  ? [{ key: "SERVICE" as const, label: "นวดสปา", Icon: IconTherapist, count: menu.all.filter((i) => i.itemType === "SERVICE").length }]
+                  : []),
+                ...(hasProducts ? [{ key: "PRODUCT" as const, label: "สินค้า", Icon: IconBoxes, count: products.length }] : []),
               ]}
             />
           </div>
@@ -362,14 +422,38 @@ export function MenuPos({
             <IconSearch size={18} aria-hidden />
             <input
               className="input"
-              placeholder={spaEnabled && kindTab === "SERVICE" ? "ค้นหาโปรแกรมนวด…" : "ค้นหาเมนู…"}
+              placeholder={
+                kindTab === "PRODUCT" ? "ค้นหาสินค้า / สแกนบาร์โค้ด (SKU) แล้วกด Enter…" : spaEnabled && kindTab === "SERVICE" ? "ค้นหาโปรแกรมนวด…" : "ค้นหาเมนู…"
+              }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  onSearchEnter()
+                }
+              }}
             />
           </div>
         </div>
 
-        {stationChips.length > 0 ? (
+        {kindTab === "PRODUCT" ? (
+          <>
+            <h2 className="t-h3" style={{ marginTop: 16 }}>
+              สินค้าในสต็อก
+            </h2>
+            <p className="t-caption">ตัดสต็อกทันทีที่ส่งเข้าโต๊ะ/รับเงิน · ไม่เข้าครัว · แสดงเฉพาะหมวดที่เปิด “ขายที่หน้าขายอาหาร”</p>
+            {visibleProducts.length === 0 ? (
+              <p className="t-body" style={{ marginTop: 8 }}>
+                ไม่พบสินค้าที่ค้นหา
+              </p>
+            ) : (
+              <ProductGrid products={visibleProducts} cart={cart} onPick={addProduct} disabled={!canSell} />
+            )}
+          </>
+        ) : null}
+
+        {kindTab !== "PRODUCT" && stationChips.length > 0 ? (
           <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 10 }} aria-label="กรองตามประเภทครัว">
             <button
               type="button"
@@ -391,7 +475,7 @@ export function MenuPos({
           </div>
         ) : null}
 
-        {featured.length > 0 && search.trim() === "" && stationFilter === "" ? (
+        {kindTab !== "PRODUCT" && featured.length > 0 && search.trim() === "" && stationFilter === "" ? (
           <>
             <h2 className="t-h3" style={{ marginTop: 16 }}>
               เมนูแนะนำ
@@ -400,16 +484,20 @@ export function MenuPos({
           </>
         ) : null}
 
-        <h2 className="t-h3" style={{ marginTop: 16 }}>
-          {spaEnabled && kindTab === "SERVICE" ? "โปรแกรมนวดทั้งหมด" : "เมนูทั้งหมด"}
-        </h2>
-        {visibleMenu.length === 0 ? (
-          <p className="t-body" style={{ marginTop: 8 }}>
-            ไม่พบเมนูที่ค้นหา
-          </p>
-        ) : (
-          <MenuGrid items={visibleMenu} onPick={pickItem} disabled={!canSell} />
-        )}
+        {kindTab !== "PRODUCT" ? (
+          <>
+            <h2 className="t-h3" style={{ marginTop: 16 }}>
+              {spaEnabled && kindTab === "SERVICE" ? "โปรแกรมนวดทั้งหมด" : "เมนูทั้งหมด"}
+            </h2>
+            {visibleMenu.length === 0 ? (
+              <p className="t-body" style={{ marginTop: 8 }}>
+                ไม่พบเมนูที่ค้นหา
+              </p>
+            ) : (
+              <MenuGrid items={visibleMenu} onPick={pickItem} disabled={!canSell} />
+            )}
+          </>
+        ) : null}
       </section>
 
       <section className="card-ui card-pad">
@@ -539,6 +627,12 @@ export function MenuPos({
               <li key={line.key} className="row" style={{ justifyContent: "space-between", gap: 8 }}>
                 <div style={{ flex: 1 }}>
                   <span className="t-body">{line.name}</span>
+                  {line.productId ? (
+                    <>
+                      <br />
+                      <span className="t-caption">สินค้าในสต็อก · ตัดสต็อกเมื่อส่ง</span>
+                    </>
+                  ) : null}
                   {line.therapistLabel ? (
                     <>
                       <br />
@@ -612,7 +706,7 @@ export function MenuPos({
             ) : (
               <IconPlus size={18} aria-hidden />
             )}
-            ส่งเข้าครัว
+            {onlyProducts ? "เพิ่มสินค้าเข้าโต๊ะ" : "ส่งเข้าครัว"}
           </button>
         ) : (
           <button
@@ -628,7 +722,7 @@ export function MenuPos({
               setPayOpen(true)
             }}
           >
-            <IconWallet size={18} aria-hidden /> รับเงินและส่งเข้าครัว
+            <IconWallet size={18} aria-hidden /> {onlyProducts ? "รับเงิน" : "รับเงินและส่งเข้าครัว"}
           </button>
         )}
 
@@ -652,9 +746,10 @@ export function MenuPos({
       <Dialog open={payOpen} onOpenChange={(open) => (pending ? null : setPayOpen(open))}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>รับเงิน — อาหารกลับบ้าน</DialogTitle>
+            <DialogTitle>{onlyProducts ? "รับเงิน — ขายสินค้า" : "รับเงิน — อาหารกลับบ้าน"}</DialogTitle>
             <DialogDescription>
-              ยอดที่ต้องชำระ ฿{formatBaht(total)} · ออกบิลและส่งเข้าครัวพร้อมกันในขั้นตอนเดียว
+              ยอดที่ต้องชำระ ฿{formatBaht(total)} ·{" "}
+              {onlyProducts ? "ออกบิลและตัดสต็อกในขั้นตอนเดียว" : "ออกบิลและส่งเข้าครัวพร้อมกันในขั้นตอนเดียว"}
             </DialogDescription>
           </DialogHeader>
 
@@ -959,5 +1054,51 @@ function CustomizeDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/// การ์ดสินค้าในสต็อก (Phase 21b) — ไม่มีรูป/ตัวเลือกเสริม กดครั้งละ 1 ชิ้น · หมด/ครบยอดในตะกร้าแล้วกดไม่ได้
+function ProductGrid({
+  products,
+  cart,
+  onPick,
+  disabled,
+}: {
+  products: PosProductCard[]
+  cart: CartLine[]
+  onPick: (product: PosProductCard) => void
+  disabled: boolean
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10, marginTop: 10 }}>
+      {products.map((product) => {
+        const inCart = cart.find((line) => line.productId === product.id)?.quantity ?? 0
+        const left = product.quantity - inCart
+        const soldOut = product.quantity <= 0
+        return (
+          <button
+            key={product.id}
+            type="button"
+            className="card-ui"
+            disabled={disabled || left <= 0}
+            onClick={() => onPick(product)}
+            style={{ padding: 12, textAlign: "left", display: "flex", flexDirection: "column", gap: 4, opacity: left <= 0 ? 0.55 : 1 }}
+          >
+            <span className="t-caption">{product.categoryName}</span>
+            <span style={{ fontWeight: 600 }}>{product.name}</span>
+            <span className="t-caption num">{product.sku}</span>
+            <span className="row" style={{ justifyContent: "space-between", marginTop: 4 }}>
+              <span className="num" style={{ fontWeight: 600 }}>
+                ฿{formatBaht(product.price)}
+              </span>
+              <span className={`chip ${soldOut ? "chip-danger" : left <= 3 ? "chip-warning" : "chip-neutral"} num`}>
+                <span className="dot" />
+                {soldOut ? "หมด" : `เหลือ ${left} ${product.unit}`}
+              </span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
   )
 }

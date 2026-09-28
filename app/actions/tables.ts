@@ -22,6 +22,7 @@ import {
   zodToFieldErrors,
 } from "@/lib/validation"
 import type { ActionResult, FieldErrors } from "@/lib/types"
+import { putStock } from "@/lib/stock-moves"
 
 /// ประเภทห้อง (Phase 20) — ใส่ได้เฉพาะห้องนวด (ROOM) และต้องเป็นประเภทบริการของร้านนี้ (FK จากฟอร์ม กติกาข้อ 5)
 /// คืน stationId = null เมื่อเป็นโต๊ะอาหาร/ไม่ระบุ · คืน ok:false เมื่อ id แปลกปลอม (forStore() หาไม่เจอ)
@@ -320,6 +321,25 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
           cancelReason: reason,
         },
       })
+
+      // สินค้าในสต็อก (Phase 21b) ถูกตัดตั้งแต่ส่งรายการ (SERVED) — ยกเลิกโต๊ะ = ไม่มีบิล จึงคืนของทุกบรรทัด
+      // conditional update ทีละบรรทัด (status: SERVED) กันคืนซ้ำกับการกดยกเลิกรายการเดียวกันพร้อมกัน
+      const productLines = await tx.mobileOrderItem.findMany({
+        where: { order: { tableSessionId: sessionId }, productId: { not: null }, status: "SERVED" },
+        select: { id: true, productId: true, quantity: true },
+      })
+      for (const line of productLines) {
+        const released = await tx.mobileOrderItem.updateMany({
+          where: { id: line.id, status: "SERVED" },
+          data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: user.id, cancelReason: reason },
+        })
+        if (released.count === 1 && line.productId) {
+          await putStock(tx, storeId, line.productId, line.quantity, {
+            orderItemId: line.id,
+            note: `ยกเลิกโต๊ะ ${session.table.code} — ${reason}`,
+          })
+        }
+      }
 
       // คืนโต๊ะหลักและโต๊ะที่รวมอยู่เป็นว่าง — ห้องสปาที่ยังมีบิลของลูกค้าคนอื่นเปิดอยู่ไม่ถูกคืน (2026-09-23)
       await releaseTableIfIdle(tx, storeId, session.tableId)

@@ -237,6 +237,27 @@ export const submitOrderSchema = z.object({
     .max(100, "รายการในตะกร้ามากเกินไป"),
 })
 
+/// สินค้าในสต็อกบนจอขายอาหาร (Phase 21b · F31) — แยกจาก cartLineSchema โดยตั้งใจ ตะกร้าฝั่งลูกค้าจึงส่งสินค้าไม่ได้เลย
+/// ราคา/หมวดที่เปิดขาย/ยอดคงเหลือ ตรวจใหม่ที่ server ทุกครั้ง (`buildProductLines` + `takeStock`)
+export const productCartLineSchema = z.object({
+  productId: requiredId("กรุณาเลือกสินค้า"),
+  quantity: positiveInt("จำนวน"),
+})
+
+const productCart = z
+  .array(productCartLineSchema, { error: "รายการสินค้าไม่ถูกต้อง" })
+  .max(100, "รายการสินค้าในตะกร้ามากเกินไป")
+  .default([])
+
+/// ตะกร้าจอขายพนักงานต้องมีอย่างน้อย 1 รายการ รวมเมนูกับสินค้า (ขายสินค้าอย่างเดียวได้)
+function requireSomething(
+  value: { items: unknown[]; products: unknown[] },
+  ctx: z.RefinementCtx,
+  message: string,
+) {
+  if (value.items.length + value.products.length === 0) ctx.addIssue({ code: "custom", path: ["items"], message })
+}
+
 /// พนักงานกดสั่งแทนลูกค้าจากจอขาย (Phase 17b) — ตะกร้าชุดเดียวกับฝั่งลูกค้า ต่างกันแค่ตัวระบุโต๊ะ
 export const staffTableOrderSchema = z.object({
   tableId: requiredId("กรุณาเลือกโต๊ะ"),
@@ -244,18 +265,14 @@ export const staffTableOrderSchema = z.object({
   sessionId: z.string().trim().max(64).optional().transform((value) => value || undefined),
   newCustomer: z.coerce.boolean().default(false),
   billLabel: z.string().trim().max(60, "ชื่อลูกค้ายาวเกินไป (ไม่เกิน 60 ตัวอักษร)").optional().transform((value) => value || undefined),
-  items: z
-    .array(cartLineSchema, { error: "ตะกร้าไม่ถูกต้อง" })
-    .min(1, "กรุณาเลือกเมนูก่อนส่งออร์เดอร์")
-    .max(100, "รายการในตะกร้ามากเกินไป"),
-})
+  items: z.array(cartLineSchema, { error: "ตะกร้าไม่ถูกต้อง" }).max(100, "รายการในตะกร้ามากเกินไป"),
+  products: productCart,
+}).superRefine((value, ctx) => requireSomething(value, ctx, "กรุณาเลือกเมนูก่อนส่งออร์เดอร์"))
 
 /// ขายอาหารกลับบ้าน (Phase 17c) — ไม่มีโต๊ะ รับเงินตอนสั่ง จึงต้องมีวิธีจ่ายและเงินที่รับเหมือนหน้า POS
 export const takeawaySaleSchema = z.object({
-  items: z
-    .array(cartLineSchema, { error: "ตะกร้าไม่ถูกต้อง" })
-    .min(1, "กรุณาเลือกเมนูก่อนรับเงิน")
-    .max(100, "รายการในตะกร้ามากเกินไป"),
+  items: z.array(cartLineSchema, { error: "ตะกร้าไม่ถูกต้อง" }).max(100, "รายการในตะกร้ามากเกินไป"),
+  products: productCart,
   paymentMethod: z.enum(["CASH", "TRANSFER", "QR"], { error: "กรุณาเลือกวิธีชำระเงิน" }),
   amountReceived: z.coerce.number({ error: "จำนวนเงินที่รับต้องเป็นตัวเลข" }).min(0, "จำนวนเงินที่รับต้องไม่ติดลบ"),
   customerLabel: z
@@ -264,7 +281,7 @@ export const takeawaySaleSchema = z.object({
     .max(40, "ชื่อลูกค้ายาวเกินไป")
     .nullish()
     .transform((v) => (v === "" || v === null ? undefined : v)),
-})
+}).superRefine((value, ctx) => requireSomething(value, ctx, "กรุณาเลือกเมนูก่อนรับเงิน"))
 
 export const callStaffSchema = z.object({
   qrToken: requiredId("ไม่พบ QR Code ของโต๊ะนี้"),

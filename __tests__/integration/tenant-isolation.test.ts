@@ -144,7 +144,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
 
     const staff = await ensureTestUser(`staff-${suffix}`, `พนักงานร้าน ${tag}`, { storeId, role: "STAFF" })
 
-    const category = await db.category.create({ data: { storeId, name: `หมวดร้าน ${tag}` } })
+    // เปิดขายที่หน้าขายอาหาร (Phase 21b) — ให้ listPosProducts มีของทั้งสองร้าน จะได้พิสูจน์ว่ากรองร้านจริง
+    const category = await db.category.create({ data: { storeId, name: `หมวดร้าน ${tag}`, sellableAtPos: true } })
     const product = await db.product.create({
       data: {
         storeId,
@@ -508,6 +509,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     // Phase 21 — เอกสารคลัง (id ของร้าน B ต้องได้ null)
     ["listStockDocuments", (q, a) => q.listStockDocuments(a.storeId, "RECEIPT", { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getStockDocument", (q, a, b) => q.getStockDocument(a.storeId, b.stockDocId)],
+    // Phase 21b — สินค้าที่ขายได้ที่จอขายอาหาร
+    ["listPosProducts", (q, a) => q.listPosProducts(a.storeId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -606,8 +609,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "getScbTestStatus",
     // Phase 17a: อัปโหลดรูปเข้าร้านที่ทำงานอยู่เสมอ (ไม่รับ id ของร้านอื่น)
     "uploadStoreAsset",
-    // Phase 17c: ขายกลับบ้านไม่มีโต๊ะ — id เดียวที่รับคือ menuItemId ซึ่งถูกกรองด้วย forStore() อยู่แล้ว
-    // (เมนูของร้านอื่น → buildOrderLines หาไม่เจอ → ปฏิเสธ · เทสอยู่ที่ takeaway-sale.test.ts)
+    // Phase 17c: ขายกลับบ้านไม่มีโต๊ะ — id ที่รับคือ menuItemId/productId (21b) ซึ่งถูกกรองด้วย forStore() อยู่แล้ว
+    // (ของร้านอื่น → buildOrderLines/buildProductLines หาไม่เจอ → ปฏิเสธ · เทสด้านล่าง + takeaway-sale.test.ts)
     "createTakeawaySale",
     // QR พร้อมเพย์ของร้านที่ทำงานอยู่ — รับแค่ยอดเงิน ไม่รับ id (เทสอยู่ที่ takeaway-sale.test.ts)
     "buildStorePromptPayQr",
@@ -659,6 +662,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       "createStockAdjustment",
       (b) => makeFormData({ docDate: businessDayKey(), reason: "นับ", lines: JSON.stringify([{ productId: b.productId, countedQty: 0 }]) }),
       async (b) => expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10),
+    ],
+    [
+      "setCategorySellable",
+      (b) => makeFormData({ id: b.categoryId, sellable: "false" }),
+      async (b) => expect((await testPrisma().category.findUniqueOrThrow({ where: { id: b.categoryId } })).sellableAtPos).toBe(true),
     ],
     [
       "voidStockDoc",

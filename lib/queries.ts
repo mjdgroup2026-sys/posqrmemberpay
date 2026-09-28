@@ -122,6 +122,7 @@ export async function listCategoriesWithCount(storeId: string) {
     select: {
       id: true,
       name: true,
+      sellableAtPos: true,
       createdAt: true,
       _count: { select: { products: true } },
     },
@@ -129,6 +130,7 @@ export async function listCategoriesWithCount(storeId: string) {
   return rows.map((c) => ({
     id: c.id,
     name: c.name,
+    sellableAtPos: c.sellableAtPos,
     createdAt: c.createdAt,
     productCount: c._count.products,
   }))
@@ -3479,4 +3481,36 @@ export async function getStockDocument(storeId: string, id: string): Promise<Sto
       countedQty: line.countedQty,
     })),
   }
+}
+
+// ───────────────────── สินค้าในสต็อกบนจอขายอาหาร (Phase 21b · F31) ─────────────────────
+
+export type PosProductCard = {
+  id: string
+  sku: string
+  name: string
+  unit: string
+  price: number
+  quantity: number
+  categoryName: string
+}
+
+/// สินค้าที่ขายได้ที่จอขายอาหาร = อยู่ในหมวดที่เปิด "ขายที่หน้าขายอาหาร" · รวมตัวที่หมดสต็อก (จอขายโชว์เป็นปุ่มปิด)
+/// ด่านจริงอยู่ที่ `buildProductLines()` ตอนขาย — รายการนี้เป็นแค่ตัวเลือกบนจอ
+export async function listPosProducts(storeId: string): Promise<PosProductCard[]> {
+  const db = forStore(storeId)
+  const rows = await db.product.findMany({
+    where: { category: { sellableAtPos: true } },
+    orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
+    select: { id: true, sku: true, name: true, unit: true, price: true, quantity: true, category: { select: { name: true } } },
+  })
+  return rows.map((p) => ({
+    id: p.id,
+    sku: p.sku,
+    name: p.name,
+    unit: p.unit,
+    price: toNumber(p.price),
+    quantity: p.quantity,
+    categoryName: p.category.name,
+  }))
 }
