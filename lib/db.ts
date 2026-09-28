@@ -20,6 +20,7 @@ import { prisma } from "@/lib/prisma"
 export const STORE_SCOPED_MODELS: ReadonlySet<string> = new Set([
   "Product",
   "StockTransaction",
+  "StockDocument",
   "Category",
   "Sale",
   "CashierClosing",

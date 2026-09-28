@@ -1035,7 +1035,8 @@ export type OrderItemRow = {
   stationId: string | null
   stationName: string | null
   /// Phase 20 — FOOD/SERVICE · นาที · พนักงานนวด (SERVICE เท่านั้น; null = ยังไม่มอบหมาย)
-  itemType: "FOOD" | "SERVICE"
+  /// Phase 21b — PRODUCT = สินค้าในสต็อกที่พนักงานขายจากจอขายอาหาร (ตัดสต็อกแล้ว ไม่เข้าครัว เป็น SERVED ตั้งแต่ส่ง)
+  itemType: "FOOD" | "SERVICE" | "PRODUCT"
   durationMinutes: number | null
   therapistId: string | null
   therapistLabel: string | null
@@ -1121,7 +1122,7 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
           include: {
             items: {
               orderBy: { createdAt: "asc" },
-              include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
+              include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, product: { select: { name: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
             },
           },
         },
@@ -1146,7 +1147,7 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
     printedAt: order.printedAt,
     items: order.items.map<OrderItemRow>((item) => ({
       id: item.id,
-      menuItemName: item.menuItem.name,
+      menuItemName: item.menuItem?.name ?? item.product?.name ?? "",
       quantity: item.quantity,
       unitPrice: toNumber(item.unitPrice),
       subtotal: toNumber(item.unitPrice) * item.quantity,
@@ -1154,10 +1155,10 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
-      itemType: item.menuItem.itemType,
-      durationMinutes: item.menuItem.durationMinutes,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
+      itemType: item.menuItem?.itemType ?? "PRODUCT",
+      durationMinutes: item.menuItem?.durationMinutes ?? null,
       therapistId: item.therapist?.id ?? null,
       therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
@@ -1214,7 +1215,7 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
       items: {
         where: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY", "CANCELLED"] }, menuItem: { itemType: "FOOD" } },
         orderBy: { createdAt: "asc" },
-        include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
+        include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, product: { select: { name: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } },
       },
     },
   })
@@ -1233,7 +1234,7 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
     printedAt: order.printedAt,
     items: order.items.map<OrderItemRow>((item) => ({
       id: item.id,
-      menuItemName: item.menuItem.name,
+      menuItemName: item.menuItem?.name ?? item.product?.name ?? "",
       quantity: item.quantity,
       unitPrice: toNumber(item.unitPrice),
       subtotal: toNumber(item.unitPrice) * item.quantity,
@@ -1241,10 +1242,10 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
-      itemType: item.menuItem.itemType,
-      durationMinutes: item.menuItem.durationMinutes,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
+      itemType: item.menuItem?.itemType ?? "PRODUCT",
+      durationMinutes: item.menuItem?.durationMinutes ?? null,
       therapistId: item.therapist?.id ?? null,
       therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
@@ -1449,7 +1450,7 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
       orders: {
         orderBy: { orderNumber: "asc" },
         include: {
-          items: { orderBy: { createdAt: "asc" }, include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } } },
+          items: { orderBy: { createdAt: "asc" }, include: { menuItem: { select: { name: true, stationId: true, station: { select: { name: true } }, itemType: true, durationMinutes: true } }, product: { select: { name: true } }, therapist: { select: { id: true, code: true, name: true, nickname: true } } } },
         },
       },
     },
@@ -1462,7 +1463,7 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
     submittedAt: order.submittedAt,
     items: order.items.map<OrderItemRow>((item) => ({
       id: item.id,
-      menuItemName: item.menuItem.name,
+      menuItemName: item.menuItem?.name ?? item.product?.name ?? "",
       quantity: item.quantity,
       unitPrice: toNumber(item.unitPrice),
       subtotal: toNumber(item.unitPrice) * item.quantity,
@@ -1470,10 +1471,10 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
       status: item.status,
       options: parseOptions(item.selectedOptionsSnapshot),
       cancelReason: item.cancelReason,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
-      itemType: item.menuItem.itemType,
-      durationMinutes: item.menuItem.durationMinutes,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
+      itemType: item.menuItem?.itemType ?? "PRODUCT",
+      durationMinutes: item.menuItem?.durationMinutes ?? null,
       therapistId: item.therapist?.id ?? null,
       therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
     })),
@@ -1595,6 +1596,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
                 unitPrice: true,
                 selectedOptionsSnapshot: true,
                 menuItem: { select: { name: true } },
+                product: { select: { name: true } },
               },
             },
           },
@@ -1618,7 +1620,8 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
   for (const item of raw) {
     const options = parseOptions(item.selectedOptionsSnapshot).map((o) => o.optionName)
     const unitPrice = toNumber(item.unitPrice)
-    const key = `${item.menuItem.name}|${unitPrice.toFixed(2)}|${options.join(",")}`
+    const itemName = item.menuItem?.name ?? item.product?.name ?? ""
+    const key = `${itemName}|${unitPrice.toFixed(2)}|${options.join(",")}`
     const existing = grouped.get(key)
     if (existing) {
       existing.quantity += item.quantity
@@ -1627,7 +1630,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
     }
     grouped.set(key, {
       id: item.id,
-      name: item.menuItem.name,
+      name: itemName,
       quantity: item.quantity,
       unitPrice,
       subtotal: round2(unitPrice * item.quantity),
@@ -1830,11 +1833,11 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
     items: order.items.map((item) => ({
       id: item.id,
       quantity: item.quantity,
-      name: item.menuItem.name,
+      name: item.menuItem?.name ?? "",
       options: parseOptions(item.selectedOptionsSnapshot).map((o) => o.optionName),
       note: item.note,
-      stationId: item.menuItem.stationId,
-      stationName: item.menuItem.station?.name ?? null,
+      stationId: item.menuItem?.stationId ?? null,
+      stationName: item.menuItem?.station?.name ?? null,
     })),
     stationOrder,
   }
@@ -2736,7 +2739,7 @@ export async function getSpaBoard(storeId: string, now: Date = new Date()) {
       label: `${t.code} ${t.nickname ?? t.name}`,
       state,
       roomCode: working?.order.session?.table.code ?? null,
-      programName: working?.menuItem.name ?? null,
+      programName: working?.menuItem?.name ?? null,
       busyUntil: working && current ? current.endAt : null,
       shiftStartMinute: shift && !shift.isOff ? shift.startMinute : null,
       shiftEndMinute: shift && !shift.isOff ? shift.endMinute : null,
@@ -2842,7 +2845,7 @@ export async function listServicesAwaitingStart(storeId: string): Promise<Servic
         tableCode: session.table.code,
         sessionId: session.id,
         customerLabel: session.customerLabel,
-        menuItemName: row.menuItem.name,
+        menuItemName: row.menuItem?.name ?? "",
         therapistId: row.therapistId,
         therapistLabel: row.therapist ? `${row.therapist.code} ${row.therapist.nickname ?? row.therapist.name}` : null,
         orderedAt: row.createdAt,
@@ -3338,4 +3341,142 @@ export async function listSalesForExport(
 export async function getTherapistById(storeId: string, therapistId: string): Promise<TherapistRow | null> {
   const rows = await listTherapists(storeId)
   return rows.find((t) => t.id === therapistId) ?? null
+}
+
+// ───────────────────── เอกสารคลัง รับ/เบิก/ปรับ (Phase 21 · F30) ─────────────────────
+
+export type StockDocListRow = {
+  id: string
+  docNumber: string
+  docDate: string
+  status: "POSTED" | "VOIDED"
+  /// ผู้ขาย (ใบรับ) · ผู้เบิก (ใบเบิก) · เหตุผล (ใบปรับ) — คอลัมน์ "คู่ค้า/ผู้เกี่ยวข้อง" ของตารางรายการ
+  party: string | null
+  referenceNo: string | null
+  lineCount: number
+  totalQuantity: number
+  totalCost: number | null
+  createdByName: string
+  createdAt: Date
+}
+
+/// รายการเอกสารของประเภทหนึ่งในช่วงวัน (ตามวันที่ของเอกสาร ไม่ใช่วันบันทึก) — ใหม่สุดก่อน
+export async function listStockDocuments(
+  storeId: string,
+  type: "RECEIPT" | "ISSUE" | "ADJUST",
+  range: { from: string; to: string },
+): Promise<StockDocListRow[]> {
+  const db = forStore(storeId)
+  const rows = await db.stockDocument.findMany({
+    where: { type, docDate: { gte: dateOnlyFromKey(range.from), lte: dateOnlyFromKey(range.to) } },
+    orderBy: [{ docDate: "desc" }, { docNumber: "desc" }],
+    take: 500,
+    select: {
+      id: true,
+      docNumber: true,
+      docDate: true,
+      status: true,
+      supplierName: true,
+      requesterName: true,
+      reason: true,
+      referenceNo: true,
+      totalCost: true,
+      createdAt: true,
+      createdBy: { select: { name: true } },
+      lines: { select: { quantity: true } },
+    },
+  })
+  return rows.map((doc) => ({
+    id: doc.id,
+    docNumber: doc.docNumber,
+    docDate: doc.docDate.toISOString().slice(0, 10),
+    status: doc.status,
+    party: type === "RECEIPT" ? doc.supplierName : type === "ISSUE" ? doc.requesterName : doc.reason,
+    referenceNo: doc.referenceNo,
+    lineCount: doc.lines.length,
+    // ใบปรับรวมส่วนต่างแบบมีเครื่องหมาย (+ เพิ่ม / − ลด) · ใบรับ/เบิกเป็นจำนวนบวกเสมอ
+    totalQuantity: doc.lines.reduce((sum, line) => sum + line.quantity, 0),
+    totalCost: doc.totalCost === null ? null : toNumber(doc.totalCost),
+    createdByName: doc.createdBy.name,
+    createdAt: doc.createdAt,
+  }))
+}
+
+export type StockDocDetail = {
+  id: string
+  type: "RECEIPT" | "ISSUE" | "ADJUST"
+  docNumber: string
+  docDate: string
+  status: "POSTED" | "VOIDED"
+  supplierName: string | null
+  referenceNo: string | null
+  requesterName: string | null
+  reason: string | null
+  note: string | null
+  totalCost: number | null
+  createdByName: string
+  createdAt: Date
+  voidedAt: Date | null
+  voidedByName: string | null
+  voidReason: string | null
+  storeName: string
+  lines: {
+    lineNo: number
+    productId: string
+    sku: string
+    name: string
+    unit: string
+    quantity: number
+    unitCost: number | null
+    lineTotal: number | null
+    systemQty: number | null
+    countedQty: number | null
+  }[]
+}
+
+export async function getStockDocument(storeId: string, id: string): Promise<StockDocDetail | null> {
+  const db = forStore(storeId)
+  const [doc, settings] = await Promise.all([
+    db.stockDocument.findUnique({
+      where: { id },
+      include: {
+        createdBy: { select: { name: true } },
+        voidedBy: { select: { name: true } },
+        lines: { orderBy: { lineNo: "asc" }, include: { product: { select: { sku: true, name: true, unit: true } } } },
+      },
+    }),
+    db.storeSettings.findUnique({ where: { storeId }, select: { storeName: true } }),
+  ])
+  if (!doc) return null
+  return {
+    id: doc.id,
+    type: doc.type,
+    docNumber: doc.docNumber,
+    docDate: doc.docDate.toISOString().slice(0, 10),
+    status: doc.status,
+    supplierName: doc.supplierName,
+    referenceNo: doc.referenceNo,
+    requesterName: doc.requesterName,
+    reason: doc.reason,
+    note: doc.note,
+    totalCost: doc.totalCost === null ? null : toNumber(doc.totalCost),
+    createdByName: doc.createdBy.name,
+    createdAt: doc.createdAt,
+    voidedAt: doc.voidedAt,
+    voidedByName: doc.voidedBy?.name ?? null,
+    voidReason: doc.voidReason,
+    storeName: settings?.storeName ?? "MJD Mobile Order",
+    lines: doc.lines.map((line) => ({
+      lineNo: line.lineNo,
+      productId: line.productId,
+      sku: line.product.sku,
+      name: line.product.name,
+      unit: line.product.unit,
+      quantity: line.quantity,
+      unitCost: line.unitCost === null ? null : toNumber(line.unitCost),
+      lineTotal: line.lineTotal === null ? null : toNumber(line.lineTotal),
+      systemQty: line.systemQty,
+      countedQty: line.countedQty,
+    })),
+  }
 }

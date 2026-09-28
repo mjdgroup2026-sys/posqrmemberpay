@@ -12,8 +12,10 @@ function revalidateProductPages() {
   revalidatePath("/pos")
   revalidatePath("/categories")
   revalidatePath("/")
-  revalidatePath("/stock-in")
-  revalidatePath("/stock-out")
+  revalidatePath("/stock/receipts/new")
+  revalidatePath("/stock/issues/new")
+  revalidatePath("/stock/adjustments/new")
+  revalidatePath("/mobile-order/pos")
 }
 
 /// สร้าง SKU ถัดไปแบบ SKU-1001, SKU-1002, … (หา max +1) — นับเฉพาะในร้าน ทุกร้านเริ่ม SKU-1001 ของตัวเอง

@@ -39,14 +39,15 @@ export default async function DashboardPage() {
           <h1 className="t-h1">สรุปสถานะคลังสินค้า</h1>
         </div>
         <div className="row">
-          <Link href="/stock-in" className="btn btn-subtle">
-            <IconArrowIn size={17} aria-hidden /> รับสินค้าเข้า
+          <Link href="/stock/receipts/new" className="btn btn-subtle">
+            <IconArrowIn size={17} aria-hidden /> ใบรับสินค้า
           </Link>
-          <Link href="/stock-out" className="btn btn-subtle">
-            <IconArrowOut size={17} aria-hidden /> เบิกจ่ายสินค้า
+          <Link href="/stock/issues/new" className="btn btn-subtle">
+            <IconArrowOut size={17} aria-hidden /> ใบเบิกสินค้า
           </Link>
-          <Link href="/pos" className="btn btn-primary">
-            <IconPos size={17} aria-hidden /> ขายหน้าร้าน
+          {/* Phase 21 — ขายหน้าร้านย้ายไปที่จอขายอาหาร */}
+          <Link href="/mobile-order/pos" className="btn btn-primary">
+            <IconPos size={17} aria-hidden /> ขายอาหาร/สินค้า
           </Link>
         </div>
       </div>
@@ -100,8 +101,8 @@ export default async function DashboardPage() {
               <IconWarning size={18} style={{ color: "var(--warning)" }} aria-hidden />
               <h2 className="t-h2">ต้องเติมสต็อก</h2>
             </div>
-            <Link href="/stock-in" className="btn btn-subtle btn-sm">
-              รับสินค้าเข้า
+            <Link href="/reports/reorder" className="btn btn-subtle btn-sm">
+              ดูรายการที่ต้องสั่งซื้อ
             </Link>
           </div>
           <ul style={{ display: "flex", flexDirection: "column" }}>

@@ -74,6 +74,8 @@ type StoreFixture = {
   bookingId: string
   roomId: string
   bookingCustomer: string
+  /// Phase 21 — ใบรับสินค้า 1 ใบ
+  stockDocId: string
 }
 
 describe.skipIf(!dbReady)("การแยกข้อมูลตามร้าน (Phase 13 — tenant isolation)", () => {
@@ -100,7 +102,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       roles: await import("@/app/actions/roles"),
       sales: await import("@/app/actions/sales"),
       settings: await import("@/app/actions/settings"),
-      stock: await import("@/app/actions/stock"),
+      "stock-docs": await import("@/app/actions/stock-docs"),
       "store-members": await import("@/app/actions/store-members"),
       tables: await import("@/app/actions/tables"),
       onboarding: await import("@/app/actions/onboarding"),
@@ -160,6 +162,17 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     })
     await db.stockTransaction.create({
       data: { storeId, productId: product.id, type: "OUT", quantity: 2, note: `เบิกร้าน ${tag}` },
+    })
+    const stockDoc = await db.stockDocument.create({
+      data: {
+        storeId,
+        type: "RECEIPT",
+        docNumber: "GR-000001",
+        docDate: new Date(`${businessDayKey()}T00:00:00.000Z`),
+        supplierName: `ผู้ขายร้าน ${tag}`,
+        createdById: ownerId,
+        lines: { create: [{ lineNo: 1, productId: product.id, quantity: 3 }] },
+      },
     })
 
     const sale = await db.sale.create({
@@ -363,6 +376,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       bookingId: booking.id,
       roomId: room.id,
       bookingCustomer: `ลูกค้าจองร้าน ${tag}`,
+      stockDocId: stockDoc.id,
     }
   }
 
@@ -399,6 +413,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       f.bookingId,
       f.roomId,
       f.bookingCustomer,
+      f.stockDocId,
       `ร้าน ${f.tag}`,
     ]
   }
@@ -490,6 +505,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["getTopItemsByKind", (q, a) => q.getTopItemsByKind(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() }, "PRODUCT")],
     ["listSalesForExport", (q, a) => q.listSalesForExport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() }, null)],
     ["getPaymentBreakdown", (q, a) => q.getPaymentBreakdown(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    // Phase 21 — เอกสารคลัง (id ของร้าน B ต้องได้ null)
+    ["listStockDocuments", (q, a) => q.listStockDocuments(a.storeId, "RECEIPT", { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
+    ["getStockDocument", (q, a, b) => q.getStockDocument(a.storeId, b.stockDocId)],
   ]
 
   describe("lib/queries.ts — อ่านใต้ร้าน A ต้องไม่เห็นอะไรของร้าน B", () => {
@@ -626,15 +644,26 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       (b) => makeFormData({ id: b.productId }),
       async (b) => expect(await testPrisma().product.count({ where: { id: b.productId } })).toBe(1),
     ],
+    // Phase 21 — เอกสารคลัง: productId ของร้าน B ในบรรทัด (FK จากฟอร์ม) ต้องถูกปฏิเสธ · ยกเลิกเอกสารของ B ต้องไม่ถึง
     [
-      "stockIn",
-      (b) => makeFormData({ productId: b.productId, quantity: 5, note: "" }),
+      "createStockReceipt",
+      (b) => makeFormData({ docDate: businessDayKey(), lines: JSON.stringify([{ productId: b.productId, quantity: 5 }]) }),
       async (b) => expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10),
     ],
     [
-      "stockOut",
-      (b) => makeFormData({ productId: b.productId, quantity: 1, note: "" }),
+      "createStockIssue",
+      (b) => makeFormData({ docDate: businessDayKey(), requesterName: "ร้าน A", lines: JSON.stringify([{ productId: b.productId, quantity: 1 }]) }),
       async (b) => expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10),
+    ],
+    [
+      "createStockAdjustment",
+      (b) => makeFormData({ docDate: businessDayKey(), reason: "นับ", lines: JSON.stringify([{ productId: b.productId, countedQty: 0 }]) }),
+      async (b) => expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10),
+    ],
+    [
+      "voidStockDoc",
+      (b) => makeFormData({ id: b.stockDocId, reason: "ร้าน A พยายามยกเลิก" }),
+      async (b) => expect((await testPrisma().stockDocument.findUniqueOrThrow({ where: { id: b.stockDocId } })).status).toBe("POSTED"),
     ],
     [
       "createSale",

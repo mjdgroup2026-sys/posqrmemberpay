@@ -116,9 +116,11 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
                 where: { status: { not: "CANCELLED" } },
                 select: {
                   menuItemId: true,
+                  productId: true,
                   quantity: true,
                   unitPrice: true,
                   menuItem: { select: { name: true, itemType: true } },
+                  product: { select: { name: true } },
                   therapistId: true,
                 },
               },
@@ -180,11 +182,18 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
           items: {
             create: lines.map((line) => ({
               menuItemId: line.menuItemId,
-              name: line.menuItem.name,
+              // บรรทัดสินค้าในสต็อก (Phase 21b) — สต็อกถูกตัดไปแล้วตอนส่งรายการ ที่นี่แค่ออกบิล
+              // (void บิลคืนสต็อกจาก SaleItem.productId ให้เองตามเดิม)
+              productId: line.productId,
+              name: line.menuItem?.name ?? line.product?.name ?? "",
               // พนักงานนวดของบรรทัดบริการ (Phase 20) — snapshot ลงบิลไว้ทำรายงานต่อคน
               therapistId: line.therapistId ?? null,
-              // ประเภทบรรทัด ณ เวลาขาย (20e) — แยกรายงานอาหาร/นวด · มีพนักงานนวดติดอยู่ถือเป็นนวดเสมอ
-              kind: line.menuItem.itemType === "SERVICE" || line.therapistId ? "SERVICE" : "FOOD",
+              // ประเภทบรรทัด ณ เวลาขาย (20e) — แยกรายงานอาหาร/นวด/สินค้า · มีพนักงานนวดติดอยู่ถือเป็นนวดเสมอ
+              kind: line.productId
+                ? "PRODUCT"
+                : line.menuItem?.itemType === "SERVICE" || line.therapistId
+                  ? "SERVICE"
+                  : "FOOD",
               quantity: line.quantity,
               unitPrice: toNumber(line.unitPrice).toFixed(2),
               subtotal: round2(toNumber(line.unitPrice) * line.quantity).toFixed(2),

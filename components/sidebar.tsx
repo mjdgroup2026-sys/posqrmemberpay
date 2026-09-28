@@ -28,6 +28,9 @@ import {
   IconTherapist,
   IconCalendar,
   IconRoom,
+  IconStockAdjust,
+  IconDocument,
+  IconReorder,
 } from "@/components/icons"
 import type { ResourceKey } from "@/lib/permissions"
 
@@ -53,7 +56,7 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
   {
     items: [
       { href: "/", label: "ภาพรวม", Icon: IconDashboard, resource: "DASHBOARD" },
-      { href: "/pos", label: "ขายหน้าร้าน (POS)", Icon: IconPos, resource: "POS" },
+      // Phase 21 (เจ้าของสั่ง 2026-09-28): ปิดเมนู POS หน้าร้าน — ขายสินค้าในสต็อกที่ "ขายอาหาร" แทน · /pos redirect ไปที่นั่น
       { href: "/pos/history", label: "ประวัติการขาย", Icon: IconReceipt, resource: "POS_HISTORY" },
       { href: "/pos/closing", label: "ปิดยอดประจำวัน", Icon: IconCalculator, resource: "POS_CLOSING" },
     ],
@@ -86,9 +89,13 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
     items: [
       { href: "/products", label: "สินค้า", Icon: IconProduct, badge: "lowStock", resource: "PRODUCTS" },
       { href: "/categories", label: "หมวดหมู่สินค้า", Icon: IconCategory, resource: "CATEGORIES" },
-      { href: "/stock-in", label: "รับสินค้าเข้า", Icon: IconStockIn, resource: "STOCK_IN" },
-      { href: "/stock-out", label: "เบิกจ่ายสินค้า", Icon: IconStockOut, resource: "STOCK_OUT" },
+      // Phase 21 — เอกสารคลัง Header/Detail แทนหน้ารับเข้า/เบิกจ่ายทีละรายการเดิม
+      { href: "/stock/receipts", label: "ใบรับสินค้า", Icon: IconStockIn, resource: "STOCK_IN" },
+      { href: "/stock/issues", label: "ใบเบิกสินค้า", Icon: IconStockOut, resource: "STOCK_OUT" },
+      { href: "/stock/adjustments", label: "ปรับยอดสต็อก", Icon: IconStockAdjust, resource: "STOCK_ADJUST" },
       { href: "/reports", label: "รายงาน", Icon: IconReports, resource: "REPORTS" },
+      { href: "/reports/stock-sales", label: "รายงานขายตัดสต็อก", Icon: IconDocument, resource: "REPORTS" },
+      { href: "/reports/reorder", label: "สินค้าต้องสั่งซื้อ", Icon: IconReorder, resource: "REPORTS" },
     ],
   },
   {
@@ -111,7 +118,7 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
 
 /// href ที่มีเส้นทางลูก (เช่น /pos กับ /pos/history) ต้องเทียบแบบตรงตัว
 /// ไม่งั้นเมนูแม่จะสว่างค้างตอนอยู่หน้าลูก
-const EXACT_MATCH = new Set(["/", "/pos", "/admin/stores", "/brand"])
+const EXACT_MATCH = new Set(["/", "/pos", "/admin/stores", "/brand", "/reports"])
 
 export function Sidebar({
   lowStockCount,

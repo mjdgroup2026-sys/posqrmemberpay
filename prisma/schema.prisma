@@ -45,10 +45,13 @@ model Product {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  store        Store              @relation(fields: [storeId], references: [id])
-  category     Category           @relation(fields: [categoryId], references: [id])
-  transactions StockTransaction[]
-  saleItems    SaleItem[]
+  store         Store               @relation(fields: [storeId], references: [id])
+  category      Category            @relation(fields: [categoryId], references: [id])
+  transactions  StockTransaction[]
+  saleItems     SaleItem[]
+  /// Phase 21 — บรรทัดเอกสารรับ/เบิก/ปรับ และบรรทัดสินค้าที่ขายผ่านจอขายอาหาร (RESTRICT — ห้ามลบสินค้าที่มีประวัติ)
+  documentLines StockDocumentLine[]
+  orderItems    MobileOrderItem[]
 
   @@unique([storeId, sku])
   @@index([storeId])
@@ -59,24 +62,104 @@ model Product {
 
 /// ledger แบบ append-only — ห้ามลบ/แก้ย้อนหลัง ถ้าต้องกลับรายการให้สร้างรายการชดเชยใหม่
 model StockTransaction {
-  id        String          @id @default(cuid())
-  storeId   String
-  productId String
-  type      TransactionType
-  quantity  Int
-  note      String?
-  saleId    String?
-  createdAt DateTime        @default(now())
+  id          String          @id @default(cuid())
+  storeId     String
+  productId   String
+  type        TransactionType
+  quantity    Int
+  note        String?
+  saleId      String?
+  /// เอกสารรับ/เบิก/ปรับที่ทำให้เกิดรายการนี้ (Phase 21) — null = ขาย/ยกเลิกบิล หรือรายการก่อนมีเอกสาร
+  documentId  String?
+  /// บรรทัดสินค้าบนโต๊ะที่ตัดสต็อก (Phase 21b) — ตัดตอนส่งรายการ ยังไม่มีบิล จึงผูกบรรทัดแทน saleId
+  orderItemId String?
+  createdAt   DateTime        @default(now())
 
-  store   Store   @relation(fields: [storeId], references: [id])
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sale    Sale?   @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  store     Store            @relation(fields: [storeId], references: [id])
+  product   Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sale      Sale?            @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  document  StockDocument?   @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  orderItem MobileOrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
 
   @@index([storeId])
   @@index([productId])
   @@index([createdAt])
   @@index([saleId])
+  @@index([documentId])
+  @@index([orderItemId])
   @@map("stock_transaction")
+}
+
+/// ประเภทเอกสารคลัง (Phase 21) — เลขที่เดินแยกต่อประเภท GR-/GI-/ADJ-
+enum StockDocType {
+  RECEIPT
+  ISSUE
+  ADJUST
+}
+
+enum StockDocStatus {
+  POSTED
+  VOIDED
+}
+
+/// หัวเอกสารคลัง (Phase 21) — บันทึกแล้วมีผลกับสต็อกทันที (ไม่มีร่าง) · แก้ไม่ได้ ยกเลิกได้ด้วยรายการชดเชยเท่านั้น
+model StockDocument {
+  id            String         @id @default(cuid())
+  storeId       String
+  type          StockDocType
+  docNumber     String
+  /// วันที่ของเอกสาร (วันทำการแบบเวลาไทย) — ต่างจาก createdAt ได้ เช่น บันทึกใบรับย้อนหลัง
+  docDate       DateTime       @db.Date
+  status        StockDocStatus @default(POSTED)
+  /// ใบรับ: ผู้ขาย + เลขใบกำกับ/ใบส่งของ
+  supplierName  String?
+  referenceNo   String?
+  /// ใบเบิก: ชื่อผู้เบิก (พิมพ์เอง ไม่ผูกบัญชีผู้ใช้) — บังคับตอนสร้างใบเบิก
+  requesterName String?
+  /// ใบปรับ: เหตุผล (นับสต็อก/ของเสีย/…)
+  reason        String?
+  note          String?
+  /// ใบรับ: มูลค่ารวมจากราคาทุนที่กรอก (null = ไม่ได้กรอกราคาทุน)
+  totalCost     Decimal?       @db.Decimal(12, 2)
+  createdById   String
+  createdAt     DateTime       @default(now())
+  voidedAt      DateTime?
+  voidedById    String?
+  voidReason    String?
+
+  store        Store               @relation(fields: [storeId], references: [id])
+  createdBy    User                @relation("StockDocCreatedBy", fields: [createdById], references: [id])
+  voidedBy     User?               @relation("StockDocVoidedBy", fields: [voidedById], references: [id])
+  lines        StockDocumentLine[]
+  transactions StockTransaction[]
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, type, docDate])
+  @@map("stock_document")
+}
+
+/// บรรทัดเอกสารคลัง (Phase 21)
+model StockDocumentLine {
+  id         String   @id @default(cuid())
+  documentId String
+  lineNo     Int
+  productId  String
+  /// ใบรับ/ใบเบิก: จำนวน (> 0) · ใบปรับ: ส่วนต่างแบบมีเครื่องหมาย (นับได้ − ในระบบ)
+  quantity   Int
+  /// ใบรับ: ราคาทุนต่อหน่วย (ไม่บังคับ)
+  unitCost   Decimal? @db.Decimal(12, 2)
+  lineTotal  Decimal? @db.Decimal(12, 2)
+  /// ใบปรับ: ยอดในระบบ ณ ตอนบันทึก (snapshot) และยอดที่นับได้จริง
+  systemQty  Int?
+  countedQty Int?
+  note       String?
+
+  document StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([documentId])
+  @@index([productId])
+  @@map("stock_document_line")
 }
 
 // ───────────────────── Better Auth 1.7.x (โครงจาก @better-auth/core) ─────────────────────
@@ -113,6 +196,8 @@ enum ResourceKey {
   /// Phase 20 (ร้านนวด) — ประวัติ/กะพนักงานนวด · ตารางจอง/เช็กอิน/กระดานว่าง-ไม่ว่าง
   SPA_THERAPISTS
   SPA_BOOKINGS
+  /// Phase 21 — ปรับยอดสต็อก (เอกสาร Adjust) · VIEW ดู · ADD บันทึก · DELETE ยกเลิกเอกสาร
+  STOCK_ADJUST
 }
 
 /// บทบาทเป็นของร้าน (Phase 13) — แต่ละร้านมีชุดของตัวเอง ร้านใหม่ได้ 3 บทบาทระบบตอนสร้าง
@@ -168,6 +253,8 @@ model User {
   closedSessions            TableSession[]    @relation("SessionClosedBy")
   cancelledOrderItems       MobileOrderItem[] @relation("OrderItemCancelledBy")
   acknowledgedNotifications Notification[]    @relation("NotificationAckBy")
+  createdStockDocuments     StockDocument[]   @relation("StockDocCreatedBy")
+  voidedStockDocuments      StockDocument[]   @relation("StockDocVoidedBy")
   storeSettingsUpdates      StoreSettings[]   @relation("StoreSettingsUpdatedBy")
   sentInvites               StoreInvite[]     @relation("StoreInviteInvitedBy")
   acceptedInvites           StoreInvite[]     @relation("StoreInviteAcceptedBy")
@@ -232,11 +319,13 @@ model Verification {
 // ───────────────────────────── POS หน้าร้าน (Phase 2.5) ─────────────────────────────
 
 model Category {
-  id        String   @id @default(cuid())
-  storeId   String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  storeId       String
+  name          String
+  /// Phase 21b — สินค้าในหมวดนี้ขายได้ที่จอขายอาหาร (ตัดสต็อกจริง) · ค่าเริ่มต้นปิด ร้านต้องเปิดเอง
+  sellableAtPos Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   store    Store     @relation(fields: [storeId], references: [id])
   products Product[]
@@ -289,7 +378,7 @@ model Sale {
 }
 
 model SaleItem {
-  id          String  @id @default(cuid())
+  id          String       @id @default(cuid())
   saleId      String
   /// บิลขายหน้าร้านอ้าง Product — บิลจาก MJD Mobile Order เป็น null (อ้าง menuItemId แทน)
   productId   String?
@@ -302,8 +391,8 @@ model SaleItem {
   /// ชื่อรายการ ณ เวลาขาย (snapshot) — หน้าประวัติ/ใบเสร็จอ่านจากฟิลด์นี้ ไม่ต้อง join กลับ
   name        String
   quantity    Int
-  unitPrice   Decimal @db.Decimal(12, 2)
-  subtotal    Decimal @db.Decimal(12, 2)
+  unitPrice   Decimal      @db.Decimal(12, 2)
+  subtotal    Decimal      @db.Decimal(12, 2)
 
   sale      Sale       @relation(fields: [saleId], references: [id], onDelete: Cascade)
   // คง RESTRICT ไว้เหมือนก่อนทำให้ productId เป็น optional — ห้ามลบสินค้าที่เคยขายไปแล้ว
@@ -321,30 +410,30 @@ model SaleItem {
 
 /// บันทึกปิดยอดประจำวัน — immutable แก้/ลบผ่าน UI ไม่ได้
 model CashierClosing {
-  id            String   @id @default(cuid())
-  storeId       String
-  cashierId     String
-  closingDate   DateTime @db.Date
-  totalSales    Decimal  @db.Decimal(12, 2)
-  totalCash     Decimal  @db.Decimal(12, 2)
-  totalTransfer Decimal  @db.Decimal(12, 2)
-  totalQR       Decimal  @db.Decimal(12, 2)
+  id               String   @id @default(cuid())
+  storeId          String
+  cashierId        String
+  closingDate      DateTime @db.Date
+  totalSales       Decimal  @db.Decimal(12, 2)
+  totalCash        Decimal  @db.Decimal(12, 2)
+  totalTransfer    Decimal  @db.Decimal(12, 2)
+  totalQR          Decimal  @db.Decimal(12, 2)
   /// บัตร (EDC) ที่ปิดบิลด้วยแคชเชียร์คนนี้ — ก่อน 20g (2026-09-24) คอลัมน์นี้รวมพร้อมเพย์ไว้ด้วย migration แยกออกให้แล้ว
-  totalCard     Decimal  @default(0) @db.Decimal(12, 2)
+  totalCard        Decimal  @default(0) @db.Decimal(12, 2)
   /// พร้อมเพย์ (MJD Mobile Order) — แยกจากบัตรใน 20g เพื่อเทียบกับยอดเข้าบัญชีธนาคาร
-  totalPromptPay Decimal @default(0) @db.Decimal(12, 2)
-  billCount     Int      @default(0)
-  voidedCount   Int      @default(0)
-  countedCash   Decimal  @db.Decimal(12, 2)
-  difference    Decimal  @db.Decimal(12, 2)
+  totalPromptPay   Decimal  @default(0) @db.Decimal(12, 2)
+  billCount        Int      @default(0)
+  voidedCount      Int      @default(0)
+  countedCash      Decimal  @db.Decimal(12, 2)
+  difference       Decimal  @db.Decimal(12, 2)
   /// ยอดจริงของช่องทางอื่นที่แคชเชียร์กรอกเทียบ (20g) — ไม่บังคับ · null = ไม่ได้กรอก (ไม่มีส่วนต่าง)
   /// ส่วนต่างไม่เก็บ คำนวณตอนแสดง (counted − total) — เงินสดยังเก็บ `difference` เหมือนเดิมเพราะเป็นกติกาเดิม
   countedTransfer  Decimal? @db.Decimal(12, 2)
   countedQR        Decimal? @db.Decimal(12, 2)
   countedPromptPay Decimal? @db.Decimal(12, 2)
   countedCard      Decimal? @db.Decimal(12, 2)
-  note          String?
-  closedAt      DateTime @default(now())
+  note             String?
+  closedAt         DateTime @default(now())
 
   store   Store @relation(fields: [storeId], references: [id])
   cashier User  @relation(fields: [cashierId], references: [id])
@@ -752,7 +841,10 @@ model MobileOrder {
 model MobileOrderItem {
   id                      String          @id @default(cuid())
   mobileOrderId           String
-  menuItemId              String
+  /// บรรทัดเมนู (อาหาร/บริการ) — มีค่าอย่างใดอย่างหนึ่งกับ productId เสมอ (CHECK constraint ในฐาน · Phase 21b)
+  menuItemId              String?
+  /// บรรทัดสินค้าในสต็อก (Phase 21b) — ตัดสต็อกตอนส่งรายการ ไม่เข้าครัว สถานะเป็น SERVED ทันที
+  productId               String?
   quantity                Int
   /// snapshot รวม modifier ณ เวลาสั่ง — เหมือน SaleItem.unitPrice กันแก้ราคาเมนูย้อนหลังแล้วบิลเก่าเพี้ยน
   unitPrice               Decimal         @db.Decimal(12, 2)
@@ -768,10 +860,13 @@ model MobileOrderItem {
   createdAt               DateTime        @default(now())
   updatedAt               DateTime        @updatedAt
 
-  order       MobileOrder @relation(fields: [mobileOrderId], references: [id], onDelete: Cascade)
-  menuItem    MenuItem    @relation(fields: [menuItemId], references: [id])
-  cancelledBy User?       @relation("OrderItemCancelledBy", fields: [cancelledById], references: [id])
-  therapist   Therapist?  @relation(fields: [therapistId], references: [id], onDelete: SetNull)
+  order             MobileOrder        @relation(fields: [mobileOrderId], references: [id], onDelete: Cascade)
+  // RESTRICT เหมือนตอนยังเป็น required — ห้ามลบเมนูที่มีคนสั่งแล้ว (ถ้าเป็น SetNull จะชน CHECK แบบงง ๆ)
+  menuItem          MenuItem?          @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  product           Product?           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  stockTransactions StockTransaction[]
+  cancelledBy       User?              @relation("OrderItemCancelledBy", fields: [cancelledById], references: [id])
+  therapist         Therapist?         @relation(fields: [therapistId], references: [id], onDelete: SetNull)
 
   @@index([mobileOrderId])
   @@index([status])
@@ -996,6 +1091,7 @@ model Store {
   roles             Role[]
   products          Product[]
   stockTransactions StockTransaction[]
+  stockDocuments    StockDocument[]
   categories        Category[]
   sales             Sale[]
   cashierClosings   CashierClosing[]
