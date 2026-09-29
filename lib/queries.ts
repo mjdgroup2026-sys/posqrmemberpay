@@ -1258,12 +1258,20 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
 
 export async function getStoreSettings(storeId: string) {
   const db = forStore(storeId)
-  const settings = await db.storeSettings.findUnique({ where: { storeId } })
+  const settings = await db.storeSettings.findUnique({
+    where: { storeId },
+    include: { store: { select: { brand: { select: { logoUrl: true } } } } },
+  })
   if (!settings) return null
   return {
     id: settings.id,
     storeName: settings.storeName,
+    /// โลโก้ของสาขาเอง (ค่าที่ฟอร์มตั้งค่าร้านแก้) — หน้าลูกค้าใช้ displayLogoUrl ด้านล่างแทน
     logoUrl: settings.logoUrl,
+    /// โลโก้แบรนด์ของสาขานี้ (null = ไม่อยู่ใต้แบรนด์/แบรนด์ไม่มีโลโก้)
+    brandLogoUrl: settings.store.brand?.logoUrl ?? null,
+    /// สิ่งที่ลูกค้าเห็น: โลโก้ของสาขา ถ้าไม่ตั้ง → โลโก้แบรนด์
+    displayLogoUrl: settings.logoUrl ?? settings.store.brand?.logoUrl ?? null,
     coverImageUrl: settings.coverImageUrl,
     themeColor: settings.themeColor,
     hasKDS: settings.hasKDS,

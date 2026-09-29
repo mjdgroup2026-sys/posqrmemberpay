@@ -56,11 +56,11 @@ export default async function CustomerMenuPage({ params }: PageProps<"/order/[qr
         />
       ) : null}
 
-      {settings?.logoUrl ? (
+      {settings?.displayLogoUrl ? (
         <div className="row" style={{ gap: 10, marginBottom: 12 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={settings.logoUrl}
+            src={settings.displayLogoUrl}
             alt={settings.storeName}
             style={{ width: 44, height: 44, objectFit: "contain", borderRadius: 10 }}
           />

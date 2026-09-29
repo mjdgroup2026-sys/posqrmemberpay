@@ -15,6 +15,8 @@ export type StoreSettingsValues = {
   storeName: string
   themeColor: string
   logoUrl: string | null
+  /// โลโก้แบรนด์ที่ใช้แทนเมื่อสาขาไม่ตั้งโลโก้เอง — แสดงเป็นคำอธิบายเท่านั้น ไม่ถูกบันทึกลงร้าน
+  brandLogoUrl?: string | null
   coverImageUrl: string | null
   serviceChargePercent: number
   hasKDS: boolean
@@ -198,6 +200,7 @@ export function StoreSettingsForm({
               value={logoUrl}
               onChange={setLogoUrl}
               error={fieldErrors.logoUrl}
+              hint={settings.brandLogoUrl ? "เว้นว่าง = ใช้โลโก้แบรนด์บนหน้าเมนูลูกค้า" : undefined}
             />
 
             <ImagePicker

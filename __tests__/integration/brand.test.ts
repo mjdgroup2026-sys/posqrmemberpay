@@ -425,4 +425,71 @@ describe.skipIf(!dbReady)("ร้านหลายสาขา — Brand (Phase
       expect((await testPrisma().subscriptionBatch.findUniqueOrThrow({ where: { id: batch.id } })).status).toBe("PENDING")
     })
   })
+
+  describe("โลโก้แบรนด์", () => {
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x11, 0x22])
+    async function uploadLogo(): Promise<string> {
+      const fd = new FormData()
+      fd.set("file", new File([PNG], "logo.png", { type: "image/png" }))
+      const result = await brand.uploadBrandAsset(fd)
+      expect(result.ok, result.ok ? "" : result.error).toBe(true)
+      return result.ok ? result.data!.url : ""
+    }
+
+    it("อัปโหลดได้ก่อนสร้างแบรนด์ แล้วสร้างแบรนด์พร้อมโลโก้ · เสิร์ฟไบต์เดิมกลับได้", async () => {
+      const url = await uploadLogo()
+      expect(url.startsWith("/api/brand-assets/")).toBe(true)
+      const result = await brand.createBrand(makeFormData({ name: "แบรนด์มีโลโก้", logoUrl: url }))
+      expect(result.ok).toBe(true)
+      expect((await testPrisma().brand.findFirstOrThrow()).logoUrl).toBe(url)
+
+      const { GET } = await import("@/app/api/brand-assets/[id]/route")
+      const id = url.split("/").pop()!
+      const response = await GET(new Request(`http://localhost${url}`), { params: Promise.resolve({ id }) })
+      expect(response.status).toBe(200)
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG)
+    })
+
+    it("เปลี่ยนโลโก้ → ไฟล์เก่าถูกลบ · เอาออก → ไฟล์ถูกลบ", async () => {
+      await brandAB()
+      const first = await uploadLogo()
+      expect((await brand.updateBrandLogo(makeFormData({ logoUrl: first }))).ok).toBe(true)
+      const second = await uploadLogo()
+      expect((await brand.updateBrandLogo(makeFormData({ logoUrl: second }))).ok).toBe(true)
+      expect(await testPrisma().brandAsset.count()).toBe(1)
+
+      expect((await brand.updateBrandLogo(makeFormData({ logoUrl: "" }))).ok).toBe(true)
+      expect(await testPrisma().brandAsset.count()).toBe(0)
+      expect((await testPrisma().brand.findFirstOrThrow()).logoUrl).toBeNull()
+    })
+
+    it("แบรนด์อื่นลบ/ทับโลโก้ของเราไม่ได้ · ลบโลโก้ที่ใช้อยู่ไม่ได้", async () => {
+      await brandAB()
+      const url = await uploadLogo()
+      await brand.updateBrandLogo(makeFormData({ logoUrl: url }))
+      expect((await brand.deleteBrandAsset(makeFormData({ url }))).ok).toBe(false)
+
+      setTestUser("owner-c")
+      await brand.createBrand(makeFormData({ name: "แบรนด์ C" }))
+      await brand.deleteBrandAsset(makeFormData({ url }))
+      // ตั้ง URL ของเราเป็นโลโก้ตัวเองแล้วเปลี่ยนทิ้ง — ต้องไม่ลบไฟล์ของ owner-a
+      await brand.updateBrandLogo(makeFormData({ logoUrl: url }))
+      await brand.updateBrandLogo(makeFormData({ logoUrl: "" }))
+      expect(await testPrisma().brandAsset.count()).toBe(1)
+    })
+
+    it("หน้าเมนูลูกค้า: สาขาไม่มีโลโก้ → ใช้โลโก้แบรนด์ · สาขามีโลโก้ → ใช้ของสาขา", async () => {
+      await brandAB()
+      const url = await uploadLogo()
+      await brand.updateBrandLogo(makeFormData({ logoUrl: url }))
+      await testPrisma().storeSettings.update({ where: { storeId: TEST_STORE_ID }, data: { logoUrl: null } })
+      await testPrisma().storeSettings.update({ where: { storeId: OTHER_STORE_ID }, data: { logoUrl: "/api/assets/own" } })
+
+      const { getStoreSettings } = await import("@/lib/queries")
+      expect((await getStoreSettings(TEST_STORE_ID))?.displayLogoUrl).toBe(url)
+      expect((await getStoreSettings(OTHER_STORE_ID))?.displayLogoUrl).toBe("/api/assets/own")
+      // ฟอร์มตั้งค่าร้านยังเห็นค่าของสาขาเอง (ว่าง) ไม่ใช่โลโก้แบรนด์ — กันบันทึกโลโก้แบรนด์ลงสาขาโดยไม่ตั้งใจ
+      expect((await getStoreSettings(TEST_STORE_ID))?.logoUrl).toBeNull()
+    })
+  })
 })

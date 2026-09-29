@@ -38,6 +38,7 @@ export default async function StoreSettingsPage() {
           // ค่าตั้งต้นเป็นสีแบรนด์ฝั่งลูกค้าตาม design system — ร้านเปลี่ยนทับได้เอง
           themeColor: settings?.themeColor ?? "#E8571F",
           logoUrl: settings?.logoUrl ?? null,
+          brandLogoUrl: settings?.brandLogoUrl ?? null,
           coverImageUrl: settings?.coverImageUrl ?? null,
           serviceChargePercent: settings?.serviceChargePercent ?? 0,
           hasKDS: settings?.hasKDS ?? false,

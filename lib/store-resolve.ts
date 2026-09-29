@@ -125,3 +125,10 @@ export async function findAssetById(id: string): Promise<StoredAsset | null> {
   if (!asset) return null
   return { id: asset.id, storeId: asset.storeId, contentType: asset.contentType, data: asset.data }
 }
+
+/// โลโก้แบรนด์ — `<img src="/api/brand-assets/<id>">` อยู่ใน HTML หน้าเมนูลูกค้าเหมือนรูปของร้าน
+/// อ่านอย่างเดียว คืนเฉพาะไบต์รูป
+export async function findBrandAssetById(id: string): Promise<{ contentType: string; data: Uint8Array } | null> {
+  if (!id) return null
+  return prisma.brandAsset.findUnique({ where: { id }, select: { contentType: true, data: true } })
+}

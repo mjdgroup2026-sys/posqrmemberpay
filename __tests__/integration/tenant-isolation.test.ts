@@ -617,6 +617,10 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     // Phase 14c: ขอบเขตคือ brand.ownerId ไม่ใช่ storeId (เทสสิทธิ์ข้ามแบรนด์อยู่ที่ brand.test.ts) ·
     // ฝั่งแพลตฟอร์มทำงานข้ามร้านโดยตั้งใจ
     "renameBrand",
+    // โลโก้แบรนด์ — ขอบเขตคือ ownerId เช่นกัน (เทสทับ/ลบข้ามเจ้าของอยู่ที่ brand.test.ts)
+    "uploadBrandAsset",
+    "deleteBrandAsset",
+    "updateBrandLogo",
     "cancelBrandBatch",
     "confirmSubscriptionBatch",
     "voidSubscriptionBatch",
