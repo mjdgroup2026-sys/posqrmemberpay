@@ -3,16 +3,18 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { createStockAdjustment, createStockIssue, createStockReceipt } from "@/app/actions/stock-docs"
+import { createStockAdjustment, createStockIssue, createStockReceipt, updateStockReceipt } from "@/app/actions/stock-docs"
 import { STOCK_DOC_KINDS, type StockDocSlug } from "@/lib/stock-doc-kinds"
 import { formatBaht, formatNumber } from "@/lib/format"
 import type { FieldErrors } from "@/lib/types"
-import { IconPlus, IconSearch, IconSpinner, IconTrash } from "@/components/icons"
+import { IconCheck, IconPlus, IconSave, IconSearch, IconSpinner, IconTrash } from "@/components/icons"
 
 /// ฟอร์มเอกสารคลังแบบหัว + บรรทัด (Phase 21 · F30) — ใช้ร่วมกันทั้งใบรับ / ใบเบิก / ใบปรับ
 ///
 /// ช่องที่ต่างกันตามประเภท: ใบรับมีผู้ขาย/เลขใบส่งของ/ราคาทุน · ใบเบิกมีผู้เบิก (บังคับ) · ใบปรับมีเหตุผล + ยอดที่นับได้
 /// · ยอดคงเหลือที่โชว์เป็นแค่ข้อมูลช่วยกรอก ด่านจริง (กันเบิกเกิน/คิดส่วนต่าง) อยู่ที่ server ใน `lib/stock-docs.ts`
+/// · ใบรับ (21d): สร้างใหม่มี 2 ปุ่ม "บันทึกร่าง" / "บันทึกและรับครบทันที" · `initial` = โหมดแก้ใบที่ยังค้างรับ
+///   บรรทัดที่รับ/ยกเลิกไปแล้วบางส่วน ลดจำนวนสั่งต่ำกว่ายอดนั้นไม่ได้ · เคยมีรอบรับ = ลบ/เปลี่ยนสินค้าไม่ได้ (server ตรวจซ้ำ)
 
 export type StockDocProduct = {
   id: string
@@ -25,7 +27,25 @@ export type StockDocProduct = {
 
 export type StockDocPrefill = { productId: string; quantity: number }
 
-type Line = { productId: string; quantity: string; unitCost: string }
+/// ใบรับที่กำลังแก้ (21d)
+export type ReceiptEditInitial = {
+  id: string
+  docDate: string
+  supplierName: string | null
+  referenceNo: string | null
+  note: string | null
+  lines: { lineId: string; productId: string; quantity: number; unitCost: number | null; receivedQty: number; cancelledQty: number; hasRounds: boolean }[]
+}
+
+type Line = {
+  productId: string
+  quantity: string
+  unitCost: string
+  lineId?: string
+  /// จำนวนสั่งขั้นต่ำ = รับแล้ว + ยกเลิก (บรรทัดใหม่ = 1)
+  floor?: number
+  locked?: boolean
+}
 
 const ADJUST_REASONS = ["นับสต็อกประจำงวด", "ของเสีย/หมดอายุ", "ของหาย", "คีย์ผิดก่อนหน้า"]
 
@@ -34,26 +54,38 @@ export function StockDocForm({
   products,
   today,
   prefill = [],
+  initial,
 }: {
   kind: StockDocSlug
   products: StockDocProduct[]
   today: string
   prefill?: StockDocPrefill[]
+  initial?: ReceiptEditInitial
 }) {
   const kind = STOCK_DOC_KINDS[slug]
   const router = useRouter()
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products])
 
-  const [docDate, setDocDate] = useState(today)
-  const [supplierName, setSupplierName] = useState("")
-  const [referenceNo, setReferenceNo] = useState("")
+  const editing = kind.type === "RECEIPT" && initial !== undefined
+  const [docDate, setDocDate] = useState(initial?.docDate ?? today)
+  const [supplierName, setSupplierName] = useState(initial?.supplierName ?? "")
+  const [referenceNo, setReferenceNo] = useState(initial?.referenceNo ?? "")
   const [requesterName, setRequesterName] = useState("")
   const [reason, setReason] = useState(kind.type === "ADJUST" ? ADJUST_REASONS[0] : "")
-  const [note, setNote] = useState("")
+  const [note, setNote] = useState(initial?.note ?? "")
   const [lines, setLines] = useState<Line[]>(() =>
-    prefill
-      .filter((p) => byId.has(p.productId))
-      .map((p) => ({ productId: p.productId, quantity: String(p.quantity), unitCost: "" })),
+    initial
+      ? initial.lines.map((l) => ({
+          productId: l.productId,
+          quantity: String(l.quantity),
+          unitCost: l.unitCost === null ? "" : String(l.unitCost),
+          lineId: l.lineId,
+          floor: Math.max(l.receivedQty + l.cancelledQty, 1),
+          locked: l.hasRounds,
+        }))
+      : prefill
+          .filter((p) => byId.has(p.productId))
+          .map((p) => ({ productId: p.productId, quantity: String(p.quantity), unitCost: "" })),
   )
   const [search, setSearch] = useState("")
   const [pending, setPending] = useState(false)
@@ -93,11 +125,15 @@ export function StockDocForm({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    // ปุ่มที่กด (ใบรับมี 2 ปุ่ม: ร่าง / รับครบทันที)
+    const mode = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value ?? ""
     setPending(true)
     setErrors({})
 
     const formData = new FormData()
     formData.set("docDate", docDate)
+    if (kind.type === "RECEIPT") formData.set("mode", mode)
+    if (editing) formData.set("id", initial.id)
     formData.set("note", note)
     if (kind.type === "RECEIPT") {
       formData.set("supplierName", supplierName)
@@ -112,13 +148,19 @@ export function StockDocForm({
           kind.type === "ADJUST"
             ? { productId: line.productId, countedQty: line.quantity }
             : kind.type === "RECEIPT"
-              ? { productId: line.productId, quantity: line.quantity, unitCost: line.unitCost }
+              ? { productId: line.productId, quantity: line.quantity, unitCost: line.unitCost, lineId: line.lineId ?? "" }
               : { productId: line.productId, quantity: line.quantity },
         ),
       ),
     )
 
-    const action = kind.type === "RECEIPT" ? createStockReceipt : kind.type === "ISSUE" ? createStockIssue : createStockAdjustment
+    const action = editing
+      ? updateStockReceipt
+      : kind.type === "RECEIPT"
+        ? createStockReceipt
+        : kind.type === "ISSUE"
+          ? createStockIssue
+          : createStockAdjustment
     try {
       const result = await action(formData)
       if (!result.ok) {
@@ -136,7 +178,7 @@ export function StockDocForm({
     }
   }
 
-  const qtyLabel = kind.type === "ADJUST" ? "นับได้จริง" : kind.type === "RECEIPT" ? "จำนวนรับ" : "จำนวนเบิก"
+  const qtyLabel = kind.type === "ADJUST" ? "นับได้จริง" : kind.type === "RECEIPT" ? "จำนวนสั่ง" : "จำนวนเบิก"
 
   return (
     <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -163,7 +205,7 @@ export function StockDocForm({
               </div>
               <div className="field">
                 <label className="t-small" htmlFor="referenceNo">
-                  เลขที่ใบกำกับ / ใบส่งของ
+                  เลขที่อ้างอิง (ใบสั่งซื้อ / ใบส่งของ)
                 </label>
                 <input id="referenceNo" className="input num" value={referenceNo} maxLength={60} onChange={(e) => setReferenceNo(e.target.value)} />
               </div>
@@ -295,6 +337,9 @@ export function StockDocForm({
                         <div className="t-caption num">
                           {product.sku} · {product.category}
                         </div>
+                        {line.floor !== undefined && line.floor > 1 ? (
+                          <div className="t-caption">รับ/ยกเลิกไปแล้ว {formatNumber(line.floor)} — สั่งต่ำกว่านี้ไม่ได้</div>
+                        ) : null}
                         {lineError ? <p className="field-hint error">{lineError}</p> : null}
                       </td>
                       <td className="num" style={{ padding: "8px 16px", textAlign: "right" }}>
@@ -304,7 +349,7 @@ export function StockDocForm({
                         <input
                           type="number"
                           inputMode="numeric"
-                          min={kind.type === "ADJUST" ? 0 : 1}
+                          min={kind.type === "ADJUST" ? 0 : (line.floor ?? 1)}
                           step={1}
                           required
                           className="input num"
@@ -360,6 +405,8 @@ export function StockDocForm({
                         <button
                           type="button"
                           className="btn btn-ghost btn-icon btn-sm"
+                          disabled={line.locked}
+                          title={line.locked ? "มีประวัติรับแล้ว ลบไม่ได้" : undefined}
                           aria-label={`ลบ ${product.name} ออกจากเอกสาร`}
                           onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}
                         >
@@ -394,13 +441,35 @@ export function StockDocForm({
       </section>
 
       <div className="row" style={{ justifyContent: "flex-end", gap: 12 }}>
-        <button type="button" className="btn btn-ghost" onClick={() => router.push(`/stock/${kind.slug}`)}>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => router.push(editing ? `/stock/${kind.slug}/${initial.id}` : `/stock/${kind.slug}`)}
+        >
           ยกเลิก
         </button>
-        <button type="submit" className="btn btn-primary btn-lg" disabled={pending || lines.length === 0}>
-          {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : <IconPlus size={17} aria-hidden />}
-          บันทึก{kind.title}
-        </button>
+        {editing ? (
+          <button type="submit" className="btn btn-primary btn-lg" disabled={pending || lines.length === 0}>
+            {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : <IconSave size={17} aria-hidden />}
+            บันทึกการแก้ไข
+          </button>
+        ) : kind.type === "RECEIPT" ? (
+          <>
+            <button type="submit" value="draft" className="btn btn-subtle btn-lg" disabled={pending || lines.length === 0}>
+              {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : <IconSave size={17} aria-hidden />}
+              บันทึกร่าง (ยังไม่รับของ)
+            </button>
+            <button type="submit" value="receive" className="btn btn-primary btn-lg" disabled={pending || lines.length === 0}>
+              {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : <IconCheck size={17} aria-hidden />}
+              บันทึกและรับครบทันที
+            </button>
+          </>
+        ) : (
+          <button type="submit" className="btn btn-primary btn-lg" disabled={pending || lines.length === 0}>
+            {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : <IconPlus size={17} aria-hidden />}
+            บันทึก{kind.title}
+          </button>
+        )}
       </div>
     </form>
   )

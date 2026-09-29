@@ -229,7 +229,7 @@ describe.skipIf(!dbReady)("เอกสารคลัง รับ/เบิก
       expect(voided.ok).toBe(false)
       expect(voided.ok === false && voided.error).toContain("ยกเลิกไม่ได้")
       expect(await qty(a.id)).toBe(2)
-      expect((await testPrisma().stockDocument.findUniqueOrThrow({ where: { id: received.data.id } })).status).toBe("POSTED")
+      expect((await testPrisma().stockDocument.findUniqueOrThrow({ where: { id: received.data.id } })).status).toBe("RECEIVED")
     })
 
     it("ยกเลิกใบปรับ: กลับทิศส่วนต่างทุกบรรทัด", async () => {

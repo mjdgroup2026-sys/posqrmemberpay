@@ -948,7 +948,7 @@ const linesOf = <T extends z.ZodType<{ productId: string }>>(line: T) =>
 export const stockReceiptSchema = z.object({
   docDate: docDateField,
   supplierName: optionalText("ชื่อผู้ขาย", 120),
-  referenceNo: optionalText("เลขที่ใบส่งของ", 60),
+  referenceNo: optionalText("เลขที่อ้างอิง", 60),
   note: optionalText("หมายเหตุ", 300),
   lines: linesOf(receiptLineSchema),
 })
@@ -984,6 +984,56 @@ export const voidStockDocSchema = z.object({
     .max(200, "เหตุผลยาวเกินไป"),
 })
 
+// ───────────────────── ใบรับแบบร่าง + รับหลายรอบ (Phase 21d) ─────────────────────
+
+const docId = z.string({ error: "ไม่พบเอกสาร" }).trim().min(1, "ไม่พบเอกสาร")
+const lineIdField = z.string({ error: "ไม่พบรายการในเอกสาร" }).trim().min(1, "ไม่พบรายการในเอกสาร")
+
+/// แก้ใบรับ — บรรทัดเดิมส่ง `lineId` มาด้วย (ไม่มี = บรรทัดใหม่) · ด่านเรื่องบรรทัดที่รับแล้วอยู่ที่ lib/stock-docs.ts
+export const stockReceiptEditSchema = stockReceiptSchema.extend({
+  id: docId,
+  lines: linesOf(
+    receiptLineSchema.extend({
+      lineId: z.string().trim().optional().transform((v) => (v ? v : undefined)),
+    }),
+  ),
+})
+
+export const receiveRoundSchema = z.object({
+  documentId: docId,
+  receivedDate: z
+    .string({ error: "กรุณาเลือกวันที่รับสินค้า" })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "รูปแบบวันที่รับสินค้าไม่ถูกต้อง"),
+  referenceNo: optionalText("เลขที่ใบส่งของ", 60),
+  note: optionalText("หมายเหตุ", 300),
+  lines: z
+    .array(z.object({ lineId: lineIdField, quantity: nonNegativeInt("จำนวนรับ") }), { error: "รายการรับไม่ถูกต้อง" })
+    .max(MAX_DOC_LINES, `เอกสารหนึ่งใบมีได้ไม่เกิน ${MAX_DOC_LINES} รายการ`)
+    .refine((lines) => lines.some((line) => line.quantity > 0), "กรุณากรอกจำนวนรับอย่างน้อย 1 รายการ")
+    .refine((lines) => new Set(lines.map((line) => line.lineId)).size === lines.length, "มีรายการซ้ำในรอบรับ"),
+})
+
+const actionReason = (label: string) =>
+  z
+    .string({ error: `กรุณาระบุ${label}` })
+    .trim()
+    .min(1, `กรุณาระบุ${label}`)
+    .max(200, "เหตุผลยาวเกินไป")
+
+export const voidReceiptRoundSchema = z.object({ id: docId, reason: actionReason("เหตุผลที่ยกเลิกรอบรับ") })
+
+export const cancelLineRemainingSchema = z.object({
+  lineId: lineIdField,
+  quantity: positiveInt("จำนวนที่ยกเลิก"),
+  reason: actionReason("เหตุผลที่ยกเลิกยอดค้าง"),
+})
+
+export const restoreLineRemainingSchema = z.object({ lineId: lineIdField })
+
+export const closeReceiptSchema = z.object({ id: docId, reason: actionReason("เหตุผลที่ปิดใบรับ") })
+
 export type StockReceiptInput = z.infer<typeof stockReceiptSchema>
+export type StockReceiptEditInput = z.infer<typeof stockReceiptEditSchema>
+export type ReceiveRoundInput = z.infer<typeof receiveRoundSchema>
 export type StockIssueInput = z.infer<typeof stockIssueSchema>
 export type StockAdjustInput = z.infer<typeof stockAdjustSchema>

@@ -74,8 +74,10 @@ type StoreFixture = {
   bookingId: string
   roomId: string
   bookingCustomer: string
-  /// Phase 21 — ใบรับสินค้า 1 ใบ
+  /// Phase 21 — ใบรับสินค้า 1 ใบ (21d: รับบางส่วน — สั่ง 3 รับ 1 ยกเลิก 1 ค้าง 1 · มีรอบรับ 1 รอบ)
   stockDocId: string
+  stockDocLineId: string
+  stockRoundId: string
 }
 
 describe.skipIf(!dbReady)("การแยกข้อมูลตามร้าน (Phase 13 — tenant isolation)", () => {
@@ -171,8 +173,20 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         docNumber: "GR-000001",
         docDate: new Date(`${businessDayKey()}T00:00:00.000Z`),
         supplierName: `ผู้ขายร้าน ${tag}`,
+        status: "PARTIAL",
         createdById: ownerId,
-        lines: { create: [{ lineNo: 1, productId: product.id, quantity: 3 }] },
+        lines: { create: [{ lineNo: 1, productId: product.id, quantity: 3, receivedQty: 1, cancelledQty: 1, cancelReason: "ของหมด" }] },
+      },
+      include: { lines: true },
+    })
+    const stockRound = await db.stockReceiptRound.create({
+      data: {
+        storeId,
+        documentId: stockDoc.id,
+        roundNo: 1,
+        receivedDate: new Date(`${businessDayKey()}T00:00:00.000Z`),
+        createdById: ownerId,
+        lines: { create: [{ documentLineId: stockDoc.lines[0].id, productId: product.id, quantity: 1 }] },
       },
     })
 
@@ -378,6 +392,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       roomId: room.id,
       bookingCustomer: `ลูกค้าจองร้าน ${tag}`,
       stockDocId: stockDoc.id,
+      stockDocLineId: stockDoc.lines[0].id,
+      stockRoundId: stockRound.id,
     }
   }
 
@@ -415,6 +431,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       f.roomId,
       f.bookingCustomer,
       f.stockDocId,
+      f.stockDocLineId,
+      f.stockRoundId,
       `ร้าน ${f.tag}`,
     ]
   }
@@ -509,6 +527,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     // Phase 21 — เอกสารคลัง (id ของร้าน B ต้องได้ null)
     ["listStockDocuments", (q, a) => q.listStockDocuments(a.storeId, "RECEIPT", { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getStockDocument", (q, a, b) => q.getStockDocument(a.storeId, b.stockDocId)],
+    ["listStockDocuments:openOnly", (q, a) => q.listStockDocuments(a.storeId, "RECEIPT", { from: businessDayKey(), to: businessDayKey() }, { openOnly: true })],
     // Phase 21b — สินค้าที่ขายได้ที่จอขายอาหาร
     ["listPosProducts", (q, a) => q.listPosProducts(a.storeId)],
     // Phase 21c — รายงานสต็อก (raw SQL ทุกตัว ต้องกรอง storeId เอง)
@@ -674,7 +693,41 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     [
       "voidStockDoc",
       (b) => makeFormData({ id: b.stockDocId, reason: "ร้าน A พยายามยกเลิก" }),
-      async (b) => expect((await testPrisma().stockDocument.findUniqueOrThrow({ where: { id: b.stockDocId } })).status).toBe("POSTED"),
+      async (b) => expect((await testPrisma().stockDocument.findUniqueOrThrow({ where: { id: b.stockDocId } })).status).toBe("PARTIAL"),
+    ],
+    // Phase 21d — ใบรับแบบร่าง + รับหลายรอบ: id ใบ/บรรทัด/รอบของร้าน B ต้องไม่ถึง
+    [
+      "updateStockReceipt",
+      (b) => makeFormData({ id: b.stockDocId, docDate: businessDayKey(), lines: JSON.stringify([{ lineId: b.stockDocLineId, productId: b.productId, quantity: 9 }]) }),
+      async (b) => expect((await testPrisma().stockDocumentLine.findUniqueOrThrow({ where: { id: b.stockDocLineId } })).quantity).toBe(3),
+    ],
+    [
+      "receiveStockRound",
+      (b) => makeFormData({ documentId: b.stockDocId, receivedDate: businessDayKey(), lines: JSON.stringify([{ lineId: b.stockDocLineId, quantity: 1 }]) }),
+      async (b) => {
+        expect((await testPrisma().stockDocumentLine.findUniqueOrThrow({ where: { id: b.stockDocLineId } })).receivedQty).toBe(1)
+        expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10)
+      },
+    ],
+    [
+      "voidStockReceiptRound",
+      (b) => makeFormData({ id: b.stockRoundId, reason: "ร้าน A พยายามยกเลิกรอบ" }),
+      async (b) => expect((await testPrisma().stockReceiptRound.findUniqueOrThrow({ where: { id: b.stockRoundId } })).status).toBe("POSTED"),
+    ],
+    [
+      "cancelReceiptRemaining",
+      (b) => makeFormData({ lineId: b.stockDocLineId, quantity: "1", reason: "ร้าน A พยายามตัดยอด" }),
+      async (b) => expect((await testPrisma().stockDocumentLine.findUniqueOrThrow({ where: { id: b.stockDocLineId } })).cancelledQty).toBe(1),
+    ],
+    [
+      "restoreReceiptRemaining",
+      (b) => makeFormData({ lineId: b.stockDocLineId }),
+      async (b) => expect((await testPrisma().stockDocumentLine.findUniqueOrThrow({ where: { id: b.stockDocLineId } })).cancelledQty).toBe(1),
+    ],
+    [
+      "closeStockReceipt",
+      (b) => makeFormData({ id: b.stockDocId, reason: "ร้าน A พยายามปิดใบ" }),
+      async (b) => expect((await testPrisma().stockDocument.findUniqueOrThrow({ where: { id: b.stockDocId } })).status).toBe("PARTIAL"),
     ],
     [
       "createSale",

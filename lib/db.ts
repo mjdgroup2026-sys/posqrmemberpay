@@ -21,6 +21,7 @@ export const STORE_SCOPED_MODELS: ReadonlySet<string> = new Set([
   "Product",
   "StockTransaction",
   "StockDocument",
+  "StockReceiptRound",
   "Category",
   "Sale",
   "CashierClosing",

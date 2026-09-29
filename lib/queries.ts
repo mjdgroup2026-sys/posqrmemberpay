@@ -9,6 +9,7 @@ import { orderTicketLabel } from "@/lib/order-label"
 import { decodeStoreScb, getStoreScb } from "@/lib/scb-store"
 import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFromKey, minuteOfBusinessDay } from "@/lib/day"
+import type { StockDocStatusValue } from "@/lib/stock-doc-kinds"
 import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import { bucketByChannel, CLOSING_CHANNELS, type ClosingChannel } from "@/lib/closing-channels"
 import type { PaymentMethodValue } from "@/lib/types"
@@ -3352,26 +3353,33 @@ export type StockDocListRow = {
   id: string
   docNumber: string
   docDate: string
-  status: "POSTED" | "VOIDED"
+  status: StockDocStatusValue
   /// ผู้ขาย (ใบรับ) · ผู้เบิก (ใบเบิก) · เหตุผล (ใบปรับ) — คอลัมน์ "คู่ค้า/ผู้เกี่ยวข้อง" ของตารางรายการ
   party: string | null
   referenceNo: string | null
   lineCount: number
+  /// ใบรับ = จำนวนสั่งรวม · ใบเบิก = จำนวนรวม · ใบปรับ = ส่วนต่างรวม
   totalQuantity: number
+  /// ใบรับ (21d): รับแล้วรวม
+  receivedQuantity: number
   totalCost: number | null
   createdByName: string
   createdAt: Date
 }
 
 /// รายการเอกสารของประเภทหนึ่งในช่วงวัน (ตามวันที่ของเอกสาร ไม่ใช่วันบันทึก) — ใหม่สุดก่อน
+/// · `openOnly` (ใบรับ 21d) = เฉพาะใบที่ยังค้างรับ ทุกวันที่ (ใบค้างเก่ากว่าช่วงที่เลือกต้องไม่หลุดจากตา)
 export async function listStockDocuments(
   storeId: string,
   type: "RECEIPT" | "ISSUE" | "ADJUST",
   range: { from: string; to: string },
+  options: { openOnly?: boolean } = {},
 ): Promise<StockDocListRow[]> {
   const db = forStore(storeId)
   const rows = await db.stockDocument.findMany({
-    where: { type, docDate: { gte: dateOnlyFromKey(range.from), lte: dateOnlyFromKey(range.to) } },
+    where: options.openOnly
+      ? { type, status: { in: ["DRAFT", "PARTIAL"] } }
+      : { type, docDate: { gte: dateOnlyFromKey(range.from), lte: dateOnlyFromKey(range.to) } },
     orderBy: [{ docDate: "desc" }, { docNumber: "desc" }],
     take: 500,
     select: {
@@ -3386,7 +3394,7 @@ export async function listStockDocuments(
       totalCost: true,
       createdAt: true,
       createdBy: { select: { name: true } },
-      lines: { select: { quantity: true } },
+      lines: { select: { quantity: true, receivedQty: true } },
     },
   })
   return rows.map((doc) => ({
@@ -3399,10 +3407,26 @@ export async function listStockDocuments(
     lineCount: doc.lines.length,
     // ใบปรับรวมส่วนต่างแบบมีเครื่องหมาย (+ เพิ่ม / − ลด) · ใบรับ/เบิกเป็นจำนวนบวกเสมอ
     totalQuantity: doc.lines.reduce((sum, line) => sum + line.quantity, 0),
+    receivedQuantity: doc.lines.reduce((sum, line) => sum + line.receivedQty, 0),
     totalCost: doc.totalCost === null ? null : toNumber(doc.totalCost),
     createdByName: doc.createdBy.name,
     createdAt: doc.createdAt,
   }))
+}
+
+export type ReceiptRoundRow = {
+  id: string
+  roundNo: number
+  receivedDate: string
+  referenceNo: string | null
+  note: string | null
+  status: "POSTED" | "VOIDED"
+  createdByName: string
+  createdAt: Date
+  voidedAt: Date | null
+  voidedByName: string | null
+  voidReason: string | null
+  lines: { name: string; sku: string; unit: string; quantity: number }[]
 }
 
 export type StockDocDetail = {
@@ -3410,7 +3434,7 @@ export type StockDocDetail = {
   type: "RECEIPT" | "ISSUE" | "ADJUST"
   docNumber: string
   docDate: string
-  status: "POSTED" | "VOIDED"
+  status: StockDocStatusValue
   supplierName: string | null
   referenceNo: string | null
   requesterName: string | null
@@ -3424,6 +3448,7 @@ export type StockDocDetail = {
   voidReason: string | null
   storeName: string
   lines: {
+    id: string
     lineNo: number
     productId: string
     sku: string
@@ -3434,7 +3459,15 @@ export type StockDocDetail = {
     lineTotal: number | null
     systemQty: number | null
     countedQty: number | null
+    /// ใบรับ (21d)
+    receivedQty: number
+    cancelledQty: number
+    cancelReason: string | null
+    /// เคยมีรอบรับ (แม้รอบนั้นถูกยกเลิกแล้ว) — ลบบรรทัด/เปลี่ยนสินค้าไม่ได้
+    hasRounds: boolean
   }[]
+  /// ใบรับ (21d): ประวัติรอบรับ เก่าสุดก่อน · ใบประเภทอื่นเป็น []
+  rounds: ReceiptRoundRow[]
 }
 
 export async function getStockDocument(storeId: string, id: string): Promise<StockDocDetail | null> {
@@ -3445,7 +3478,18 @@ export async function getStockDocument(storeId: string, id: string): Promise<Sto
       include: {
         createdBy: { select: { name: true } },
         voidedBy: { select: { name: true } },
-        lines: { orderBy: { lineNo: "asc" }, include: { product: { select: { sku: true, name: true, unit: true } } } },
+        lines: {
+          orderBy: { lineNo: "asc" },
+          include: { product: { select: { sku: true, name: true, unit: true } }, _count: { select: { roundLines: true } } },
+        },
+        rounds: {
+          orderBy: { roundNo: "asc" },
+          include: {
+            createdBy: { select: { name: true } },
+            voidedBy: { select: { name: true } },
+            lines: { include: { documentLine: { select: { lineNo: true, product: { select: { sku: true, name: true, unit: true } } } } } },
+          },
+        },
       },
     }),
     db.storeSettings.findUnique({ where: { storeId }, select: { storeName: true } }),
@@ -3470,6 +3514,7 @@ export async function getStockDocument(storeId: string, id: string): Promise<Sto
     voidReason: doc.voidReason,
     storeName: settings?.storeName ?? "MJD Mobile Order",
     lines: doc.lines.map((line) => ({
+      id: line.id,
       lineNo: line.lineNo,
       productId: line.productId,
       sku: line.product.sku,
@@ -3480,6 +3525,26 @@ export async function getStockDocument(storeId: string, id: string): Promise<Sto
       lineTotal: line.lineTotal === null ? null : toNumber(line.lineTotal),
       systemQty: line.systemQty,
       countedQty: line.countedQty,
+      receivedQty: line.receivedQty,
+      cancelledQty: line.cancelledQty,
+      cancelReason: line.cancelReason,
+      hasRounds: line._count.roundLines > 0,
+    })),
+    rounds: doc.rounds.map((round) => ({
+      id: round.id,
+      roundNo: round.roundNo,
+      receivedDate: round.receivedDate.toISOString().slice(0, 10),
+      referenceNo: round.referenceNo,
+      note: round.note,
+      status: round.status === "VOIDED" ? "VOIDED" : "POSTED",
+      createdByName: round.createdBy.name,
+      createdAt: round.createdAt,
+      voidedAt: round.voidedAt,
+      voidedByName: round.voidedBy?.name ?? null,
+      voidReason: round.voidReason,
+      lines: [...round.lines]
+        .sort((a, b) => a.documentLine.lineNo - b.documentLine.lineNo)
+        .map((line) => ({ name: line.documentLine.product.name, sku: line.documentLine.product.sku, unit: line.documentLine.product.unit, quantity: line.quantity })),
     })),
   }
 }
@@ -3709,7 +3774,8 @@ export async function getReorderReport(storeId: string): Promise<{ rows: Reorder
       JOIN "stock_document" d ON d."id" = l."documentId"
       WHERE d."storeId" = ${storeId}
         AND d."type" = 'RECEIPT'
-        AND d."status" = 'POSTED'
+        AND d."status" <> 'VOIDED'
+        AND l."receivedQty" > 0
         AND l."productId" IN (${Prisma.join(ids)})
       ORDER BY l."productId", d."docDate" DESC, d."createdAt" DESC
     `,

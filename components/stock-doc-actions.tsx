@@ -20,11 +20,14 @@ export function StockDocActions({
   docNumber,
   canVoid,
   voidHint,
+  children,
 }: {
   id: string
   docNumber: string
   canVoid: boolean
   voidHint: string
+  /// ปุ่มเพิ่มเติมของเอกสารประเภทนั้น (ใบรับ 21d: แก้ไข/ปิดใบ/รับสินค้า) — วางต่อท้ายแถวเดียวกัน
+  children?: React.ReactNode
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -54,7 +57,7 @@ export function StockDocActions({
   }
 
   return (
-    <div className="row no-print" style={{ gap: 10 }}>
+    <div className="row no-print" style={{ gap: 10, flexWrap: "wrap" }}>
       <button type="button" className="btn btn-subtle" onClick={() => window.print()}>
         <IconPrinter size={17} aria-hidden />
         พิมพ์เอกสาร
@@ -65,6 +68,7 @@ export function StockDocActions({
           ยกเลิกเอกสาร
         </button>
       ) : null}
+      {children}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">

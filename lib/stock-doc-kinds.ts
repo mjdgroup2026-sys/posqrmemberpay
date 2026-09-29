@@ -23,7 +23,7 @@ export const STOCK_DOC_KINDS: Record<StockDocSlug, StockDocKind> = {
     resource: "STOCK_IN",
     title: "ใบรับสินค้า",
     newTitle: "สร้างใบรับสินค้า",
-    description: "เอกสารซื้อ/รับของเข้าคลัง — บันทึกแล้วเพิ่มสต็อกทันที ยกเลิกได้ด้วยรายการชดเชย",
+    description: "เอกสารซื้อ/รับของเข้าคลัง — บันทึกเป็นร่างแล้วรับของได้หลายรอบ สต็อกเพิ่มเฉพาะตอนกดรับ",
     partyLabel: "ผู้ขาย",
   },
   issues: {
@@ -50,6 +50,23 @@ export const SLUG_OF_TYPE: Record<StockDocTypeValue, StockDocSlug> = {
   RECEIPT: "receipts",
   ISSUE: "issues",
   ADJUST: "adjustments",
+}
+
+/// สถานะเอกสาร (ตรงกับ enum `StockDocStatus`) — ใบรับใช้ DRAFT/PARTIAL/RECEIVED/CLOSED (Phase 21d) · ใบเบิก/ปรับใช้ POSTED
+export type StockDocStatusValue = "POSTED" | "VOIDED" | "DRAFT" | "PARTIAL" | "RECEIVED" | "CLOSED"
+
+export const DOC_STATUS_CHIP: Record<StockDocStatusValue, { label: string; tone: "success" | "danger" | "warning" | "info" | "neutral" }> = {
+  POSTED: { label: "บันทึกแล้ว", tone: "success" },
+  VOIDED: { label: "ยกเลิกแล้ว", tone: "danger" },
+  DRAFT: { label: "ร่าง · ยังไม่รับ", tone: "neutral" },
+  PARTIAL: { label: "รับบางส่วน", tone: "warning" },
+  RECEIVED: { label: "รับครบ", tone: "success" },
+  CLOSED: { label: "ปิดแล้ว (รับไม่ครบ)", tone: "info" },
+}
+
+/// ใบรับที่ยังค้างรับ — แก้ไข/รับสินค้า/ปิดใบได้
+export function isOpenReceipt(status: StockDocStatusValue): boolean {
+  return status === "DRAFT" || status === "PARTIAL"
 }
 
 export function stockDocKind(slug: string): StockDocKind | null {
