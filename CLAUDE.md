@@ -457,7 +457,7 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   ยังอยู่และยังไม่ได้ต่อกับใคร · `lib/promptpay.ts` (env `PROMPTPAY_ID`) เป็น fallback ให้ร้าน
   ที่รับพร้อมเพย์ส่วนตัวแล้วให้พนักงานกดยืนยันเอง (เลือกด้วย `isScbConfigured()`)
 - **POS หน้าร้าน**: หน้า `/pos` (ค้นหา/บาร์โค้ด + ตะกร้า + ส่วนลด + ชำระเงิน CASH/TRANSFER/QR + ใบเสร็จพิมพ์ได้),
-  `/pos/history` (กรองวันที่/สถานะ + void พร้อมเหตุผล), `/pos/closing` (ปิดยอดวันละครั้ง/คน + ส่วนต่างเงินสด),
+  `/pos/history` (กรองวันที่/สถานะ + void พร้อมเหตุผล), `/pos/closing` (ปิดยอดได้หลายรอบต่อวัน/คน + ส่วนต่างรายช่องทาง · 2026-09-29),
   `/categories` (หมวดหมู่เป็น master data — `Product.categoryId` เป็น FK แล้ว ไม่ใช่ข้อความอิสระ)
 - ฐานข้อมูล: `posmobileorderdb` บน container `posmobileorder-postgres` (PostgreSQL 18, port **5437**)
   seed ไว้ 7 รายการ SKU-1001…SKU-1007 + บิลตัวอย่าง 8 บิล
@@ -624,6 +624,10 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 **ตรรกะอยู่ที่ `lib/stock-docs.ts` ที่เดียว — ทุกคำสั่งที่แตะยอดรับ/ยกเลิก/จำนวนสั่งต้องผ่าน `lockReceipt()` ก่อน** · สถานะคำนวณที่ `receiptStatusOf()` ห้ามตั้งเอง ·
 `StockDocumentLine.receivedQty` เป็นค่า denormalized (CHECK `received + cancelled ≤ quantity`) · ledger ผูก `receiptRoundId` + `documentId` · ใบรับเดิมถูก backfill เป็นรอบที่ 1 ·
 ยังเรียก `createStockReceipt` แบบไม่ส่ง `mode` ได้ = รับครบทันที (ขั้นตอนเดิม) · เทส `stock-receipt-rounds.test.ts` 14
+
+**ปิดยอดหลายรอบต่อวัน (2026-09-29 · รอ PR/deploy · migration `20260929150000_closing_rounds` มี backfill)**: `Sale.closingId` ผูกบิลกับรอบที่นับมัน ·
+**ทางเดียวที่ตั้ง `closingId` คือ `closeCashierDay`** (สร้างรอบ → `updateMany where closingId null` → คำนวณยอดจากบิลที่ผูก ในทรานแซคชันเดียว) · void ล็อกรายบิล
+(`where closingId: null`) · รอบ 2+ ต้องมีบิลใหม่ · query ที่ใช้: `getOpenSalesSummary` / `getDayClosings` (ชื่อเดิม `getTodaySalesSummary`/`getTodayClosing` ถูกลบ)
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

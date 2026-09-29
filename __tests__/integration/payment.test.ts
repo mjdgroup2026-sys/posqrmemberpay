@@ -244,7 +244,7 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
   })
 
   it("ปิดบิลแล้วบิลปรากฏใน /pos/history และสรุปยอดปิดกะของแคชเชียร์", async () => {
-    const { listSales, getTodaySalesSummary, getCustomerPaymentStatus } = await import("@/lib/queries")
+    const { listSales, getOpenSalesSummary, getCustomerPaymentStatus } = await import("@/lib/queries")
     const { sessionId, qr } = await seedTableWithOrder()
 
     await confirmMobilePayment(makeFormData({ sessionId, paymentMethod: "CARD", reference: "EDC-9" }))
@@ -256,7 +256,7 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
     // ชื่อรายการเป็น snapshot ในแถวเอง — ไม่มี Product ให้ join
     expect(sales[0]?.items.map((item) => item.name).sort()).toEqual(["ข้าวกะเพราหมู", "ต้มยำกุ้ง"])
 
-    const summary = await getTodaySalesSummary(TEST_STORE_ID, "test-user")
+    const summary = await getOpenSalesSummary(TEST_STORE_ID, "test-user")
     expect(summary.billCount).toBe(1)
     expect(summary.totalSales).toBe(260)
     // 20g — บัตรแยกจากพร้อมเพย์แล้ว

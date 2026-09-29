@@ -6,7 +6,7 @@ import { nextSaleNumber } from "@/lib/sale-number"
 import { guardAction } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { toNumber } from "@/lib/format"
-import { businessDateOnly, isSameBusinessDay } from "@/lib/day"
+import { isSameBusinessDay } from "@/lib/day"
 import {
   saleSchema,
   voidSaleSchema,
@@ -248,6 +248,7 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
           status: true,
           createdAt: true,
           cashierId: true,
+          closingId: true,
           items: { select: { productId: true, quantity: true } },
         },
       })
@@ -259,24 +260,15 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
         })
       }
 
-      // ปิดยอดของแคชเชียร์คนนั้นในวันนั้นไปแล้ว ห้าม void ซ้ำ ไม่งั้นตัวเลขที่ปิดไปแล้วคลาดเคลื่อน
-      const closed = await tx.cashierClosing.findUnique({
-        where: {
-          storeId_cashierId_closingDate: {
-            storeId,
-            cashierId: sale.cashierId,
-            closingDate: businessDateOnly(sale.createdAt),
-          },
-        },
-        select: { id: true },
-      })
-      if (closed) {
-        throw new SaleAbort({ error: `ปิดยอดของวันนี้ไปแล้ว จึงยกเลิกบิล ${sale.saleNumber} ไม่ได้` })
+      // บิลที่ถูกนับในรอบปิดยอดแล้ว ห้าม void ไม่งั้นตัวเลขของรอบนั้นคลาดเคลื่อน (ล็อกรายบิล — บิลที่ขายหลังปิดรอบยัง void ได้)
+      if (sale.closingId) {
+        throw new SaleAbort({ error: `บิล ${sale.saleNumber} ถูกนับในรอบปิดยอดแล้ว จึงยกเลิกไม่ได้` })
       }
 
       // ★ conditional update — กัน race กับผู้ใช้อีกคนที่กด void บิลเดียวกันพร้อมกัน
+      // และกับการปิดรอบที่กำลังผูกบิลนี้ (closingId: null) — ถ้าปิดรอบชนะ void ล้ม
       const marked = await tx.sale.updateMany({
-        where: { id: sale.id, status: "COMPLETED" },
+        where: { id: sale.id, status: "COMPLETED", closingId: null },
         data: {
           status: "VOIDED",
           voidedAt: new Date(),
@@ -284,7 +276,7 @@ export async function voidSale(formData: FormData): Promise<ActionResult> {
           voidReason: reason,
         },
       })
-      if (marked.count === 0) throw new SaleAbort({ error: `บิล ${sale.saleNumber} ถูกยกเลิกไปแล้ว` })
+      if (marked.count === 0) throw new SaleAbort({ error: `บิล ${sale.saleNumber} ถูกยกเลิกหรือถูกปิดรอบไปแล้ว — รีเฟรชหน้าแล้วลองใหม่` })
 
       // ★ บิลกลับบ้าน (Phase 17c) จ่ายเงินตอนสั่ง ครัวจึงกำลังทำอยู่ — void แล้วต้องหยุดครัวด้วย
       //   ไม่งั้นอาหารของบิลที่ยกเลิกไปแล้วยังถูกทำต่อจนเสร็จ · รายการที่ยกเลิกไปก่อนหน้าไม่ถูกแตะซ้ำ

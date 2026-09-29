@@ -42,7 +42,8 @@ const HINT: Record<ClosingChannel, string> = {
 }
 
 /// `closingDate` = คีย์ YYYY-MM-DD ของวันทางธุรกิจที่กำลังปิด (Phase 19 — เลือกจากหน้า `/pos/closing?date=`)
-/// `isToday` ใช้แค่เปลี่ยนถ้อยคำบนปุ่ม/คำเตือน ด่านจริง (ห้ามอนาคต · ปิดซ้ำไม่ได้) อยู่ที่ action
+/// `isToday`/`roundNo` ใช้แค่เปลี่ยนถ้อยคำบนปุ่ม/คำเตือน ด่านจริง (ห้ามอนาคต · เลขรอบ · บิลที่ยังไม่ปิด) อยู่ที่ action
+/// `summary` = ยอดที่ยังไม่ถูกปิดรอบ (getOpenSalesSummary) ไม่ใช่ยอดทั้งวัน
 ///
 /// 20g: การ์ดทีละช่องทาง (ไอคอน · ยอดในระบบ · ช่องกรอก · ป้ายส่วนต่าง) + แถบสรุป "ตรวจแล้ว n/m · ส่วนต่างรวม" —
 /// เจ้าของขอให้สวยขึ้น 2026-09-24 (ตารางเดิมเบียดในคอลัมน์ 420px) · เงินสดบังคับกรอก ช่องทางอื่นไม่บังคับ
@@ -51,10 +52,13 @@ export function ClosingForm({
   summary,
   closingDate,
   isToday,
+  roundNo = 1,
 }: {
   summary: ClosingSummary
   closingDate: string
   isToday: boolean
+  /// รอบที่กำลังจะปิด (ปิดหลายรอบต่อวัน 2026-09-29)
+  roundNo?: number
 }) {
   const router = useRouter()
   const [counted, setCounted] = useState<Record<ClosingChannel, string>>({ CASH: "", TRANSFER: "", QR: "", PROMPTPAY: "", CARD: "" })
@@ -197,7 +201,7 @@ export function ClosingForm({
       {/* แถบสรุป — ตรวจไปกี่ช่อง ส่วนต่างรวมเท่าไหร่ (นับเฉพาะช่องที่กรอก) */}
       <div className="closing-summary" role="status" aria-live="polite">
         <span>
-          <span className="t-caption">ยอดขายรวมทุกช่องทาง</span>
+          <span className="t-caption">{roundNo > 1 ? `ยอดขายของรอบที่ ${roundNo}` : "ยอดขายรวมทุกช่องทาง"}</span>
           <br />
           <strong className="num" style={{ fontSize: "1.1rem" }}>
             ฿{formatBaht(summary.totalSales)}
@@ -227,10 +231,10 @@ export function ClosingForm({
 
       <button type="submit" className="btn btn-primary btn-block" disabled={pending || !valid}>
         {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : null}
-        {isToday ? "ยืนยันปิดยอดประจำวัน" : `ยืนยันปิดยอดย้อนหลัง ${formatBusinessDate(closingDate)}`}
+        {isToday ? `ยืนยันปิดยอดรอบที่ ${roundNo}` : `ยืนยันปิดยอดรอบที่ ${roundNo} ย้อนหลัง ${formatBusinessDate(closingDate)}`}
       </button>
       <p className="t-caption">
-        ปิดยอดได้วันละ 1 ครั้งต่อคน และเมื่อปิดแล้วจะยกเลิกบิลของ{isToday ? "วันนี้" : "วันที่เลือก"}ไม่ได้อีก · ยอดที่กรอกแก้ย้อนหลังไม่ได้
+        บิลที่ถูกนับในรอบนี้จะยกเลิกไม่ได้อีก · ถ้ามีขายเพิ่มหลังปิด ปิดเป็นรอบถัดไปได้ที่หน้านี้ · ยอดที่กรอกแก้ย้อนหลังไม่ได้
       </p>
     </form>
   )

@@ -183,7 +183,7 @@ describe.skipIf(!dbReady)("ขายอาหารกลับบ้าน (Pha
 
     const [history, closing, report] = await Promise.all([
       queries.listSales(TEST_STORE_ID),
-      queries.getTodaySalesSummary(TEST_STORE_ID, "owner"),
+      queries.getOpenSalesSummary(TEST_STORE_ID, "owner"),
       queries.getSalesReport(TEST_STORE_ID),
     ])
 

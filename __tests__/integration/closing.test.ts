@@ -92,7 +92,7 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     expect(closing.note).toBe("เงินขาด")
   })
 
-  it("ปิดยอดซ้ำวันเดิมต้องถูกปฏิเสธและมีบันทึกเดียวเท่านั้น", async () => {
+  it("ปิดรอบถัดไปโดยไม่มีบิลใหม่ต้องถูกปฏิเสธ และมีบันทึกเดียวเท่านั้น", async () => {
     // arrange
     const product = await createTestProduct({ quantity: 100, price: "50.00" })
     await sell(product.id, 1, "CASH")
@@ -103,11 +103,94 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
 
     // assert
     expect(second.ok).toBe(false)
-    expect(second.ok === false && second.error).toContain("ปิดซ้ำวันเดิมไม่ได้")
+    expect(second.ok === false && second.error).toContain("ไม่มีบิลใหม่")
     expect(await testPrisma().cashierClosing.count()).toBe(1)
   })
 
-  it("ปิดยอดพร้อมกันหลายคำขอต้องสำเร็จแค่ครั้งเดียว (unique cashierId+closingDate)", async () => {
+  // ───────────── ปิดหลายรอบต่อวัน (เจ้าของสั่ง 2026-09-29) ─────────────
+
+  it("ขายเพิ่มหลังปิดรอบ 1 → รอบ 2 นับเฉพาะบิลใหม่ · บิลทุกใบถูกผูกกับรอบของตัวเอง", async () => {
+    const product = await createTestProduct({ quantity: 100, price: "50.00" })
+    const a = await sell(product.id, 2, "CASH") // 100
+    const first = await closeCashierDay(makeFormData({ countedCash: 100, note: "" }))
+    expect(first.ok).toBe(true)
+    expect(first.ok && first.message).toContain("รอบที่ 1")
+
+    const b = await sell(product.id, 1, "CASH") // 50
+    const c = await sell(product.id, 3, "TRANSFER") // 150
+    const queries = await import("@/lib/queries")
+    const storeId = (await testPrisma().storeMember.findFirstOrThrow({ where: { userId: "test-user" } })).storeId
+    const open = await queries.getOpenSalesSummary(storeId, "test-user")
+    expect(open).toMatchObject({ totalSales: 200, totalCash: 50, totalTransfer: 150, billCount: 2 })
+
+    const second = await closeCashierDay(makeFormData({ countedCash: 40, note: "" }))
+    expect(second.ok).toBe(true)
+    expect(second.ok && second.message).toContain("รอบที่ 2")
+
+    const rounds = await queries.getDayClosings(storeId, "test-user")
+    expect(rounds.map((r) => [r.roundNo, r.totalSales, r.billCount, r.difference])).toEqual([
+      [1, 100, 1, 0],
+      [2, 200, 2, -10],
+    ])
+    const closingOf = async (id: string) => (await testPrisma().sale.findUniqueOrThrow({ where: { id } })).closingId
+    if (!a.ok || !b.ok || !c.ok) throw new Error("ขายไม่สำเร็จ")
+    expect(await closingOf(a.data!.id)).toBe(rounds[0].id)
+    expect(await closingOf(b.data!.id)).toBe(rounds[1].id)
+    expect(await closingOf(c.data!.id)).toBe(rounds[1].id)
+    expect((await queries.getOpenSalesSummary(storeId, "test-user")).billCount).toBe(0)
+  })
+
+  it("void: บิลในรอบที่ปิดแล้วยกเลิกไม่ได้ · บิลที่ขายหลังปิดยังยกเลิกได้และถูกนับเป็นบิลยกเลิกของรอบถัดไป", async () => {
+    const product = await createTestProduct({ quantity: 100, price: "50.00" })
+    const inRound = await sell(product.id, 1, "CASH")
+    await closeCashierDay(makeFormData({ countedCash: 50, note: "" }))
+    const after = await sell(product.id, 1, "CASH")
+    if (!inRound.ok || !after.ok) throw new Error("ขายไม่สำเร็จ")
+
+    const locked = await voidSale(makeFormData({ id: inRound.data!.id, reason: "ทดสอบ" }))
+    expect(locked.ok).toBe(false)
+    expect(locked.ok === false && locked.error).toContain("รอบปิดยอด")
+
+    const allowed = await voidSale(makeFormData({ id: after.data!.id, reason: "ลูกค้าเปลี่ยนใจ" }))
+    expect(allowed.ok).toBe(true)
+
+    const second = await closeCashierDay(makeFormData({ countedCash: 0, note: "" }))
+    expect(second.ok).toBe(true)
+    const round2 = await testPrisma().cashierClosing.findFirstOrThrow({ where: { roundNo: 2 } })
+    expect(round2.billCount).toBe(0)
+    expect(round2.voidedCount).toBe(1)
+    expect(Number(round2.totalSales)).toBe(0)
+  })
+
+  it("★ ปิดรอบพร้อมกับ void บิลเดียวกัน → ตัวเลขสอดคล้องเสมอ (void ชนะ = รอบนับเป็นบิลยกเลิก · ปิดรอบชนะ = void ล้ม)", async () => {
+    const product = await createTestProduct({ quantity: 100, price: "50.00" })
+    for (let i = 0; i < 5; i++) {
+      await resetDb()
+      await ensureTestUser()
+      const fresh = await createTestProduct({ quantity: 100, price: "50.00" })
+      const sale = await sell(fresh.id, 1, "CASH")
+      if (!sale.ok) throw new Error("ขายไม่สำเร็จ")
+
+      const [voided, closed] = await Promise.all([
+        voidSale(makeFormData({ id: sale.data!.id, reason: "ชนกัน" })),
+        closeCashierDay(makeFormData({ countedCash: 0, note: "" })),
+      ])
+      expect(closed.ok).toBe(true)
+      const round = await testPrisma().cashierClosing.findFirstOrThrow()
+      const row = await testPrisma().sale.findUniqueOrThrow({ where: { id: sale.data!.id } })
+      expect(row.closingId).toBe(round.id)
+      if (voided.ok) {
+        expect(row.status).toBe("VOIDED")
+        expect([round.billCount, round.voidedCount, Number(round.totalSales)]).toEqual([0, 1, 0])
+      } else {
+        expect(row.status).toBe("COMPLETED")
+        expect([round.billCount, round.voidedCount, Number(round.totalSales)]).toEqual([1, 0, 50])
+      }
+    }
+    void product
+  })
+
+  it("ปิดยอดพร้อมกันหลายคำขอต้องสำเร็จแค่ครั้งเดียว (unique ร้าน+คน+วัน+รอบ)", async () => {
     // arrange
     const product = await createTestProduct({ quantity: 100, price: "50.00" })
     await sell(product.id, 1, "CASH")
@@ -193,7 +276,7 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     expect(await testPrisma().cashierClosing.count()).toBe(0)
   })
 
-  it("ปิดรอบย้อนหลังแล้ว void บิลของวันนั้นต้องถูกปฏิเสธ (กติกา F9 ตามวันของบิล)", async () => {
+  it("ปิดรอบแล้ว void บิลที่อยู่ในรอบต้องถูกปฏิเสธ (F9 — ล็อกรายบิล)", async () => {
     // บิลเมื่อวาน — กติกา F6 เดิม (void ได้เฉพาะวันเดียวกัน) จะปฏิเสธก่อนอยู่แล้ว จึงต้องเทสด้วยบิล "วันนี้"
     // ที่ปิดรอบวันนี้ผ่านฟิลด์ closingDate ชัด ๆ (ไม่ใช่ค่า default) ให้แน่ใจว่าเส้นทางเลือกวันล็อก void จริง
     const product = await createTestProduct({ quantity: 100, price: "100.00" })
@@ -238,7 +321,7 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
 
     const queries = await import("@/lib/queries")
     const storeId = (await testPrisma().storeMember.findFirstOrThrow({ where: { userId: "test-user" } })).storeId
-    const summary = await queries.getTodaySalesSummary(storeId, "test-user")
+    const summary = await queries.getOpenSalesSummary(storeId, "test-user")
     expect(summary).toMatchObject({ totalCash: 100, totalPromptPay: 250, totalCard: 80, totalTransfer: 40, totalQR: 0, totalSales: 470 })
 
     // พร้อมเพย์เข้าบัญชีจริง 240 (ขาด 10) · บัตรตรง · โอน/QR ไม่ได้ตรวจ
@@ -255,7 +338,7 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     expect(row.countedTransfer).toBeNull()
     expect(row.countedQR).toBeNull()
 
-    const view = await queries.getTodayClosing(storeId, "test-user")
+    const [view] = await queries.getDayClosings(storeId, "test-user")
     const diff = Object.fromEntries(view!.channels.map((c) => [c.channel, c.difference]))
     expect(diff).toEqual({ CASH: 0, TRANSFER: null, QR: null, PROMPTPAY: -10, CARD: 0 })
   })
@@ -283,9 +366,14 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     expect(day.totalSales).toBe(450)
     expect(day.totals).toEqual({ CASH: 100, TRANSFER: 0, QR: 0, PROMPTPAY: 300, CARD: 50 })
     const byId = Object.fromEntries(day.byCashier.map((r) => [r.cashierId, r]))
-    expect(byId["system"]).toMatchObject({ isSystem: true, closed: null, totalSales: 300 })
-    expect(byId["test-user"]).toMatchObject({ closed: true, totalSales: 100 })
-    expect(byId["cashier-2"]).toMatchObject({ closed: false, totalSales: 50 })
+    expect(byId["system"]).toMatchObject({ isSystem: true, rounds: null, openBills: 0, totalSales: 300 })
+    expect(byId["test-user"]).toMatchObject({ rounds: 1, openBills: 0, totalSales: 100 })
+    expect(byId["cashier-2"]).toMatchObject({ rounds: 0, openBills: 1, totalSales: 50 })
+
+    // ขายเพิ่มหลังปิด → ขึ้นว่าค้าง
+    await bill("CASH", "20.00")
+    const later = await queries.getStoreDaySummary(storeId)
+    expect(later.byCashier.find((r) => r.cashierId === "test-user")).toMatchObject({ rounds: 1, openBills: 1 })
     // ระบบอยู่ท้ายเสมอ
     expect(day.byCashier.at(-1)?.cashierId).toBe("system")
   })

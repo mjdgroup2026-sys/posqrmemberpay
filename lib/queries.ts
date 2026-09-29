@@ -352,12 +352,6 @@ export async function listSales(storeId: string, params: { from?: string; to?: s
   })
 
   const { start, end } = businessDayRange()
-  // ปิดยอดของแคชเชียร์คนไหนไปแล้วบ้างในวันนี้ — บิลของคนนั้นกด void ไม่ได้อีก (F9)
-  const closings = await db.cashierClosing.findMany({
-    where: { closingDate: businessDateOnly() },
-    select: { cashierId: true },
-  })
-  const closedCashiers = new Set(closings.map((c) => c.cashierId))
 
   return rows.map((sale) => ({
     id: sale.id,
@@ -381,7 +375,8 @@ export async function listSales(storeId: string, params: { from?: string; to?: s
       sale.status === "COMPLETED" &&
       sale.createdAt >= start &&
       sale.createdAt < end &&
-      !closedCashiers.has(sale.cashierId),
+      // บิลที่ถูกนับในรอบปิดยอดแล้ว void ไม่ได้ (ล็อกรายบิล · voidSale เช็คซ้ำที่ server)
+      sale.closingId === null,
     items: sale.items.map((item) => ({
       id: item.id,
       // ชื่อเป็น snapshot ในแถวเอง — บิลจาก Mobile Order ไม่มี product ให้ join (Phase 10)
@@ -501,20 +496,22 @@ export type ClosingSummary = {
   voidedCount: number
 }
 
-/// สรุปยอดของแคชเชียร์คนหนึ่งในวันทางธุรกิจที่ระบุ (ค่าเริ่มต้น = วันนี้) — คำนวณสดจาก Sale จริงเสมอ ไม่มีการกรอกเอง
+/// ยอดที่ **ยังไม่ถูกปิดรอบ** ของแคชเชียร์คนหนึ่งในวันทางธุรกิจที่ระบุ (ค่าเริ่มต้น = วันนี้) = สิ่งที่รอบถัดไปจะนับ
+/// (ปิดหลายรอบต่อวัน 2026-09-29 — บิลที่ปิดรอบแล้วมี closingId) · คำนวณสดจาก Sale จริงเสมอ ไม่มีการกรอกเอง
 /// Phase 19: รับ `date` เพื่อปิดรอบย้อนหลังได้ — ผู้เรียกต้องผ่าน parseBusinessDayKey() มาก่อน (กันวันอนาคต)
-export async function getTodaySalesSummary(storeId: string, cashierId: string, date: Date = new Date()): Promise<ClosingSummary> {
+export async function getOpenSalesSummary(storeId: string, cashierId: string, date: Date = new Date()): Promise<ClosingSummary> {
   const db = forStore(storeId)
   const { start, end } = businessDayRange(date)
+  const open = { cashierId, closingId: null, createdAt: { gte: start, lt: end } }
 
   const [byMethod, voidedCount] = await Promise.all([
     db.sale.groupBy({
       by: ["paymentMethod"],
-      where: { cashierId, status: "COMPLETED", createdAt: { gte: start, lt: end } },
+      where: { ...open, status: "COMPLETED" },
       _sum: { total: true },
       _count: { _all: true },
     }),
-    db.sale.count({ where: { cashierId, status: "VOIDED", voidedAt: { gte: start, lt: end } } }),
+    db.sale.count({ where: { ...open, status: "VOIDED" } }),
   ])
 
   const { totals, totalSales, billCount } = bucketByChannel(
@@ -535,6 +532,7 @@ export async function getTodaySalesSummary(storeId: string, cashierId: string, d
 type ClosingRow = {
   id: string
   closingDate: Date
+  roundNo: number
   totalSales: Prisma.Decimal
   totalCash: Prisma.Decimal
   totalTransfer: Prisma.Decimal
@@ -581,6 +579,7 @@ function closingView(row: ClosingRow) {
   return {
     id: row.id,
     closingDate: row.closingDate,
+    roundNo: row.roundNo,
     totalSales: toNumber(row.totalSales),
     totalCash: totals.CASH,
     totalTransfer: totals.TRANSFER,
@@ -597,19 +596,23 @@ function closingView(row: ClosingRow) {
   }
 }
 
-export async function getTodayClosing(storeId: string, cashierId: string, date: Date = new Date()) {
+export type ClosingView = ReturnType<typeof closingView>
+
+/// ทุกรอบที่ปิดแล้วของแคชเชียร์คนหนึ่งในวันนั้น เรียงรอบ 1 → n
+export async function getDayClosings(storeId: string, cashierId: string, date: Date = new Date()): Promise<ClosingView[]> {
   const db = forStore(storeId)
-  const row = await db.cashierClosing.findUnique({
-    where: { storeId_cashierId_closingDate: { storeId, cashierId, closingDate: businessDateOnly(date) } },
+  const rows = await db.cashierClosing.findMany({
+    where: { cashierId, closingDate: businessDateOnly(date) },
+    orderBy: { roundNo: "asc" },
   })
-  return row ? closingView(row) : null
+  return rows.map(closingView)
 }
 
 export async function listClosings(storeId: string, params: { cashierId?: string; limit?: number } = {}) {
   const db = forStore(storeId)
   const rows = await db.cashierClosing.findMany({
     where: params.cashierId ? { cashierId: params.cashierId } : {},
-    orderBy: [{ closingDate: "desc" }, { closedAt: "desc" }],
+    orderBy: [{ closingDate: "desc" }, { roundNo: "desc" }],
     take: params.limit ?? 60,
     include: { cashier: { select: { name: true } } },
   })
@@ -628,8 +631,10 @@ export type StoreDaySummary = {
     totalSales: number
     billCount: number
     totals: Record<ClosingChannel, number>
-    /// ปิดรอบวันนี้แล้วหรือยัง (ระบบ = null เพราะไม่มีรอบ)
-    closed: boolean | null
+    /// จำนวนรอบที่ปิดแล้วในวันนั้น (ระบบ = null เพราะไม่มีรอบ)
+    rounds: number | null
+    /// บิลที่ยังไม่ถูกปิดรอบ (รวมบิลยกเลิก) — > 0 = ต้องปิดรอบเพิ่ม · ระบบ = 0 เสมอ
+    openBills: number
   }[]
 }
 
@@ -641,14 +646,15 @@ export async function getStoreDaySummary(storeId: string, date: Date = new Date(
   const db = forStore(storeId)
   const { start, end } = businessDayRange(date)
 
-  const [grouped, closings] = await Promise.all([
+  const [grouped, closings, open] = await Promise.all([
     db.sale.groupBy({
       by: ["cashierId", "paymentMethod"],
       where: { status: "COMPLETED", createdAt: { gte: start, lt: end } },
       _sum: { total: true },
       _count: { _all: true },
     }),
-    db.cashierClosing.findMany({ where: { closingDate: businessDateOnly(date) }, select: { cashierId: true } }),
+    db.cashierClosing.groupBy({ by: ["cashierId"], where: { closingDate: businessDateOnly(date) }, _count: { _all: true } }),
+    db.sale.groupBy({ by: ["cashierId"], where: { closingId: null, createdAt: { gte: start, lt: end } }, _count: { _all: true } }),
   ])
 
   const cashierIds = [...new Set(grouped.map((row) => row.cashierId))]
@@ -656,7 +662,8 @@ export async function getStoreDaySummary(storeId: string, date: Date = new Date(
     ? await db.user.findMany({ where: { id: { in: cashierIds } }, select: { id: true, name: true } })
     : []
   const nameOf = new Map(users.map((u) => [u.id, u.name]))
-  const closedIds = new Set(closings.map((c) => c.cashierId))
+  const roundsOf = new Map(closings.map((c) => [c.cashierId, c._count._all]))
+  const openOf = new Map(open.map((c) => [c.cashierId, c._count._all]))
 
   const all = bucketByChannel(grouped.map((row) => ({ paymentMethod: row.paymentMethod, total: toNumber(row._sum.total ?? 0), bills: row._count._all })))
   const byCashier = cashierIds.map((cashierId) => {
@@ -673,7 +680,8 @@ export async function getStoreDaySummary(storeId: string, date: Date = new Date(
       totalSales: mine.totalSales,
       billCount: mine.billCount,
       totals: mine.totals,
-      closed: isSystem ? null : closedIds.has(cashierId),
+      rounds: isSystem ? null : (roundsOf.get(cashierId) ?? 0),
+      openBills: isSystem ? 0 : (openOf.get(cashierId) ?? 0),
     }
   })
   // คนก่อน ระบบไว้ท้าย · ยอดมากขึ้นก่อน
