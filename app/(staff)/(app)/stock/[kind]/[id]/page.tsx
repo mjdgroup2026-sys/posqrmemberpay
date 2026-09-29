@@ -3,7 +3,6 @@ import { notFound } from "next/navigation"
 import { getStockDocument, type StockDocDetail } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { DOC_STATUS_CHIP, isOpenReceipt, SLUG_OF_TYPE, stockDocKind } from "@/lib/stock-doc-kinds"
-import { businessDayKey } from "@/lib/day"
 import { formatBaht, formatBusinessDate, formatDateTime, formatNumber } from "@/lib/format"
 import { StockDocActions } from "@/components/stock-doc-actions"
 import { ReceiptLineButtons, ReceiptToolbar, VoidRoundButton } from "@/components/receipt-actions"
@@ -68,12 +67,8 @@ export default async function StockDocDetailPage({ params }: PageProps<"/stock/[
             <ReceiptToolbar
               documentId={doc.id}
               docNumber={doc.docNumber}
-              editHref={`/stock/${kind.slug}/${doc.id}/edit`}
-              today={businessDayKey()}
+              receiveHref={`/stock/${kind.slug}/${doc.id}/edit`}
               canAdd={open && canAdd}
-              lines={doc.lines
-                .map((line) => ({ lineId: line.id, name: line.name, sku: line.sku, unit: line.unit, remaining: remainingOf(line) }))
-                .filter((line) => line.remaining > 0)}
             />
           ) : null}
         </StockDocActions>
@@ -157,6 +152,10 @@ type DocLine = StockDocDetail["lines"][number]
 
 function remainingOf(line: DocLine): number {
   return Math.max(line.quantity - line.receivedQty - line.cancelledQty, 0)
+}
+
+function sumOf(lines: DocLine[], pick: (line: DocLine) => number): number {
+  return lines.reduce((sum, line) => sum + pick(line), 0)
 }
 
 /// ใบเบิก / ใบปรับ
@@ -288,19 +287,30 @@ function ReceiptLines({ doc, canAdd }: { doc: StockDocDetail; canAdd: boolean })
             )
           })}
         </tbody>
-        {doc.totalCost !== null ? (
-          <tfoot>
-            <tr style={{ borderTop: "2px solid var(--line)" }}>
-              <td colSpan={8} style={{ ...numCell, fontWeight: 600 }}>
-                มูลค่ารวม (ตามจำนวนสั่ง)
-              </td>
-              <td className="num" style={{ ...numCell, fontWeight: 700 }}>
-                ฿{formatBaht(doc.totalCost)}
-              </td>
-              {showButtons ? <td className="no-print" /> : null}
-            </tr>
-          </tfoot>
-        ) : null}
+        <tfoot>
+          <tr style={{ borderTop: "2px solid var(--line)", fontWeight: 700 }}>
+            <td style={cell} />
+            <td style={cell}>รวม</td>
+            <td className="num" style={numCell}>
+              {formatNumber(sumOf(doc.lines, (line) => line.quantity))}
+            </td>
+            <td className="num" style={numCell}>
+              {formatNumber(sumOf(doc.lines, (line) => line.receivedQty))}
+            </td>
+            <td className="num" style={numCell}>
+              {formatNumber(sumOf(doc.lines, (line) => line.cancelledQty))}
+            </td>
+            <td className="num" style={numCell}>
+              {voided ? "—" : formatNumber(sumOf(doc.lines, remainingOf))}
+            </td>
+            <td style={cell} />
+            <td style={cell} />
+            <td className="num" style={numCell}>
+              {doc.totalCost === null ? "—" : `฿${formatBaht(doc.totalCost)}`}
+            </td>
+            {showButtons ? <td className="no-print" /> : null}
+          </tr>
+        </tfoot>
       </table>
     </div>
   )
@@ -313,7 +323,7 @@ function ReceiptRounds({ doc, canVoidRound }: { doc: StockDocDetail; canVoidRoun
       <h3 className="t-h3">ประวัติการรับสินค้า</h3>
       {doc.rounds.length === 0 ? (
         <p className="t-small" style={{ color: "var(--ink-3)" }}>
-          ยังไม่ได้รับสินค้า — กด &quot;รับสินค้า&quot; เมื่อของมาถึง
+          ยังไม่ได้รับสินค้า — กด &quot;รับสินค้า / แก้ไข&quot; เมื่อของมาถึง
         </p>
       ) : (
         doc.rounds.map((round) => {

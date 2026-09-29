@@ -926,6 +926,11 @@ export const receiptLineSchema = z.object({
       .max(MAX_MONEY, "ราคาทุนสูงเกินไป")
       .optional(),
   ),
+  // (21d) จำนวน "รับครั้งนี้" ของฟอร์มตารางเดียว — ใช้เฉพาะตอนกด "บันทึก + รับสินค้า" · ว่าง = ไม่ได้กรอก
+  receiveQty: z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    nonNegativeInt("จำนวนรับครั้งนี้").optional(),
+  ),
 })
 
 export const issueLineSchema = z.object({

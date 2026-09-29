@@ -326,6 +326,35 @@ export async function receiveRound(
   return { docNumber: doc.docNumber, roundNo, lineCount: receiving.length, status }
 }
 
+/// รับสินค้า 1 รอบโดยระบุจำนวนต่อ "สินค้า" (ฟอร์มตารางเดียว — บรรทัดใหม่ที่เพิ่งสร้างในทรานแซคชันเดียวกันยังไม่มี lineId ฝั่ง client)
+/// สินค้าไม่ซ้ำในใบ (zod บังคับ) จึงแปลง productId → lineId ได้ตรงตัว · จำนวน 0 = ไม่รับบรรทัดนั้นรอบนี้
+/// ค้างรับเหลือ = ใบยังเปิด (รับบางส่วน) กลับมารับรอบถัดไปได้ · ใบปิดเองเมื่อค้าง 0 เท่านั้น
+export async function receiveByProduct(
+  tx: StoreTx,
+  ctx: { storeId: string; userId: string },
+  documentId: string,
+  round: { receivedDate: string; referenceNo?: string; note?: string },
+  quantities: { productId: string; quantity: number }[],
+): Promise<Awaited<ReturnType<typeof receiveRound>>> {
+  const lines = await tx.stockDocumentLine.findMany({ where: { documentId }, select: { id: true, productId: true } })
+  const lineOf = new Map(lines.map((line) => [line.productId, line.id]))
+  const receiving = quantities
+    .filter((entry) => entry.quantity > 0)
+    .map((entry) => {
+      const lineId = lineOf.get(entry.productId)
+      if (!lineId) throw new StockDocError("มีรายการที่ไม่อยู่ในใบรับนี้ — กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง")
+      return { lineId, quantity: entry.quantity }
+    })
+  if (receiving.length === 0) throw new StockDocError("กรุณากรอกจำนวน \"รับครั้งนี้\" อย่างน้อย 1 รายการ")
+  return receiveRound(tx, ctx, {
+    documentId,
+    receivedDate: round.receivedDate,
+    referenceNo: round.referenceNo,
+    note: round.note,
+    lines: receiving,
+  })
+}
+
 /// ยกเลิกรอบรับ (หนึ่งหรือหลายรอบของใบเดียว) — ตัดของออกจากสต็อกด้วยรายการชดเชย + ถอยยอดรับของบรรทัด
 /// · conditional update `status: POSTED` กันกดยกเลิกรอบเดียวกันซ้ำ · ตัดทุกบรรทัดของทุกรอบเรียงตาม productId รวดเดียว (กัน deadlock)
 async function reverseRounds(

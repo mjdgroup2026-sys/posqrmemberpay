@@ -205,6 +205,76 @@ describe.skipIf(!dbReady)("ใบรับสินค้าแบบร่า�
     })
   })
 
+  describe("ฟอร์มตารางเดียว — บันทึก + รับสินค้า (mode=receive)", () => {
+    it("สร้างใบ สั่ง 20 รับครั้งนี้ 15 → รับบางส่วน · สต็อก +15 · เลขใบส่งของอยู่ที่รอบ · ยังค้าง 5 รับเพิ่มได้ภายหลัง", async () => {
+      const a = await createTestProduct({ quantity: 0 })
+      const created = await createStockReceipt(
+        makeFormData({
+          mode: "receive",
+          docDate: today(),
+          receivedDate: today(),
+          roundReferenceNo: "DO-77",
+          lines: JSON.stringify([{ productId: a.id, quantity: 20, receiveQty: 15 }]),
+        }),
+      )
+      expect(created.ok).toBe(true)
+      if (!created.ok || !created.data) return
+      const saved = await docOf(created.data.id)
+      expect(saved.status).toBe("PARTIAL")
+      expect(saved.lines[0]).toMatchObject({ quantity: 20, receivedQty: 15 })
+      expect(saved.rounds.map((round) => round.referenceNo)).toEqual(["DO-77"])
+      expect(await qty(a.id)).toBe(15)
+
+      // กลับมารับเพิ่มผ่านฟอร์มเดิม (แก้ใบ + รับ) — เพิ่มสินค้าใหม่พร้อมรับในรอบเดียวกัน
+      const b = await createTestProduct({ quantity: 0 })
+      const more = await updateStockReceipt(
+        makeFormData({
+          mode: "receive",
+          id: saved.id,
+          docDate: today(),
+          lines: JSON.stringify([
+            { lineId: saved.lines[0].id, productId: a.id, quantity: 20, receiveQty: 5 },
+            { productId: b.id, quantity: 3, receiveQty: 3 },
+          ]),
+        }),
+      )
+      expect(more.ok).toBe(true)
+      const after = await docOf(saved.id)
+      expect(after.status).toBe("RECEIVED")
+      expect(after.rounds).toHaveLength(2)
+      expect(await qty(a.id)).toBe(20)
+      expect(await qty(b.id)).toBe(3)
+    })
+
+    it("บันทึก + รับ ที่รับเกินยอดค้าง = ไม่บันทึกอะไรเลย (ทั้งการแก้ใบและการรับ)", async () => {
+      const a = await createTestProduct({ quantity: 0 })
+      const doc = await draft([{ productId: a.id, quantity: 10 }])
+      const result = await updateStockReceipt(
+        makeFormData({
+          mode: "receive",
+          id: doc.id,
+          docDate: today(),
+          supplierName: "เปลี่ยนชื่อ",
+          lines: JSON.stringify([{ lineId: doc.lineIds[0], productId: a.id, quantity: 10, receiveQty: 11 }]),
+        }),
+      )
+      expect(result.ok === false && result.error).toContain("รับได้อีกไม่เกิน 10")
+      const saved = await docOf(doc.id)
+      expect(saved.supplierName).toBe("แม็คโคร")
+      expect(saved.status).toBe("DRAFT")
+      expect(await qty(a.id)).toBe(0)
+    })
+
+    it("บันทึก + รับ โดยไม่กรอกรับครั้งนี้เลย = ปฏิเสธ และไม่สร้างใบ", async () => {
+      const a = await createTestProduct({ quantity: 0 })
+      const result = await createStockReceipt(
+        makeFormData({ mode: "receive", docDate: today(), lines: JSON.stringify([{ productId: a.id, quantity: 5, receiveQty: 0 }]) }),
+      )
+      expect(result.ok === false && result.error).toContain("รับครั้งนี้")
+      expect(await testPrisma().stockDocument.count()).toBe(0)
+    })
+  })
+
   describe("ยกเลิกยอดค้าง / ปิดใบ", () => {
     it("สั่ง 20 รับ 15 แล้วยกเลิก 5 → ปิดแล้ว (รับไม่ครบ) · สต็อกไม่เปลี่ยน · คืนยอดค้างแล้วรับต่อได้จนรับครบ", async () => {
       const a = await createTestProduct({ quantity: 0 })
