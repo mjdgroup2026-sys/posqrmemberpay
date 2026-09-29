@@ -2379,7 +2379,7 @@ enum ResourceKey {
       พิมพ์ได้ · ปุ่ม "สร้างใบรับสินค้าจากรายการนี้" (เติมบรรทัดให้ในฟอร์มใบรับ)
 - [x] สิทธิ์ `REPORTS:VIEW` · เพิ่มลิงก์ในหน้า `/reports` + sidebar · raw SQL ใหม่ทุกจุดมี `WHERE "storeId"` · tenant-isolation + เทสตัวเลขรายงาน
 
-#### 🔧 21d — ใบรับแบบร่าง + รับได้หลายรอบ (เจ้าของสั่ง 2026-09-29) — โค้ดเสร็จ รอ deploy
+#### ✅ 21d — ใบรับแบบร่าง + รับได้หลายรอบ (เจ้าของสั่ง 2026-09-29) — ขึ้น production แล้ว 2026-09-29 (PR #41 · CI run 36524375769)
 > **ที่มา**: "ใบรับสินค้า ถ้ายังไม่กดรับสินค้า สามารถแก้ไขได้ บางทีสินค้าอาจจะไม่ได้รับทีเดียว อาจจะรับได้หลายครั้ง" + "สั่ง 20 รับ 15 ขาด 5 —
 > อาจต้องยกเลิก 5 หรืออาจมารับเพิ่ม 5" · **ตัดสินใจ**: ใบเดียวรับได้หลายรอบ (ไม่แยกใบสั่งซื้อ) · รับเกินยอดค้างไม่ได้ · ยกเลิก/คืนยอดค้างรายบรรทัด ·
 > ไม่เพิ่ม resource (ADD = แก้/รับ/ปิด · DELETE = ยกเลิกรอบ/ใบ) · ใบเบิก/ใบปรับไม่เปลี่ยน · **มี migration 2 ไฟล์ + backfill**
@@ -2397,8 +2397,11 @@ enum ResourceKey {
       `components/receipt-actions.tsx`
 - [x] `/reports/reorder` อ่านราคาทุนล่าสุดจากบรรทัดที่รับจริง (`receivedQty > 0`) ไม่ใช่ใบร่าง
 - [x] เทส `stock-receipt-rounds.test.ts` 14 (รวม **กดรับพร้อมกัน 5 คำขอจากใบสั่ง 10 ผ่าน 2**) · tenant-isolation +1 query +6 action · `stock-docs.test.ts` ปรับสถานะใบรับ
-- [ ] deploy: backup ก่อน merge (มี backfill แตะ `stock_document`/`stock_transaction`) → ซ้อมบน dump production → merge → CI → ตรวจ
-      `_prisma_migrations` = 36 · ใบรับเดิมทุกใบเป็น RECEIVED และมี `stock_receipt_round` เท่าจำนวนใบรับ
+- [x] รายการเอกสารคลังเปิดมาที่วันนี้ (ตั้งแต่ = ถึง = วันนี้) เหมือนรายงาน — เดิม 30 วัน (เจ้าของสั่ง 2026-09-29)
+- [x] deploy 2026-09-29: backup `posmobileorderdb-20260929-114642.dump` → ซ้อมบนสำเนา production (34 → 36 · diff สะอาด · ใบรับ 2 ใบ → RECEIVED + รอบที่ 1 · สต็อกรวม 108 เท่าเดิม)
+      → merge PR #41 → CI run 36524375769 · สลับ blue → **green** · ตรวจฐานจริง: `_prisma_migrations` = 36 · ใบรับ 2 ใบ RECEIVED · `stock_receipt_round` = 2 ·
+      คอนเทนเนอร์ green มี route `stock/[kind]/[id]/edit`
+- [ ] เจ้าของลองหน้าจอจริง: สร้างร่าง → รับไม่ครบ → ยกเลิกยอดค้าง / รับเพิ่ม
 
 #### เอกสาร
 - [x] §2 Data Model (`StockDocument`/`StockDocumentLine`/ฟิลด์ใหม่) · §4 resource `STOCK_ADJUST` · §5 F30–F33 · §6 routes · CLAUDE.md สถานะ + รายการ raw SQL + ที่เดียวของ `lib/stock-docs.ts`
