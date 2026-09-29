@@ -607,12 +607,12 @@ CSV `GET /api/reports/sales-csv` (`lib/sales-csv.ts` · BOM + กันสูต
 (หน้าจอฟัง SSE + `getStaffBillStatus` อ่านอย่างเดียว **ห้ามยิงถามธนาคาร** ตามกติกา callback-only) · ร้านอื่น = QR พร้อมเพย์ของร้าน + พนักงานกดยืนยัน ·
 `/spa/reports` ตัวกรอง ช่วงวัน/พนักงาน/ประเภทบริการ (`SpaReportFilter` + `spaFilterSql()` · ประเภทบริการอ่านจากเมนูปัจจุบัน ไม่ snapshot) · hover ตารางจองบอกเวลาสิ้นสุด/ว่างถึงกี่โมง · 712 เทสผ่าน
 
-**🔧 20g ปิดยอดแยกตามช่องทาง — โค้ดเสร็จ 2026-09-24 (รอ deploy · migration `20260924150000_split_closing_payment_methods` · ไม่มี env)**:
+**✅ 20g ปิดยอดแยกตามช่องทาง — ขึ้น production แล้ว 2026-09-24 (PR #36 · CI run 35981268505 · backup `posmobileorderdb-20260924-162525.dump` · `_prisma_migrations` = 32 · migration `20260924150000_split_closing_payment_methods` · ไม่มี env)**:
 `CashierClosing.totalPromptPay` แยกจาก `totalCard` + ยอดจริงที่กรอกไม่บังคับ `counted{Transfer,QR,PromptPay,Card}` (null = ไม่ได้ตรวจ · ส่วนต่างคำนวณตอนแสดง) ·
 **วิธีชำระลงถังไหนตัดสินที่ `bucketByChannel()` ใน `lib/closing-channels.ts` ที่เดียว** (เพิ่ม `PaymentMethod` ใหม่ต้องเพิ่มช่องที่นี่ ไม่งั้นตกถังบัตร) ·
 `getStoreDaySummary()` สรุปทั้งร้านรายวัน รวมบิลที่ธนาคารปิดเอง (`SYSTEM_USER_ID` ไม่มีรอบของตัวเอง) — ท้าย `/pos/closing` เฉพาะ `REPORTS:VIEW` · 717 เทสผ่าน
 
-**🔧 Phase 21 เอกสารคลัง + ขายสินค้าจากจอขายอาหาร + รายงานสต็อก — โค้ดเสร็จ 2026-09-28 (branch `feat/stock-documents` · รอ PR/deploy · migration 2 ไฟล์ · ไม่มี env ใหม่)**:
+**✅ Phase 21 เอกสารคลัง + ขายสินค้าจากจอขายอาหาร + รายงานสต็อก — ขึ้น production แล้ว 2026-09-28 (PR #39 · CI run 36413160305 · backup `posmobileorderdb-20260928-174029.dump` ซ้อมบนสำเนาแล้ว · migration 2 ไฟล์ · `_prisma_migrations` = 34 · สลับไป green · ไม่มี env ใหม่ · หลัง deploy เจ้าของต้องเปิดหมวดที่จะขายใน `/categories` และติ๊ก `STOCK_ADJUST` ใน `/roles` เอง)**:
 **21a** `StockDocument`/`StockDocumentLine` (ใบรับ GR- · ใบเบิก GI- มีชื่อผู้เบิก · ใบปรับ ADJ- กรอกยอดนับได้) · หน้า `/stock/[kind]` (receipts/issues/adjustments) รายการ/สร้าง/ดู+พิมพ์/ยกเลิก ·
 resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเดิมมีแค่ OWNER) · `STOCK_IN/OUT` ได้ DELETE = ยกเลิกเอกสาร · `/stock-in` `/stock-out` redirect · ลบ `stockIn`/`stockOut` เดิม ·
 **21b** `Category.sellableAtPos` · จอขายอาหารแท็บ "สินค้า" (`buildProductLines` ใน `lib/order-lines.ts` ตรวจหมวดที่ server) · กลับบ้านตัดสต็อกใน tx บิล · เข้าโต๊ะตัดตอนส่ง
