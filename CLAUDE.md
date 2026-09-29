@@ -317,7 +317,7 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   grep -rn '\$queryRaw\|\$executeRaw' --include='*.ts' . --exclude-dir=node_modules --exclude-dir=generated
   ```
   ปัจจุบันมี raw SQL อยู่ที่ `lib/queries.ts` (19 จุด — รวมรายงานพนักงานนวด Phase 20c 2 จุด + รายงานแยกประเภท/CSV 20e 5 จุด + รายงานสต็อก Phase 21c 4 จุด · วันแบบเวลาไทยใช้ `SALE_DAY_SQL`/`LEDGER_DAY_SQL` เพราะ `createdAt` เป็น timestamp ไม่มี TZ),
-  `lib/stock-docs.ts` (3 จุด — advisory lock เลขเอกสาร namespace 720_005 ต่อร้าน+ประเภท · `nextDocNumber()` · `SELECT … FOR UPDATE` แถวสินค้าของใบปรับ, Phase 21), `app/actions/products.ts` (1 จุด — `nextSku()`),
+  `lib/stock-docs.ts` (4 จุด — advisory lock เลขเอกสาร namespace 720_005 ต่อร้าน+ประเภท · `nextDocNumber()` · `SELECT … FOR UPDATE` แถวสินค้าของใบปรับ, Phase 21 · `lockReceipt()` `SELECT … FOR UPDATE` หัวใบรับ, 21d), `app/actions/products.ts` (1 จุด — `nextSku()`),
   `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
   `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
   `lib/table-session.ts` (1 จุด — `lockTableRow()` `SELECT … FOR UPDATE` แถว `restaurant_table` ก่อนคืนห้อง/เปิดบิลแยก, 2026-09-23)
@@ -618,6 +618,12 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 **21b** `Category.sellableAtPos` · จอขายอาหารแท็บ "สินค้า" (`buildProductLines` ใน `lib/order-lines.ts` ตรวจหมวดที่ server) · กลับบ้านตัดสต็อกใน tx บิล · เข้าโต๊ะตัดตอนส่ง
 (`MobileOrderItem.productId` + CHECK เมนูหรือสินค้าอย่างใดอย่างหนึ่ง · SERVED ทันที ไม่เข้าครัว) · ยกเลิกรายการ/โต๊ะคืนสต็อก · `/pos` redirect ไปจอขายอาหาร ·
 **21c** `/reports/stock-sales` (+ CSV) · `/reports/reorder` (สูตร `lib/reorder.ts`) · เทสใหม่ stock-docs 12 · pos-products 10 · stock-report 2 · reorder unit 4 · tenant-isolation +7 query/+5 action
+
+**🔧 21d ใบรับแบบร่าง + รับได้หลายรอบ — โค้ดเสร็จ 2026-09-29 (branch `feat/receipt-rounds` · รอ PR/deploy · migration 2 ไฟล์ มี backfill · ไม่มี env)**:
+ใบรับบันทึกเป็นร่าง (ไม่แตะสต็อก) แก้ได้จนกว่าจะรับครบ แล้วกด "รับสินค้า" เป็นรอบ ๆ (`StockReceiptRound` · วันที่รับ + เลขใบส่งของต่อรอบ) · ของขาด = ยกเลิกยอดค้างรายบรรทัด/ปิดใบ · คืนยอดค้างได้ ·
+**ตรรกะอยู่ที่ `lib/stock-docs.ts` ที่เดียว — ทุกคำสั่งที่แตะยอดรับ/ยกเลิก/จำนวนสั่งต้องผ่าน `lockReceipt()` ก่อน** · สถานะคำนวณที่ `receiptStatusOf()` ห้ามตั้งเอง ·
+`StockDocumentLine.receivedQty` เป็นค่า denormalized (CHECK `received + cancelled ≤ quantity`) · ledger ผูก `receiptRoundId` + `documentId` · ใบรับเดิมถูก backfill เป็นรอบที่ 1 ·
+ยังเรียก `createStockReceipt` แบบไม่ส่ง `mode` ได้ = รับครบทันที (ขั้นตอนเดิม) · เทส `stock-receipt-rounds.test.ts` 14
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

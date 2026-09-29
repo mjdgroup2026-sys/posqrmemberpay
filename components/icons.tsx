@@ -68,4 +68,9 @@ export {
   FileText as IconDocument,
   SlidersHorizontal as IconStockAdjust,
   ShoppingBasket as IconReorder,
+  // Phase 21d — ใบรับแบบร่าง + รับหลายรอบ
+  Save as IconSave,
+  Truck as IconTruck,
+  Undo2 as IconUndo,
+  CircleSlash as IconCancelRemaining,
 } from "lucide-react"

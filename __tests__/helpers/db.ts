@@ -98,7 +98,7 @@ export async function resetDb(): Promise<void> {
   await db.$executeRawUnsafe(
     [
       "TRUNCATE TABLE",
-      '"sale_item", "stock_transaction", "stock_document_line", "stock_document", "cashier_closing", "member_point_transaction", "sale",',
+      '"sale_item", "stock_transaction", "stock_receipt_round_line", "stock_receipt_round", "stock_document_line", "stock_document", "cashier_closing", "member_point_transaction", "sale",',
       '"mobile_order_item", "mobile_order", "notification", "line_notification_log",',
       '"payment_intent", "table_session",',
       '"qr_code", "restaurant_table", "modifier_option", "modifier_group", "menu_item",',

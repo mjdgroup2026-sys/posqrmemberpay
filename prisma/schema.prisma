@@ -62,24 +62,27 @@ model Product {
 
 /// ledger แบบ append-only — ห้ามลบ/แก้ย้อนหลัง ถ้าต้องกลับรายการให้สร้างรายการชดเชยใหม่
 model StockTransaction {
-  id          String          @id @default(cuid())
-  storeId     String
-  productId   String
-  type        TransactionType
-  quantity    Int
-  note        String?
-  saleId      String?
+  id             String          @id @default(cuid())
+  storeId        String
+  productId      String
+  type           TransactionType
+  quantity       Int
+  note           String?
+  saleId         String?
   /// เอกสารรับ/เบิก/ปรับที่ทำให้เกิดรายการนี้ (Phase 21) — null = ขาย/ยกเลิกบิล หรือรายการก่อนมีเอกสาร
-  documentId  String?
+  documentId     String?
   /// บรรทัดสินค้าบนโต๊ะที่ตัดสต็อก (Phase 21b) — ตัดตอนส่งรายการ ยังไม่มีบิล จึงผูกบรรทัดแทน saleId
-  orderItemId String?
-  createdAt   DateTime        @default(now())
+  orderItemId    String?
+  /// รอบรับของใบรับ (Phase 21d) — ใบรับรับได้หลายรอบ ledger ของแต่ละรอบ (รวมรายการชดเชยตอนยกเลิกรอบ) ผูกรอบนั้น
+  receiptRoundId String?
+  createdAt      DateTime        @default(now())
 
-  store     Store            @relation(fields: [storeId], references: [id])
-  product   Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sale      Sale?            @relation(fields: [saleId], references: [id], onDelete: SetNull)
-  document  StockDocument?   @relation(fields: [documentId], references: [id], onDelete: Restrict)
-  orderItem MobileOrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  store        Store              @relation(fields: [storeId], references: [id])
+  product      Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sale         Sale?              @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  document     StockDocument?     @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  orderItem    MobileOrderItem?   @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  receiptRound StockReceiptRound? @relation(fields: [receiptRoundId], references: [id], onDelete: Restrict)
 
   @@index([storeId])
   @@index([productId])
@@ -87,6 +90,7 @@ model StockTransaction {
   @@index([saleId])
   @@index([documentId])
   @@index([orderItemId])
+  @@index([receiptRoundId])
   @@map("stock_transaction")
 }
 
@@ -97,12 +101,19 @@ enum StockDocType {
   ADJUST
 }
 
+/// ใบเบิก/ใบปรับ: POSTED → VOIDED · รอบรับ (StockReceiptRound): POSTED → VOIDED
+/// ใบรับ (Phase 21d): DRAFT → PARTIAL → RECEIVED / CLOSED (ค้าง 0 แต่มียอดยกเลิก) · VOIDED — คำนวณที่ `receiptStatusOf()` ใน lib/stock-docs.ts ที่เดียว
 enum StockDocStatus {
   POSTED
   VOIDED
+  DRAFT
+  PARTIAL
+  RECEIVED
+  CLOSED
 }
 
-/// หัวเอกสารคลัง (Phase 21) — บันทึกแล้วมีผลกับสต็อกทันที (ไม่มีร่าง) · แก้ไม่ได้ ยกเลิกได้ด้วยรายการชดเชยเท่านั้น
+/// หัวเอกสารคลัง (Phase 21) — ใบเบิก/ใบปรับบันทึกแล้วมีผลกับสต็อกทันที แก้ไม่ได้ ยกเลิกได้ด้วยรายการชดเชยเท่านั้น
+/// · ใบรับ (Phase 21d) เป็นร่างที่แก้ได้ แล้วรับของเข้าเป็นรอบ ๆ (`StockReceiptRound`) — สต็อกขยับเฉพาะตอนรับแต่ละรอบ
 model StockDocument {
   id            String         @id @default(cuid())
   storeId       String
@@ -111,7 +122,7 @@ model StockDocument {
   /// วันที่ของเอกสาร (วันทำการแบบเวลาไทย) — ต่างจาก createdAt ได้ เช่น บันทึกใบรับย้อนหลัง
   docDate       DateTime       @db.Date
   status        StockDocStatus @default(POSTED)
-  /// ใบรับ: ผู้ขาย + เลขใบกำกับ/ใบส่งของ
+  /// ใบรับ: ผู้ขาย + เลขอ้างอิง (ใบสั่งซื้อ) — เลขใบส่งของอยู่ที่แต่ละรอบรับ
   supplierName  String?
   referenceNo   String?
   /// ใบเบิก: ชื่อผู้เบิก (พิมพ์เอง ไม่ผูกบัญชีผู้ใช้) — บังคับตอนสร้างใบเบิก
@@ -119,7 +130,7 @@ model StockDocument {
   /// ใบปรับ: เหตุผล (นับสต็อก/ของเสีย/…)
   reason        String?
   note          String?
-  /// ใบรับ: มูลค่ารวมจากราคาทุนที่กรอก (null = ไม่ได้กรอกราคาทุน)
+  /// ใบรับ: มูลค่ารวมของจำนวนที่สั่งจากราคาทุนที่กรอก (null = ไม่ได้กรอกราคาทุน)
   totalCost     Decimal?       @db.Decimal(12, 2)
   createdById   String
   createdAt     DateTime       @default(now())
@@ -132,6 +143,7 @@ model StockDocument {
   voidedBy     User?               @relation("StockDocVoidedBy", fields: [voidedById], references: [id])
   lines        StockDocumentLine[]
   transactions StockTransaction[]
+  rounds       StockReceiptRound[]
 
   @@unique([storeId, docNumber])
   @@index([storeId, type, docDate])
@@ -140,26 +152,77 @@ model StockDocument {
 
 /// บรรทัดเอกสารคลัง (Phase 21)
 model StockDocumentLine {
-  id         String   @id @default(cuid())
-  documentId String
-  lineNo     Int
-  productId  String
-  /// ใบรับ/ใบเบิก: จำนวน (> 0) · ใบปรับ: ส่วนต่างแบบมีเครื่องหมาย (นับได้ − ในระบบ)
-  quantity   Int
+  id           String   @id @default(cuid())
+  documentId   String
+  lineNo       Int
+  productId    String
+  /// ใบรับ: จำนวนที่สั่ง · ใบเบิก: จำนวน (> 0) · ใบปรับ: ส่วนต่างแบบมีเครื่องหมาย (นับได้ − ในระบบ)
+  quantity     Int
+  /// ใบรับ (Phase 21d): รับแล้วสะสมจากรอบที่ยังไม่ยกเลิก (denormalized — แก้ใต้ล็อกแถวหัวใบเท่านั้น)
+  receivedQty  Int      @default(0)
+  /// ใบรับ (Phase 21d): ยอดค้างที่ยกเลิกไม่รับแล้ว · ค้าง = quantity − receivedQty − cancelledQty (CHECK ในฐาน)
+  cancelledQty Int      @default(0)
+  cancelReason String?
   /// ใบรับ: ราคาทุนต่อหน่วย (ไม่บังคับ)
-  unitCost   Decimal? @db.Decimal(12, 2)
-  lineTotal  Decimal? @db.Decimal(12, 2)
+  unitCost     Decimal? @db.Decimal(12, 2)
+  lineTotal    Decimal? @db.Decimal(12, 2)
   /// ใบปรับ: ยอดในระบบ ณ ตอนบันทึก (snapshot) และยอดที่นับได้จริง
-  systemQty  Int?
-  countedQty Int?
-  note       String?
+  systemQty    Int?
+  countedQty   Int?
+  note         String?
 
-  document StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  product  Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  document   StockDocument           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  product    Product                 @relation(fields: [productId], references: [id], onDelete: Restrict)
+  roundLines StockReceiptRoundLine[]
 
   @@index([documentId])
   @@index([productId])
   @@map("stock_document_line")
+}
+
+/// รอบรับของใบรับ (Phase 21d) — 1 รอบ = ของมาส่ง 1 ครั้ง มีเลขใบส่งของของตัวเอง · ยกเลิกรายรอบได้ด้วยรายการชดเชย
+model StockReceiptRound {
+  id           String         @id @default(cuid())
+  storeId      String
+  documentId   String
+  roundNo      Int
+  /// วันที่ได้รับของจริง (วันทำการแบบเวลาไทย · ห้ามอนาคต)
+  receivedDate DateTime       @db.Date
+  referenceNo  String?
+  note         String?
+  status       StockDocStatus @default(POSTED)
+  createdById  String
+  createdAt    DateTime       @default(now())
+  voidedAt     DateTime?
+  voidedById   String?
+  voidReason   String?
+
+  store        Store                   @relation(fields: [storeId], references: [id])
+  document     StockDocument           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy    User                    @relation("StockRoundCreatedBy", fields: [createdById], references: [id])
+  voidedBy     User?                   @relation("StockRoundVoidedBy", fields: [voidedById], references: [id])
+  lines        StockReceiptRoundLine[]
+  transactions StockTransaction[]
+
+  @@unique([documentId, roundNo])
+  @@index([storeId])
+  @@map("stock_receipt_round")
+}
+
+/// บรรทัดของรอบรับ (Phase 21d) — เฉพาะบรรทัดที่รับจริงในรอบนั้น (> 0)
+model StockReceiptRoundLine {
+  id             String @id @default(cuid())
+  roundId        String
+  documentLineId String
+  productId      String
+  quantity       Int
+
+  round        StockReceiptRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  documentLine StockDocumentLine @relation(fields: [documentLineId], references: [id], onDelete: Restrict)
+
+  @@index([roundId])
+  @@index([documentLineId])
+  @@map("stock_receipt_round_line")
 }
 
 // ───────────────────── Better Auth 1.7.x (โครงจาก @better-auth/core) ─────────────────────
@@ -245,21 +308,23 @@ model User {
   updatedAt       DateTime @updatedAt
 
   storeMemberships          StoreMember[]
-  ownedBrands               Brand[]           @relation("BrandOwner")
+  ownedBrands               Brand[]             @relation("BrandOwner")
   sessions                  Session[]
   accounts                  Account[]
-  sales                     Sale[]            @relation("SaleCashier")
-  voided                    Sale[]            @relation("SaleVoidedBy")
-  closedSessions            TableSession[]    @relation("SessionClosedBy")
-  cancelledOrderItems       MobileOrderItem[] @relation("OrderItemCancelledBy")
-  acknowledgedNotifications Notification[]    @relation("NotificationAckBy")
-  createdStockDocuments     StockDocument[]   @relation("StockDocCreatedBy")
-  voidedStockDocuments      StockDocument[]   @relation("StockDocVoidedBy")
-  storeSettingsUpdates      StoreSettings[]   @relation("StoreSettingsUpdatedBy")
-  sentInvites               StoreInvite[]     @relation("StoreInviteInvitedBy")
-  acceptedInvites           StoreInvite[]     @relation("StoreInviteAcceptedBy")
-  uploadedAssets            StoreAsset[]      @relation("AssetUploadedBy")
-  createdBookings           Booking[]         @relation("BookingCreatedBy")
+  sales                     Sale[]              @relation("SaleCashier")
+  voided                    Sale[]              @relation("SaleVoidedBy")
+  closedSessions            TableSession[]      @relation("SessionClosedBy")
+  cancelledOrderItems       MobileOrderItem[]   @relation("OrderItemCancelledBy")
+  acknowledgedNotifications Notification[]      @relation("NotificationAckBy")
+  createdStockDocuments     StockDocument[]     @relation("StockDocCreatedBy")
+  voidedStockDocuments      StockDocument[]     @relation("StockDocVoidedBy")
+  createdReceiptRounds      StockReceiptRound[] @relation("StockRoundCreatedBy")
+  voidedReceiptRounds       StockReceiptRound[] @relation("StockRoundVoidedBy")
+  storeSettingsUpdates      StoreSettings[]     @relation("StoreSettingsUpdatedBy")
+  sentInvites               StoreInvite[]       @relation("StoreInviteInvitedBy")
+  acceptedInvites           StoreInvite[]       @relation("StoreInviteAcceptedBy")
+  uploadedAssets            StoreAsset[]        @relation("AssetUploadedBy")
+  createdBookings           Booking[]           @relation("BookingCreatedBy")
   closings                  CashierClosing[]
 
   @@map("user")
@@ -1092,6 +1157,7 @@ model Store {
   products          Product[]
   stockTransactions StockTransaction[]
   stockDocuments    StockDocument[]
+  receiptRounds     StockReceiptRound[]
   categories        Category[]
   sales             Sale[]
   cashierClosings   CashierClosing[]

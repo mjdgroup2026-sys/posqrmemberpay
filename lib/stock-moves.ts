@@ -13,6 +13,7 @@ export type StockLink = {
   saleId?: string | null
   documentId?: string | null
   orderItemId?: string | null
+  receiptRoundId?: string | null
 }
 
 /// ของไม่พอ — เก็บชื่อ/ยอดไว้ให้ผู้เรียกประกอบข้อความไทยตามบริบท (เบิก / ขาย / ยกเลิกใบรับ)
@@ -90,5 +91,6 @@ function linkData(link: StockLink) {
     saleId: link.saleId ?? null,
     documentId: link.documentId ?? null,
     orderItemId: link.orderItemId ?? null,
+    receiptRoundId: link.receiptRoundId ?? null,
   }
 }

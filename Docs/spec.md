@@ -101,6 +101,7 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `saleId` | String? | optional, FK → Sale | ระบุถ้ารายการนี้เกิดจากการขาย POS (checkout สร้าง OUT, void สร้าง IN ชดเชย) — `null` หากเป็น Stock In/Out ที่คีย์ด้วยมือ |
 | `documentId` | String? | optional, FK → StockDocument (RESTRICT) | *(Phase 21)* เอกสารรับ/เบิก/ปรับที่ทำให้เกิดรายการนี้ (รวมรายการชดเชยตอนยกเลิกเอกสาร) |
 | `orderItemId` | String? | optional, FK → MobileOrderItem (SetNull) | *(Phase 21b)* บรรทัดสินค้าบนโต๊ะที่ตัดสต็อกตอนส่ง (ยังไม่มีบิล) + รายการคืนตอนยกเลิกรายการ/โต๊ะ |
+| `receiptRoundId` | String? | optional, FK → StockReceiptRound (RESTRICT) | *(Phase 21d)* รอบรับของใบรับ (มี `documentId` คู่กันเสมอ) รวมรายการชดเชยตอนยกเลิกรอบ |
 | `createdAt` | DateTime | auto | เวลาบันทึกรายการ |
 
 > **ที่มาของรายการ ledger (Phase 21)** — มี `documentId` = ตามประเภทเอกสาร · มี `saleId`/`orderItemId` = การขาย (รวมคืนจาก void/ยกเลิก) ·
@@ -112,11 +113,11 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `type` | `StockDocType` | enum {RECEIPT, ISSUE, ADJUST} | ใบรับ / ใบเบิก / ใบปรับยอด |
 | `docNumber` | String | unique (storeId, docNumber) | `GR-000001` / `GI-000001` / `ADJ-000001` เดินแยกต่อร้าน+ประเภท ใต้ advisory lock 720_005 |
 | `docDate` | Date | ≤ วันนี้ (เวลาไทย) | วันที่ของเอกสาร (บันทึกย้อนหลังได้ ห้ามอนาคต) |
-| `status` | `StockDocStatus` | {POSTED, VOIDED} | บันทึกแล้วมีผลทันที · ยกเลิก = สร้างรายการชดเชย ไม่ลบ |
-| `supplierName` / `referenceNo` | String? | ใบรับ | ผู้ขาย + เลขใบกำกับ/ใบส่งของ |
+| `status` | `StockDocStatus` | ใบเบิก/ปรับ {POSTED, VOIDED} · **ใบรับ (21d) {DRAFT, PARTIAL, RECEIVED, CLOSED, VOIDED}** | ใบเบิก/ปรับบันทึกแล้วมีผลทันที · ใบรับคำนวณจากยอดบรรทัดที่ `receiptStatusOf()` ที่เดียว: ค้าง > 0 = DRAFT (ยังไม่รับ) / PARTIAL · ค้าง 0 = RECEIVED หรือ CLOSED (มียอดยกเลิก) · ยกเลิก = สร้างรายการชดเชย ไม่ลบ |
+| `supplierName` / `referenceNo` | String? | ใบรับ | ผู้ขาย + เลขอ้างอิง (ใบสั่งซื้อ) — เลขใบส่งของอยู่ที่แต่ละรอบรับ (21d) |
 | `requesterName` | String? | **บังคับในใบเบิก** | ชื่อผู้เบิก (พิมพ์เอง ไม่ผูกบัญชีผู้ใช้) |
 | `reason` | String? | **บังคับในใบปรับ** | เหตุผลการปรับยอด |
-| `totalCost` | Decimal? | ใบรับ | มูลค่ารวมจากราคาทุนที่กรอก (null = ไม่ได้กรอกเลย) |
+| `totalCost` | Decimal? | ใบรับ | มูลค่ารวมของ**จำนวนสั่ง**จากราคาทุนที่กรอก (null = ไม่ได้กรอกเลย) |
 | `createdById` / `voidedById` / `voidedAt` / `voidReason` | | | ผู้บันทึก / ผู้ยกเลิก |
 
 ### StockDocumentLine *(Phase 21 — บรรทัดเอกสาร)*
@@ -126,6 +127,18 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `quantity` | Int | ใบรับ/เบิก: จำนวน > 0 · **ใบปรับ: ส่วนต่างมีเครื่องหมาย** (นับได้ − ในระบบ) |
 | `unitCost` / `lineTotal` | Decimal? | ใบรับ: ราคาทุน (ไม่บังคับ) |
 | `systemQty` / `countedQty` | Int? | ใบปรับ: ยอดในระบบ ณ ตอนบันทึก (อ่านใต้ `SELECT … FOR UPDATE`) และยอดที่นับได้ |
+| `receivedQty` / `cancelledQty` / `cancelReason` | Int / Int / String? | *(21d)* ใบรับ: รับแล้วสะสมจากรอบที่ยังไม่ยกเลิก · ยอดค้างที่ยกเลิกไม่รับ · **ค้าง = quantity − receivedQty − cancelledQty** (CHECK ในฐาน `received + cancelled ≤ GREATEST(quantity, 0)`) · แก้ใต้ล็อกแถวหัวใบเท่านั้น |
+
+### StockReceiptRound *(Phase 21d — รอบรับของใบรับ)*
+| ฟิลด์ | ชนิด | คำอธิบาย |
+|---|---|---|
+| `documentId` · `roundNo` | | unique (documentId, roundNo) · เลขรอบคิดใต้ล็อกหัวใบ |
+| `receivedDate` | Date | วันที่ได้รับของจริง (ห้ามอนาคต) |
+| `referenceNo` / `note` | String? | เลขใบส่งของของรอบนั้น |
+| `status` | `StockDocStatus` | POSTED / VOIDED · ยกเลิกรอบ = รายการชดเชย + ถอย `receivedQty` |
+| `createdById` / `voidedById` / `voidedAt` / `voidReason` | | |
+
+`StockReceiptRoundLine` (roundId · documentLineId RESTRICT · productId · quantity > 0) — เฉพาะบรรทัดที่รับจริงในรอบนั้น · บรรทัดของใบที่เคยมีรอบรับ (แม้ยกเลิกแล้ว) ลบ/เปลี่ยนสินค้าไม่ได้
 
 ### Sale
 | ฟิลด์ | ชนิด | เงื่อนไข | คำอธิบาย |
@@ -1038,10 +1051,14 @@ enum ResourceKey {
       `/mobile-order/notifications` และรวมใน badge ของ sidebar — คำนวณสดเหมือนใบ "รอธนาคารยืนยัน" จึงหายเองเมื่อเช็กอิน/ยกเลิก ไม่มีปุ่มรับทราบ
 - [x] เทส `booking.test.ts` 12 · `therapist-shift.test.ts` 4 · tenant-isolation +6 query +6 action (651 ทั้งชุด)
 
-### F30 — เอกสารคลัง รับ/เบิก/ปรับ แบบ Header + Detail (Phase 21a)
-- ใบรับสินค้า (ผู้ขาย · เลขใบส่งของ · ราคาทุนต่อบรรทัดไม่บังคับ) · ใบเบิก (**ชื่อผู้เบิกบังคับ**) · ใบปรับ (กรอกยอดที่นับได้ ระบบคิดส่วนต่าง · เหตุผลบังคับ)
-- บันทึกแล้วมีผลทันที · ทั้งใบอยู่ในทรานแซคชันเดียว — **บรรทัดใดของไม่พอ = ไม่บันทึกทั้งใบ** · เบิกพร้อมกัน 10 ใบจากสต็อก 8 ผ่าน 4 (กติกาข้อ 4)
-- แก้เอกสารไม่ได้ ยกเลิกได้ (สิทธิ์ DELETE ของ resource นั้น) = สร้างรายการชดเชยทุกบรรทัด · ยกเลิกใบรับที่ของถูกขาย/เบิกไปแล้วจนไม่พอ = ปฏิเสธ
+### F30 — เอกสารคลัง รับ/เบิก/ปรับ แบบ Header + Detail (Phase 21a · ใบรับหลายรอบ 21d)
+- ใบรับสินค้า (ผู้ขาย · เลขอ้างอิง · ราคาทุนต่อบรรทัดไม่บังคับ) · ใบเบิก (**ชื่อผู้เบิกบังคับ**) · ใบปรับ (กรอกยอดที่นับได้ ระบบคิดส่วนต่าง · เหตุผลบังคับ)
+- ใบเบิก/ใบปรับบันทึกแล้วมีผลทันที · ทั้งใบอยู่ในทรานแซคชันเดียว — **บรรทัดใดของไม่พอ = ไม่บันทึกทั้งใบ** · เบิกพร้อมกัน 10 ใบจากสต็อก 8 ผ่าน 4 (กติกาข้อ 4)
+- **ใบรับ (21d)**: บันทึกเป็น "ร่าง" (ไม่แตะสต็อก) หรือ "บันทึกและรับครบทันที" · ยังค้างรับ = แก้ไขได้ (บรรทัดที่รับแล้วลบ/เปลี่ยนสินค้าไม่ได้ · จำนวนสั่ง ≥ รับ + ยกเลิก)
+  · กด "รับสินค้า" ได้หลายรอบ แต่ละรอบมีวันที่รับ + เลขใบส่งของ · **รับเกินยอดค้างไม่ได้** (ได้ของเกินให้แก้จำนวนสั่งก่อน) · กดรับพร้อมกันไม่รับเกิน (ล็อกหัวใบ)
+  · ของขาด: "ยกเลิกยอดค้าง" รายบรรทัด (บางส่วน/ทั้งหมด + เหตุผล) หรือ "ปิดใบ" (ยกเลิกยอดค้างทุกบรรทัด) · "คืนยอดค้าง" ได้ตราบที่ใบยังไม่ถูกยกเลิก (ผู้ขายกลับมาส่ง)
+  · แก้/รับ/ยกเลิกยอดค้าง/ปิดใบ = `STOCK_IN:ADD` · ยกเลิกรอบรับ/ยกเลิกทั้งใบ = `STOCK_IN:DELETE`
+- ใบเบิก/ใบปรับแก้ไม่ได้ ยกเลิกได้ (สิทธิ์ DELETE ของ resource นั้น) = สร้างรายการชดเชยทุกบรรทัด · ยกเลิกใบรับ = ยกเลิกทุกรอบที่รับแล้ว · ของถูกขาย/เบิกไปแล้วจนไม่พอ = ปฏิเสธ
 - ใบปรับต้องมี `STOCK_ADJUST` — มีแค่สิทธิ์รับ/เบิกปรับยอดไม่ได้
 - `/stock-in` `/stock-out` เดิม redirect ไป `/stock/receipts` `/stock/issues` · ประวัติ ledger เดิมอยู่ครบ
 
@@ -2361,6 +2378,27 @@ enum ResourceKey {
 - [x] `/reports/reorder` — สินค้าคงเหลือ ≤ จุดสั่งซื้อ: คงเหลือ · จุดสั่งซื้อ · ขายเฉลี่ย/วัน (30 วัน) · อยู่ได้อีกกี่วัน · **จำนวนแนะนำให้สั่ง** ·
       พิมพ์ได้ · ปุ่ม "สร้างใบรับสินค้าจากรายการนี้" (เติมบรรทัดให้ในฟอร์มใบรับ)
 - [x] สิทธิ์ `REPORTS:VIEW` · เพิ่มลิงก์ในหน้า `/reports` + sidebar · raw SQL ใหม่ทุกจุดมี `WHERE "storeId"` · tenant-isolation + เทสตัวเลขรายงาน
+
+#### 🔧 21d — ใบรับแบบร่าง + รับได้หลายรอบ (เจ้าของสั่ง 2026-09-29) — โค้ดเสร็จ รอ deploy
+> **ที่มา**: "ใบรับสินค้า ถ้ายังไม่กดรับสินค้า สามารถแก้ไขได้ บางทีสินค้าอาจจะไม่ได้รับทีเดียว อาจจะรับได้หลายครั้ง" + "สั่ง 20 รับ 15 ขาด 5 —
+> อาจต้องยกเลิก 5 หรืออาจมารับเพิ่ม 5" · **ตัดสินใจ**: ใบเดียวรับได้หลายรอบ (ไม่แยกใบสั่งซื้อ) · รับเกินยอดค้างไม่ได้ · ยกเลิก/คืนยอดค้างรายบรรทัด ·
+> ไม่เพิ่ม resource (ADD = แก้/รับ/ปิด · DELETE = ยกเลิกรอบ/ใบ) · ใบเบิก/ใบปรับไม่เปลี่ยน · **มี migration 2 ไฟล์ + backfill**
+- [x] schema: `StockDocStatus` +DRAFT/PARTIAL/RECEIVED/CLOSED (migration `20260929090000_add_receipt_statuses` แยก ADD VALUE) ·
+      `StockDocumentLine.receivedQty/cancelledQty/cancelReason` + CHECK · `StockReceiptRound` + `StockReceiptRoundLine` · `StockTransaction.receiptRoundId` ·
+      `StockReceiptRound` อยู่ใน `STORE_SCOPED_MODELS`
+- [x] migration `20260929090100_add_receipt_rounds` backfill: ใบรับเดิมทุกใบ = รอบที่ 1 ของตัวเอง (ใบ POSTED → RECEIVED + `receivedQty = quantity` ·
+      ใบ VOIDED → รอบที่ยกเลิก) · ledger เดิมของใบรับผูก `receiptRoundId` · ซ้อมด้วยข้อมูลสมมติแล้ว (ใบรับ/ใบยกเลิก/ใบเบิก) ผลตรง
+- [x] `lib/stock-docs.ts`: `createReceiptDraft` · `postReceipt` (= ร่าง + รอบ 1 เต็ม) · `updateReceipt` · `receiveRound` · `voidReceiptRound` · `cancelLineRemaining` ·
+      `restoreLineRemaining` · `closeReceipt` · `voidStockDocument` ของใบรับ = ยกเลิกทุกรอบ · ทุกคำสั่ง**ล็อกแถวหัวใบ** (`SELECT … FOR UPDATE` กรอง storeId) ·
+      สถานะคำนวณที่ `receiptStatusOf()` ที่เดียว · ตัด/เติมสต็อกเรียง productId
+- [x] action 6 ตัวใน `app/actions/stock-docs.ts` + `createStockReceipt` รับ `mode=draft`
+- [x] หน้า `/stock/receipts/[id]` ตาราง สั่ง/รับแล้ว/ยกเลิก/ค้างรับ + ปุ่มแก้ไข/รับสินค้า/ปิดใบ + ยกเลิก/คืนยอดค้างต่อบรรทัด + ประวัติรอบรับ (ยกเลิกรายรอบ) ·
+      `/stock/receipts/[id]/edit` · รายการใบรับมี chip สถานะ + "ค้างรับทั้งหมด" (`?status=open` ไม่จำกัดวันที่) · ฟอร์มสร้างมี 2 ปุ่ม ร่าง/รับครบทันที ·
+      `components/receipt-actions.tsx`
+- [x] `/reports/reorder` อ่านราคาทุนล่าสุดจากบรรทัดที่รับจริง (`receivedQty > 0`) ไม่ใช่ใบร่าง
+- [x] เทส `stock-receipt-rounds.test.ts` 14 (รวม **กดรับพร้อมกัน 5 คำขอจากใบสั่ง 10 ผ่าน 2**) · tenant-isolation +1 query +6 action · `stock-docs.test.ts` ปรับสถานะใบรับ
+- [ ] deploy: backup ก่อน merge (มี backfill แตะ `stock_document`/`stock_transaction`) → ซ้อมบน dump production → merge → CI → ตรวจ
+      `_prisma_migrations` = 36 · ใบรับเดิมทุกใบเป็น RECEIVED และมี `stock_receipt_round` เท่าจำนวนใบรับ
 
 #### เอกสาร
 - [x] §2 Data Model (`StockDocument`/`StockDocumentLine`/ฟิลด์ใหม่) · §4 resource `STOCK_ADJUST` · §5 F30–F33 · §6 routes · CLAUDE.md สถานะ + รายการ raw SQL + ที่เดียวของ `lib/stock-docs.ts`

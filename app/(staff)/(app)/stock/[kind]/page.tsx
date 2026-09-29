@@ -2,7 +2,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { listStockDocuments } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
-import { stockDocKind } from "@/lib/stock-doc-kinds"
+import { DOC_STATUS_CHIP, stockDocKind } from "@/lib/stock-doc-kinds"
 import { businessDayKey, resolveDayRange } from "@/lib/day"
 import { formatBaht, formatBusinessDate, formatNumber } from "@/lib/format"
 import { DayRangePicker } from "@/components/day-range-picker"
@@ -22,10 +22,14 @@ export default async function StockDocListPage({ params, searchParams }: PagePro
   const canAdd = granted[kind.resource]?.includes("ADD") ?? false
 
   const query = await searchParams
-  // เปิดมาที่ 30 วันล่าสุด — เอกสารคลังไม่ได้เกิดทุกวันเหมือนบิลขาย เปิดวันเดียวมักว่าง
-  const range = resolveDayRange(query.from, query.to, 30)
-  const docs = await listStockDocuments(storeId, kind.type, range)
+  // เปิดมาที่วันนี้ (ตั้งแต่ = ถึง = วันนี้) เหมือนรายงานทุกหน้า — ผู้ใช้เลือกช่วงเอง (เจ้าของสั่ง 2026-09-29)
+  // ใบรับที่ค้างรับจากวันก่อน ๆ ดูได้ที่ปุ่ม "ค้างรับทั้งหมด"
+  const range = resolveDayRange(query.from, query.to)
+  // (21d) ?status=open = ใบรับที่ยังค้างรับทุกวันที่ (ไม่ใช้ช่วงวัน)
+  const openOnly = kind.type === "RECEIPT" && query.status === "open"
+  const docs = await listStockDocuments(storeId, kind.type, range, { openOnly })
   const basePath = `/stock/${kind.slug}`
+  const isReceipt = kind.type === "RECEIPT"
 
   return (
     <>
@@ -38,7 +42,17 @@ export default async function StockDocListPage({ params, searchParams }: PagePro
           </p>
         </div>
         <div className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <DayRangePicker basePath={basePath} from={range.from} to={range.to} today={businessDayKey()} />
+          {isReceipt ? (
+            <div className="row" style={{ gap: 6 }}>
+              <Link href={basePath} className={`btn btn-sm ${openOnly ? "btn-ghost" : "btn-subtle"}`} aria-current={openOnly ? undefined : "page"}>
+                ตามช่วงวันที่
+              </Link>
+              <Link href={`${basePath}?status=open`} className={`btn btn-sm ${openOnly ? "btn-subtle" : "btn-ghost"}`} aria-current={openOnly ? "page" : undefined}>
+                ค้างรับทั้งหมด
+              </Link>
+            </div>
+          ) : null}
+          {openOnly ? null : <DayRangePicker basePath={basePath} from={range.from} to={range.to} today={businessDayKey()} />}
           {canAdd ? (
             <Link href={`${basePath}/new`} className="btn btn-primary">
               <IconPlus size={17} aria-hidden />
@@ -51,7 +65,7 @@ export default async function StockDocListPage({ params, searchParams }: PagePro
       <section className="card-ui">
         {docs.length === 0 ? (
           <p className="t-body" style={{ padding: 24 }}>
-            ไม่มี{kind.title}ในช่วงวันที่เลือก
+            {openOnly ? "ไม่มีใบรับที่ค้างรับ" : `ไม่มี${kind.title}ในช่วงวันที่เลือก`}
           </p>
         ) : (
           <div className="datatable-wrap">
@@ -61,12 +75,13 @@ export default async function StockDocListPage({ params, searchParams }: PagePro
                   <th style={{ padding: "10px 16px", fontWeight: 500 }}>เลขที่</th>
                   <th style={{ padding: "10px 16px", fontWeight: 500 }}>วันที่</th>
                   <th style={{ padding: "10px 16px", fontWeight: 500 }}>{kind.partyLabel}</th>
-                  {kind.type === "RECEIPT" ? <th style={{ padding: "10px 16px", fontWeight: 500 }}>เลขที่ใบส่งของ</th> : null}
+                  {isReceipt ? <th style={{ padding: "10px 16px", fontWeight: 500 }}>เลขที่อ้างอิง</th> : null}
                   <th style={{ padding: "10px 16px", fontWeight: 500, textAlign: "right" }}>รายการ</th>
                   <th style={{ padding: "10px 16px", fontWeight: 500, textAlign: "right" }}>
-                    {kind.type === "ADJUST" ? "ส่วนต่างรวม" : "จำนวนรวม"}
+                    {kind.type === "ADJUST" ? "ส่วนต่างรวม" : isReceipt ? "สั่ง" : "จำนวนรวม"}
                   </th>
-                  {kind.type === "RECEIPT" ? (
+                  {isReceipt ? <th style={{ padding: "10px 16px", fontWeight: 500, textAlign: "right" }}>รับแล้ว</th> : null}
+                  {isReceipt ? (
                     <th style={{ padding: "10px 16px", fontWeight: 500, textAlign: "right" }}>มูลค่า</th>
                   ) : null}
                   <th style={{ padding: "10px 16px", fontWeight: 500 }}>ผู้บันทึก</th>
@@ -85,7 +100,7 @@ export default async function StockDocListPage({ params, searchParams }: PagePro
                       {formatBusinessDate(doc.docDate)}
                     </td>
                     <td style={{ padding: "10px 16px" }}>{doc.party ?? "—"}</td>
-                    {kind.type === "RECEIPT" ? (
+                    {isReceipt ? (
                       <td className="num" style={{ padding: "10px 16px" }}>
                         {doc.referenceNo ?? "—"}
                       </td>
@@ -97,24 +112,22 @@ export default async function StockDocListPage({ params, searchParams }: PagePro
                       {kind.type === "ADJUST" && doc.totalQuantity > 0 ? "+" : ""}
                       {formatNumber(doc.totalQuantity)}
                     </td>
-                    {kind.type === "RECEIPT" ? (
+                    {isReceipt ? (
+                      <td className="num" style={{ padding: "10px 16px", textAlign: "right" }}>
+                        {formatNumber(doc.receivedQuantity)}
+                      </td>
+                    ) : null}
+                    {isReceipt ? (
                       <td className="num" style={{ padding: "10px 16px", textAlign: "right" }}>
                         {doc.totalCost === null ? "—" : `฿${formatBaht(doc.totalCost)}`}
                       </td>
                     ) : null}
                     <td style={{ padding: "10px 16px" }}>{doc.createdByName}</td>
                     <td style={{ padding: "10px 16px" }}>
-                      {doc.status === "VOIDED" ? (
-                        <span className="chip chip-danger">
-                          <span className="dot" />
-                          ยกเลิกแล้ว
-                        </span>
-                      ) : (
-                        <span className="chip chip-success">
-                          <span className="dot" />
-                          บันทึกแล้ว
-                        </span>
-                      )}
+                      <span className={`chip chip-${DOC_STATUS_CHIP[doc.status].tone}`}>
+                        <span className="dot" />
+                        {DOC_STATUS_CHIP[doc.status].label}
+                      </span>
                     </td>
                   </tr>
                 ))}
