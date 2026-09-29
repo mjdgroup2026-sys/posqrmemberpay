@@ -619,7 +619,7 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 (`MobileOrderItem.productId` + CHECK เมนูหรือสินค้าอย่างใดอย่างหนึ่ง · SERVED ทันที ไม่เข้าครัว) · ยกเลิกรายการ/โต๊ะคืนสต็อก · `/pos` redirect ไปจอขายอาหาร ·
 **21c** `/reports/stock-sales` (+ CSV) · `/reports/reorder` (สูตร `lib/reorder.ts`) · เทสใหม่ stock-docs 12 · pos-products 10 · stock-report 2 · reorder unit 4 · tenant-isolation +7 query/+5 action
 
-**🔧 21d ใบรับแบบร่าง + รับได้หลายรอบ — โค้ดเสร็จ 2026-09-29 (branch `feat/receipt-rounds` · รอ PR/deploy · migration 2 ไฟล์ มี backfill · ไม่มี env)**:
+**✅ 21d ใบรับแบบร่าง + รับได้หลายรอบ — ขึ้น production แล้ว 2026-09-29 (PR #41 · CI run 36524375769 · backup `posmobileorderdb-20260929-114642.dump` ซ้อมบนสำเนาแล้ว · `_prisma_migrations` = 36 · สลับไป green · ไม่มี env)**:
 ใบรับบันทึกเป็นร่าง (ไม่แตะสต็อก) แก้ได้จนกว่าจะรับครบ แล้วกด "รับสินค้า" เป็นรอบ ๆ (`StockReceiptRound` · วันที่รับ + เลขใบส่งของต่อรอบ) · ของขาด = ยกเลิกยอดค้างรายบรรทัด/ปิดใบ · คืนยอดค้างได้ ·
 **ตรรกะอยู่ที่ `lib/stock-docs.ts` ที่เดียว — ทุกคำสั่งที่แตะยอดรับ/ยกเลิก/จำนวนสั่งต้องผ่าน `lockReceipt()` ก่อน** · สถานะคำนวณที่ `receiptStatusOf()` ห้ามตั้งเอง ·
 `StockDocumentLine.receivedQty` เป็นค่า denormalized (CHECK `received + cancelled ≤ quantity`) · ledger ผูก `receiptRoundId` + `documentId` · ใบรับเดิมถูก backfill เป็นรอบที่ 1 ·
