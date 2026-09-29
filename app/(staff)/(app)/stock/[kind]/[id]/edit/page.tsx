@@ -4,12 +4,12 @@ import { getStockDocument, listProductOptions } from "@/lib/queries"
 import { requirePageAccess } from "@/lib/permissions"
 import { isOpenReceipt, stockDocKind } from "@/lib/stock-doc-kinds"
 import { businessDayKey } from "@/lib/day"
-import { StockDocForm } from "@/components/stock-doc-form"
+import { ReceiptForm } from "@/components/receipt-form"
 import { IconBack } from "@/components/icons"
 
-export const metadata = { title: "แก้ไขใบรับสินค้า" }
+export const metadata = { title: "รับสินค้า / แก้ไขใบรับ" }
 
-/// แก้ใบรับที่ยังค้างรับ (Phase 21d) — ใบเบิก/ใบปรับแก้ไม่ได้ · ใบที่รับครบ/ปิด/ยกเลิกแล้ว = กลับไปหน้าดูเอกสาร
+/// รับสินค้าเพิ่ม / แก้ใบรับที่ยังค้างรับ (Phase 21d · ฟอร์มตารางเดียว) — ใบเบิก/ใบปรับแก้ไม่ได้ · ใบที่รับครบ/ปิด/ยกเลิกแล้ว = กลับไปหน้าดูเอกสาร
 /// ด่านจริง (ล็อกหัวใบ + บรรทัดที่รับแล้ว) อยู่ที่ `updateReceipt()` ใน lib/stock-docs.ts
 export default async function EditStockDocPage({ params }: PageProps<"/stock/[kind]/[id]/edit">) {
   const { kind: slug, id } = await params
@@ -34,19 +34,20 @@ export default async function EditStockDocPage({ params }: PageProps<"/stock/[ki
               {doc.docNumber}
             </Link>
           </p>
-          <h1 className="t-h1">แก้ไขใบรับสินค้า</h1>
+          <h1 className="t-h1">รับสินค้า / แก้ไขใบรับ {doc.docNumber}</h1>
           <p className="t-body" style={{ marginTop: 4 }}>
-            แก้ได้จนกว่าจะรับครบ — รายการที่รับไปแล้วลบไม่ได้ และจำนวนสั่งต้องไม่น้อยกว่าที่รับ/ยกเลิกไปแล้ว
+            กรอกช่อง &quot;รับครั้งนี้&quot; ตามของที่ได้จริง แล้วกด &quot;บันทึก + รับสินค้า&quot; — ยังค้างรับก็กลับมารับเพิ่มที่หน้านี้ได้ ·
+            รายการที่รับไปแล้วลบไม่ได้ และจำนวนสั่งต้องไม่น้อยกว่าที่รับ/ยกเลิกไปแล้ว
           </p>
         </div>
       </div>
 
-      <StockDocForm
-        kind={kind.slug}
+      <ReceiptForm
         products={products}
         today={businessDayKey()}
         initial={{
           id: doc.id,
+          docNumber: doc.docNumber,
           docDate: doc.docDate,
           supplierName: doc.supplierName,
           referenceNo: doc.referenceNo,

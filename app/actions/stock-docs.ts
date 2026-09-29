@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { getCurrentPermissions, guardAction, type ResourceKey } from "@/lib/permissions"
-import { parseBusinessDayKey } from "@/lib/day"
+import { businessDayKey, parseBusinessDayKey } from "@/lib/day"
 import { StockMissing, StockShortage } from "@/lib/stock-moves"
 import {
   cancelLineRemaining,
@@ -13,6 +13,7 @@ import {
   postAdjustment,
   postIssue,
   postReceipt,
+  receiveByProduct,
   receiveRound,
   restoreLineRemaining,
   StockDocError,
@@ -96,17 +97,28 @@ export async function createStockReceipt(formData: FormData): Promise<ActionResu
   const dateError = checkDocDate(parsed.data.docDate)
   if (dateError) return { ok: false, error: dateError, fieldErrors: { docDate: dateError } }
 
-  // (21d) mode=draft = บันทึกร่างยังไม่แตะสต็อก · ค่าอื่น/ไม่ส่ง = รับครบทันที (ขั้นตอนเดิม)
-  const asDraft = formData.get("mode") === "draft"
+  // (21d) mode=draft = บันทึกยังไม่รับของ · mode=receive = บันทึก + รับตามช่อง "รับครั้งนี้" (ฟอร์มตารางเดียว)
+  //       ไม่ส่ง mode = รับครบทุกบรรทัดทันที (ขั้นตอนเดิม)
+  const mode = formData.get("mode")
+  const round = mode === "receive" ? readReceiveRound(formData, parsed.data.docDate) : null
+  if (round && !round.ok) return { ok: false, error: round.error, fieldErrors: { receivedDate: round.error } }
   try {
     const ctx = { storeId, userId, docDateKey: parsed.data.docDate }
-    const doc = await forStore(storeId).$transaction((tx) =>
-      asDraft ? createReceiptDraft(tx, ctx, parsed.data) : postReceipt(tx, ctx, parsed.data),
-    )
+    const result = await forStore(storeId).$transaction(async (tx) => {
+      if (mode === "draft") return { doc: await createReceiptDraft(tx, ctx, parsed.data), received: null }
+      if (!round) return { doc: await postReceipt(tx, ctx, parsed.data), received: null }
+      const doc = await createReceiptDraft(tx, ctx, parsed.data)
+      const received = await receiveByProduct(tx, ctx, doc.id, round.value, receiveQuantities(parsed.data.lines))
+      return { doc, received }
+    })
     revalidateStockPages()
-    const message = asDraft
-      ? `บันทึกร่าง${DOC_TYPE_LABEL.RECEIPT} ${doc.docNumber} แล้ว — กด "รับสินค้า" เมื่อของมาถึง`
-      : `บันทึก${DOC_TYPE_LABEL.RECEIPT} ${doc.docNumber} แล้ว — เพิ่มสต็อก ${parsed.data.lines.length} รายการ`
+    const { doc, received } = result
+    const message =
+      mode === "draft"
+        ? `บันทึก${DOC_TYPE_LABEL.RECEIPT} ${doc.docNumber} แล้ว (ยังไม่รับของ)`
+        : received
+          ? `บันทึก ${doc.docNumber} + รับสินค้ารอบที่ ${received.roundNo} แล้ว — ${RECEIPT_STATUS_TEXT[received.status]}`
+          : `บันทึก${DOC_TYPE_LABEL.RECEIPT} ${doc.docNumber} แล้ว — เพิ่มสต็อก ${parsed.data.lines.length} รายการ`
     return { ok: true, message, data: doc }
   } catch (error) {
     return { ok: false, error: stockDocErrorMessage(error, "บันทึกใบรับสินค้าไม่สำเร็จ กรุณาลองใหม่อีกครั้ง") }
@@ -118,10 +130,28 @@ export async function createStockReceipt(formData: FormData): Promise<ActionResu
 
 const RECEIPT_STATUS_TEXT = {
   DRAFT: "ยังไม่ได้รับ",
-  PARTIAL: "รับบางส่วน",
+  PARTIAL: "รับบางส่วน ยังค้างรับ รับเพิ่มได้ภายหลัง",
   RECEIVED: "รับครบแล้ว",
   CLOSED: "ปิดใบแล้ว (รับไม่ครบ)",
 } as const
+
+/// วันที่รับ + เลขใบส่งของของรอบนี้ (ฟอร์มตารางเดียว) — ไม่กรอกวันที่ = ใช้วันที่เอกสาร · ห้ามอนาคต
+function readReceiveRound(
+  formData: FormData,
+  fallbackDate: string,
+): { ok: true; value: { receivedDate: string; referenceNo?: string } } | { ok: false; error: string } {
+  const raw = String(formData.get("receivedDate") ?? "").trim()
+  const receivedDate = raw || fallbackDate
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedDate)) return { ok: false, error: "รูปแบบวันที่รับสินค้าไม่ถูกต้อง" }
+  if (!parseBusinessDayKey(receivedDate)) return { ok: false, error: "วันที่รับสินค้าต้องไม่เป็นวันในอนาคต" }
+  const referenceNo = String(formData.get("roundReferenceNo") ?? "").trim().slice(0, 60)
+  return { ok: true, value: { receivedDate, referenceNo: referenceNo || undefined } }
+}
+
+/// ช่อง "รับครั้งนี้" ของทุกบรรทัด — ว่าง = 0 (ไม่รับบรรทัดนั้นรอบนี้)
+function receiveQuantities(lines: { productId: string; receiveQty?: number }[]) {
+  return lines.map((line) => ({ productId: line.productId, quantity: line.receiveQty ?? 0 }))
+}
 
 export async function updateStockReceipt(formData: FormData): Promise<ActionResult<StockDocResult>> {
   const guard = await guardAction("STOCK_IN", "ADD")
@@ -142,12 +172,23 @@ export async function updateStockReceipt(formData: FormData): Promise<ActionResu
   const dateError = checkDocDate(parsed.data.docDate)
   if (dateError) return { ok: false, error: dateError, fieldErrors: { docDate: dateError } }
 
+  // mode=receive = บันทึกการแก้ไข + รับตามช่อง "รับครั้งนี้" เป็นรอบใหม่ ในทรานแซคชันเดียว (แก้พังหรือรับเกิน = ไม่บันทึกอะไรเลย)
+  const round = formData.get("mode") === "receive" ? readReceiveRound(formData, businessDayKey()) : null
+  if (round && !round.ok) return { ok: false, error: round.error, fieldErrors: { receivedDate: round.error } }
+
   try {
-    const doc = await forStore(storeId).$transaction((tx) =>
-      updateReceipt(tx, { storeId, userId, docDateKey: parsed.data.docDate }, parsed.data),
-    )
+    const ctx = { storeId, userId, docDateKey: parsed.data.docDate }
+    const { doc, received } = await forStore(storeId).$transaction(async (tx) => {
+      const doc = await updateReceipt(tx, ctx, parsed.data)
+      const received = round ? await receiveByProduct(tx, ctx, doc.id, round.value, receiveQuantities(parsed.data.lines)) : null
+      return { doc, received }
+    })
     revalidateStockPages()
-    return { ok: true, message: `บันทึกการแก้ไข ${doc.docNumber} แล้ว — สถานะ: ${RECEIPT_STATUS_TEXT[doc.status]}`, data: { id: doc.id, docNumber: doc.docNumber } }
+    const status = received?.status ?? doc.status
+    const message = received
+      ? `บันทึก ${doc.docNumber} + รับสินค้ารอบที่ ${received.roundNo} แล้ว — ${RECEIPT_STATUS_TEXT[status]}`
+      : `บันทึกการแก้ไข ${doc.docNumber} แล้ว — สถานะ: ${RECEIPT_STATUS_TEXT[status]}`
+    return { ok: true, message, data: { id: doc.id, docNumber: doc.docNumber } }
   } catch (error) {
     return { ok: false, error: stockDocErrorMessage(error, "บันทึกการแก้ไขใบรับไม่สำเร็จ กรุณาลองใหม่อีกครั้ง") }
   }

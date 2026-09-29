@@ -5,6 +5,7 @@ import { requirePageAccess } from "@/lib/permissions"
 import { stockDocKind } from "@/lib/stock-doc-kinds"
 import { businessDayKey } from "@/lib/day"
 import { StockDocForm, type StockDocPrefill } from "@/components/stock-doc-form"
+import { ReceiptForm } from "@/components/receipt-form"
 import { IconBack } from "@/components/icons"
 
 export async function generateMetadata({ params }: PageProps<"/stock/[kind]/new">) {
@@ -45,7 +46,11 @@ export default async function NewStockDocPage({ params, searchParams }: PageProp
         </div>
       </div>
 
-      <StockDocForm kind={kind.slug} products={products} today={businessDayKey()} prefill={prefill} />
+      {kind.slug === "receipts" ? (
+        <ReceiptForm products={products} today={businessDayKey()} prefill={prefill} />
+      ) : (
+        <StockDocForm kind={kind.slug} products={products} today={businessDayKey()} />
+      )}
     </>
   )
 }

@@ -7,13 +7,12 @@ import { toast } from "sonner"
 import {
   cancelReceiptRemaining,
   closeStockReceipt,
-  receiveStockRound,
   restoreReceiptRemaining,
   voidStockReceiptRound,
 } from "@/app/actions/stock-docs"
 import { formatNumber } from "@/lib/format"
 import type { ActionResult, FieldErrors } from "@/lib/types"
-import { IconBan, IconCancelRemaining, IconEdit, IconSpinner, IconTruck, IconUndo } from "@/components/icons"
+import { IconBan, IconCancelRemaining, IconSpinner, IconTruck, IconUndo } from "@/components/icons"
 import {
   Dialog,
   DialogContent,
@@ -24,9 +23,8 @@ import {
 } from "@/components/ui/dialog"
 
 /// ปุ่มของใบรับแบบร่าง + รับหลายรอบ (Phase 21d) — ใช้บนหน้า `/stock/receipts/[id]`
+/// · รับสินค้าเพิ่ม/แก้ใบ ไปที่ฟอร์มตารางเดียว (`receipt-form.tsx`) ไม่มีหน้าต่างเด้งแยก
 /// · การมองเห็นปุ่มมาจากสิทธิ์ที่หน้าคำนวณให้ (`STOCK_IN` ADD/DELETE) · ด่านจริงอยู่ใน action ทุกตัว
-
-export type ReceivableLine = { lineId: string; name: string; sku: string; unit: string; remaining: number }
 
 /// ส่ง action → toast → refresh · คืน true เมื่อสำเร็จ (ให้ผู้เรียกปิด dialog)
 function useSubmit() {
@@ -61,170 +59,31 @@ function useSubmit() {
 export function ReceiptToolbar({
   documentId,
   docNumber,
-  editHref,
-  lines,
-  today,
+  receiveHref,
   canAdd,
 }: {
   documentId: string
   docNumber: string
-  editHref: string
-  lines: ReceivableLine[]
-  today: string
+  /// หน้าฟอร์มตารางเดียว (รับสินค้าเพิ่ม + แก้ใบ)
+  receiveHref: string
   /// ใบยังค้างรับ + มีสิทธิ์ STOCK_IN:ADD
   canAdd: boolean
 }) {
-  const [receiveOpen, setReceiveOpen] = useState(false)
   const [closeOpen, setCloseOpen] = useState(false)
   if (!canAdd) return null
 
   return (
     <>
-      <Link href={editHref} className="btn btn-subtle">
-        <IconEdit size={17} aria-hidden />
-        แก้ไขใบรับ
-      </Link>
       <button type="button" className="btn btn-subtle" onClick={() => setCloseOpen(true)}>
         <IconCancelRemaining size={17} aria-hidden />
         ปิดใบ
       </button>
-      <button type="button" className="btn btn-primary" onClick={() => setReceiveOpen(true)}>
+      <Link href={receiveHref} className="btn btn-primary">
         <IconTruck size={17} aria-hidden />
-        รับสินค้า
-      </button>
-
-      <ReceiveDialog
-        // ยอดค้างเปลี่ยนหลังรับแต่ละรอบ — remount ให้ช่องจำนวนตั้งต้นที่ยอดค้างล่าสุด
-        key={lines.map((line) => `${line.lineId}:${line.remaining}`).join(",")}
-        open={receiveOpen}
-        onOpenChange={setReceiveOpen}
-        documentId={documentId}
-        docNumber={docNumber}
-        lines={lines}
-        today={today}
-      />
+        รับสินค้า / แก้ไข
+      </Link>
       <CloseDialog open={closeOpen} onOpenChange={setCloseOpen} documentId={documentId} docNumber={docNumber} />
     </>
-  )
-}
-
-function ReceiveDialog({
-  open,
-  onOpenChange,
-  documentId,
-  docNumber,
-  lines,
-  today,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  documentId: string
-  docNumber: string
-  lines: ReceivableLine[]
-  today: string
-}) {
-  const { pending, errors, submit } = useSubmit()
-  const [receivedDate, setReceivedDate] = useState(today)
-  const [referenceNo, setReferenceNo] = useState("")
-  const [note, setNote] = useState("")
-  // ตั้งต้นที่ยอดค้างทั้งหมด — ของมาครบก็กดบันทึกได้เลย มาไม่ครบค่อยแก้เป็นจำนวนจริง
-  const [qty, setQty] = useState<Record<string, string>>(() =>
-    Object.fromEntries(lines.map((line) => [line.lineId, String(line.remaining)])),
-  )
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const formData = new FormData()
-    formData.set("documentId", documentId)
-    formData.set("receivedDate", receivedDate)
-    formData.set("referenceNo", referenceNo)
-    formData.set("note", note)
-    formData.set("lines", JSON.stringify(lines.map((line) => ({ lineId: line.lineId, quantity: qty[line.lineId] || "0" }))))
-    if (await submit(receiveStockRound, formData)) onOpenChange(false)
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>รับสินค้า {docNumber}</DialogTitle>
-          <DialogDescription>กรอกจำนวนที่ได้รับจริงในรอบนี้ — สต็อกเพิ่มเฉพาะจำนวนที่กรอก ยอดที่เหลือรอรับรอบถัดไปได้</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div className="field-grid">
-            <div className="field">
-              <label className="t-small" htmlFor="round-date">
-                วันที่รับสินค้า <span style={{ color: "var(--danger)" }}>*</span>
-              </label>
-              <input id="round-date" type="date" className="input num" value={receivedDate} max={today} required onChange={(e) => setReceivedDate(e.target.value)} />
-              {errors.receivedDate ? <p className="field-hint error">{errors.receivedDate}</p> : null}
-            </div>
-            <div className="field">
-              <label className="t-small" htmlFor="round-ref">
-                เลขที่ใบส่งของ
-              </label>
-              <input id="round-ref" className="input num" value={referenceNo} maxLength={60} onChange={(e) => setReferenceNo(e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="t-small" htmlFor="round-note">
-                หมายเหตุ
-              </label>
-              <input id="round-note" className="input" value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="datatable-wrap">
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
-              <thead>
-                <tr style={{ textAlign: "left", color: "var(--ink-3)", background: "var(--surface-2)" }}>
-                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>สินค้า</th>
-                  <th style={{ padding: "8px 12px", fontWeight: 500, textAlign: "right" }}>ค้างรับ</th>
-                  <th style={{ padding: "8px 12px", fontWeight: 500, textAlign: "right" }}>รับรอบนี้</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line) => (
-                  <tr key={line.lineId} style={{ borderTop: "1px solid var(--line)" }}>
-                    <td style={{ padding: "8px 12px" }}>
-                      <div style={{ fontWeight: 500 }}>{line.name}</div>
-                      <div className="t-caption num">{line.sku}</div>
-                    </td>
-                    <td className="num" style={{ padding: "8px 12px", textAlign: "right" }}>
-                      {formatNumber(line.remaining)} {line.unit}
-                    </td>
-                    <td style={{ padding: "8px 12px", textAlign: "right" }}>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        max={line.remaining}
-                        step={1}
-                        className="input num"
-                        style={{ width: 110, textAlign: "right" }}
-                        aria-label={`จำนวนรับรอบนี้ ${line.name}`}
-                        value={qty[line.lineId] ?? ""}
-                        onChange={(e) => setQty((prev) => ({ ...prev, [line.lineId]: e.target.value }))}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {errors.lines ? <p className="field-hint error">{errors.lines}</p> : null}
-
-          <DialogFooter>
-            <button type="button" className="btn btn-ghost" onClick={() => onOpenChange(false)}>
-              ยกเลิก
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={pending}>
-              {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : <IconTruck size={17} aria-hidden />}
-              บันทึกการรับรอบนี้
-            </button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }
 
