@@ -3,16 +3,9 @@
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { formatBaht } from "@/lib/format"
 import type { SaleKind } from "@/lib/queries"
+import { SALE_KIND_SERIES } from "@/lib/sale-kinds"
 
 type Point = { day: string; PRODUCT: number; FOOD: number; SERVICE: number }
-
-/// ชื่อ + สีของแต่ละประเภท (20e) — ลำดับตายตัว สีผูกกับประเภท ไม่ผูกกับอันดับยอด
-/// (ร้านที่ไม่มีสปาซ่อนแท่งนวด แต่อาหารยังเป็นสีช่อง 1 เสมอ)
-export const SALE_KIND_SERIES: { kind: SaleKind; label: string; color: string }[] = [
-  { kind: "FOOD", label: "อาหาร/เครื่องดื่ม", color: "var(--chart-1)" },
-  { kind: "SERVICE", label: "นวด/สปา", color: "var(--chart-2)" },
-  { kind: "PRODUCT", label: "สินค้าหน้าร้าน", color: "var(--chart-3)" },
-]
 
 /// ยอดขายรายวันแบบแท่งซ้อนแยกประเภท — ความสูงรวมของแท่ง = ยอดของทุกประเภทในวันนั้น (ก่อนส่วนลด/ค่าบริการ)
 /// ตัวเลขชุดเดียวกันอยู่ในตารางใต้กราฟด้วย (contrast ของสีช่อง 3 ต่ำกว่า 3:1 ต้องมีทางอ่านที่ไม่พึ่งสี)

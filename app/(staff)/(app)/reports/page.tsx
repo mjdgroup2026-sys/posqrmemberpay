@@ -10,7 +10,8 @@ import {
   type SaleKind,
 } from "@/lib/queries"
 import { MovementChart } from "@/components/movement-chart"
-import { SALE_KIND_SERIES, SalesKindChart } from "@/components/sales-kind-chart"
+import { SalesKindChart } from "@/components/sales-kind-chart"
+import { SALE_KIND_SERIES } from "@/lib/sale-kinds"
 import { DayRangePicker } from "@/components/day-range-picker"
 import { IconDownload } from "@/components/icons"
 import { businessDayKey, resolveDayRange } from "@/lib/day"
