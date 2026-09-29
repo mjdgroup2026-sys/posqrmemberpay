@@ -1,5 +1,6 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
+import { Copyright } from "@/components/copyright"
 
 /// โครงหน้าฝั่งลูกค้า — หัวเรื่องร้าน/โต๊ะ + พื้นที่เนื้อหา (มือถือเป็นหลัก กว้างสุด 480px)
 export function CustomerShell({
@@ -44,6 +45,7 @@ export function CustomerShell({
 
       <main style={{ flex: 1, width: "100%", maxWidth: 480, margin: "0 auto", padding: "16px 16px 96px" }}>
         {children}
+        <Copyright className="customer-copyright" />
       </main>
 
       {footer ? (
@@ -73,6 +75,7 @@ export function CustomerNotice({ title, description }: { title: string; descript
           {description}
         </p>
       </div>
+      <Copyright />
     </main>
   )
 }
