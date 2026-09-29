@@ -22,8 +22,9 @@ export default async function StockDocListPage({ params, searchParams }: PagePro
   const canAdd = granted[kind.resource]?.includes("ADD") ?? false
 
   const query = await searchParams
-  // เปิดมาที่ 30 วันล่าสุด — เอกสารคลังไม่ได้เกิดทุกวันเหมือนบิลขาย เปิดวันเดียวมักว่าง
-  const range = resolveDayRange(query.from, query.to, 30)
+  // เปิดมาที่วันนี้ (ตั้งแต่ = ถึง = วันนี้) เหมือนรายงานทุกหน้า — ผู้ใช้เลือกช่วงเอง (เจ้าของสั่ง 2026-09-29)
+  // ใบรับที่ค้างรับจากวันก่อน ๆ ดูได้ที่ปุ่ม "ค้างรับทั้งหมด"
+  const range = resolveDayRange(query.from, query.to)
   // (21d) ?status=open = ใบรับที่ยังค้างรับทุกวันที่ (ไม่ใช้ช่วงวัน)
   const openOnly = kind.type === "RECEIPT" && query.status === "open"
   const docs = await listStockDocuments(storeId, kind.type, range, { openOnly })
