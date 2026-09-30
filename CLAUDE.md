@@ -651,7 +651,7 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 การ์ด "ปิดร้าน / ลบร้าน" ท้าย `/mobile-order/settings` (OWNER · พิมพ์ชื่อร้านยืนยัน · ปิดต้องมีเหตุผลและไม่มีบิลค้าง) · `/no-store` มีรายการ "ร้านที่คุณปิดไว้" + ปุ่มเปิดอีกครั้ง ·
 `/admin/stores` ตัวกรอง/ป้าย "ปิดโดยเจ้าของ" (`STORE_STATUS_CHIP` ใน `lib/format.ts`) · เทส `store-lifecycle.test.ts` 7 (รวม ★ ขายพร้อมกดลบ) + tenant-isolation +3 action
 
-**โมดูลต่อร้าน (2026-09-30 · รอ PR/deploy · migration `20260930150000_store_modules` additive ไม่มี backfill — ทุกร้านได้ครบเหมือนเดิม)**: 5 กลุ่ม
+**✅ โมดูลต่อร้าน — ขึ้น production แล้ว 2026-09-30 15:48 (PR #53 · CI run 36691184302 · `_prisma_migrations` = 42 · สลับไป blue · backup ก่อน merge `posmobileorderdb-20260930-154020.dump`) · migration `20260930150000_store_modules` additive ไม่มี backfill — ทุกร้านได้ครบเหมือนเดิม)**: 5 กลุ่ม
 ขายอาหาร/QR (แกน) · ร้านนวด/สปา · คลังสินค้า+ขายสินค้า · สมาชิกสะสมแต้ม · รายงาน · ผู้ดูแลตั้งรายร้าน ไม่ผูกราคา (ตัดสินใจ 2026-09-30 — ต่อยอดผูกแพ็กเกจทีหลังได้โดยไม่แก้ด่าน) ·
 ดูกติกาข้อ 13 · เทส `store-modules.test.ts` 6
 
