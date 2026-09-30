@@ -3,7 +3,7 @@ import { redirect } from "next/navigation"
 import { getSession, resolveStoreContext } from "@/lib/session"
 import { getBrandOverview } from "@/lib/brand-queries"
 import { remainingDays, TIER_SPEC } from "@/lib/subscription"
-import { formatBaht, formatDate } from "@/lib/format"
+import { formatBaht, formatDate, STORE_STATUS_CHIP } from "@/lib/format"
 import { AttachStoreForm, BrandLogoForm, CopyMenuForm, CreateBrandForm, RenameBrandForm } from "@/components/brand-manager"
 import { IconBrand, IconCard, IconPlus, IconReports } from "@/components/icons"
 
@@ -121,9 +121,9 @@ export default async function BrandPage() {
                             <div className="t-caption num">/{s.slug}</div>
                           </td>
                           <td style={{ padding: "10px 12px" }}>
-                            <span className={`chip ${s.status === "ACTIVE" ? "chip-success" : "chip-danger"}`}>
+                            <span className={`chip ${STORE_STATUS_CHIP[s.status].cls}`}>
                               <span className="dot" />
-                              {s.status === "ACTIVE" ? "ใช้งาน" : "ถูกระงับ"}
+                              {STORE_STATUS_CHIP[s.status].label}
                             </span>
                           </td>
                           <td style={{ padding: "10px 12px" }}>

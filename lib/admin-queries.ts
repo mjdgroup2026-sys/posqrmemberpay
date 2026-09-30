@@ -1,6 +1,6 @@
 import "server-only"
 import { prisma } from "@/lib/prisma"
-import { toNumber } from "@/lib/format"
+import { toNumber, type StoreStatusValue } from "@/lib/format"
 import type { PaymentMode } from "@/generated/prisma/client"
 
 /// ชั้นอ่านข้อมูลของ "ผู้ดูแลแพลตฟอร์ม" (Phase 14a) — ค้นข้ามทุกร้านโดยตั้งใจ
@@ -13,7 +13,7 @@ export type AdminStoreRow = {
   id: string
   slug: string
   name: string
-  status: "ACTIVE" | "SUSPENDED"
+  status: StoreStatusValue
   createdAt: Date
   memberCount: number
   ownerEmails: string[]
@@ -75,7 +75,7 @@ export type AdminStorePlanRow = AdminStoreRow & {
   pendingCount: number
 }
 
-export type AdminStoreFilter = "all" | "expiring" | "expired" | "full" | "pending" | "suspended"
+export type AdminStoreFilter = "all" | "expiring" | "expired" | "full" | "pending" | "suspended" | "closed"
 
 /// รายชื่อร้านพร้อมข้อมูลแพ็กเกจ + ตัวกรอง "ใกล้หมด ≤ 7 วัน / หมดแล้ว / โต๊ะเต็มเพดาน / รอยืนยัน / ถูกระงับ"
 export async function listStoresWithPlanForAdmin(filter: AdminStoreFilter = "all"): Promise<AdminStorePlanRow[]> {
@@ -111,6 +111,8 @@ export async function listStoresWithPlanForAdmin(filter: AdminStoreFilter = "all
       return rows.filter((r) => r.pendingCount > 0)
     case "suspended":
       return rows.filter((r) => r.status === "SUSPENDED")
+    case "closed":
+      return rows.filter((r) => r.status === "CLOSED")
     default:
       return rows
   }
@@ -120,7 +122,7 @@ export type AdminStoreDetail = {
   id: string
   slug: string
   name: string
-  status: "ACTIVE" | "SUSPENDED"
+  status: StoreStatusValue
   createdAt: Date
   planTier: "S" | "M" | "L" | "XL" | null
   tableLimit: number

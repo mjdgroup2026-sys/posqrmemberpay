@@ -81,7 +81,7 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
   if (qrToken) {
     const store = await findStoreByQrToken(qrToken)
     if (!store) return { ok: false, error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" }
-    if (store.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว" }
+    if (store.status !== "ACTIVE") return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว" }
     // แพ็กเกจหมดอายุ (Phase 14b) — เปิดโต๊ะใหม่ไม่ได้ทั้งจากฝั่งลูกค้าและพนักงาน
     if (!isPlanActive(new Date(), store.planExpiresAt)) return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว" }
     storeId = store.storeId

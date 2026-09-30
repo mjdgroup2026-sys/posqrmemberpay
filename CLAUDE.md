@@ -84,7 +84,12 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว), `lib/plan-queries.ts` (แพ็กเกจ = ข้อมูลอ้างอิงของ
    แพลตฟอร์ม ไม่มี storeId) และ `lib/brand-queries.ts` + `app/actions/brand.ts` (Phase 14c — ขอบเขต tenant คือ
    `brand.ownerId = userId` ทุกฟังก์ชันรับ userId แล้วกรองเงื่อนไขนี้ ไม่รับ brandId จากผู้ใช้) — ที่อื่นห้าม
-   · `TrialClaim` ตั้งใจไม่ scoped (กันใช้สิทธิ์ทดลองซ้ำข้ามร้าน)
+   · `TrialClaim` ตั้งใจไม่ scoped (กันใช้สิทธิ์ทดลองซ้ำข้ามร้าน) — และ**ไม่ถูกลบตอนลบร้าน** (ไม่มี FK) จึงเอาเลขพร้อมเพย์เดิมไปรับสิทธิ์ทดลองซ้ำไม่ได้
+   · **(2026-09-30) ปิด/เปิด/ลบร้านอยู่ที่ `lib/store-lifecycle.ts` ที่เดียว** — `status = CLOSED` = เจ้าของปิดเอง (เข้าไม่ได้เหมือน SUSPENDED แต่เปิดกลับเองได้ที่ `/no-store`) ·
+     ลบถาวรได้เฉพาะร้านที่ไม่เคยใช้งาน (`getStoreUsage()`: บิล/ออร์เดอร์/สต็อก/เอกสารคลัง/การจอง/สมาชิก/ค่าใช้งาน RENEWAL-UPGRADE ที่ไม่ VOID) —
+     **แถว `StoreSubscription` TRIAL ถูกลบไปกับร้าน = ข้อยกเว้นเดียวของกติกาข้อ 9 (เจ้าของระบบอนุมัติ 2026-09-30)** · action ใน `app/actions/store-lifecycle.ts`
+     รับ storeId จากฟอร์มแล้วตรวจ OWNER ผ่าน `loadStoreContext()` (ร้านที่ปิดแล้วเข้า `requireStore()` ไม่ได้) · ร้าน CLOSED ไม่ถูกเลือกเป็นร้านที่ทำงานอยู่ และพนักงานมองไม่เห็นใน memberships ·
+     ฝั่งลูกค้า/คำเชิญเช็ค `status !== "ACTIVE"` (ไม่ใช่ `=== "SUSPENDED"`) — เพิ่มทางเข้าของลูกค้าใหม่ต้องเช็คแบบนี้
    · **(Phase 14c) ตรรกะ "ผู้ใช้เข้าร้านไหนได้ในบทบาทอะไร" อยู่ที่ `lib/store-context.ts` (`loadStoreContext()`) ที่เดียว**
    — `lib/session.ts` และ mock ของเทส (`__tests__/helpers/session-mock.ts`) เรียกตัวเดียวกัน ห้ามลอกตรรกะไปเขียนซ้ำ
    · เจ้าของ `Brand` = OWNER ของทุก `Store` ใต้แบรนด์โดยอัตโนมัติแม้ไม่มีแถว `StoreMember` (`viaBrand`) ·
@@ -323,6 +328,7 @@ export async function doThing(formData: FormData): Promise<ActionResult> {
   `lib/sale-number.ts` (2 จุด — advisory lock ต่อร้าน + `nextSaleNumber()` ใช้ร่วมกันทั้ง POS/Mobile Order)
   `lib/table-limit.ts` (1 จุด — advisory lock เพดานโต๊ะ namespace 720_002, Phase 14b)
   `lib/table-session.ts` (1 จุด — `lockTableRow()` `SELECT … FOR UPDATE` แถว `restaurant_table` ก่อนคืนห้อง/เปิดบิลแยก, 2026-09-23)
+  `lib/store-lifecycle.ts` (1 จุด — `SELECT … FOR UPDATE` แถว `store` ก่อนนับการใช้งานแล้วลบร้าน, 2026-09-30 · ใช้ `WHERE "id" = ${storeId}` เพราะตาราง store ไม่มีคอลัมน์ storeId)
   และ `lib/booking.ts` (2 จุด — advisory lock กันจองซ้อน namespace 720_003 ต่อพนักงาน / 720_004 ต่อห้อง, Phase 20b
   · **ลำดับการจับต้องคงที่เสมอ**: พนักงานก่อน แล้วค่อยห้อง ไม่งั้น deadlock)
   · ทุกจุดต้องมี `WHERE "storeId" = ${storeId}` (Phase 13)
@@ -634,6 +640,10 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 **✅ เปิดรอบปิดยอดใหม่ — ขึ้น production แล้ว 2026-09-30 (PR #48 · CI run 36670880627 · migration `20260930090000_closing_reopen` additive · `_prisma_migrations` = 39 · สลับไป green · เจ้าของลองหน้าจริงผ่านแล้ว)**: **ทางเดียวที่ถอด `closingId` คือ `reopenCashierClosing`**
 (สิทธิ์ `POS_CLOSING:EDIT` ไม่ backfill · เหตุผลบังคับ · เฉพาะรอบล่าสุด · conditional update `where reopenedAt null`) · แถวรอบเดิมไม่ลบ — **ทุก query ที่รวมยอด/นับรอบต้องกรอง `reopenedAt: null`** ·
 เลขรอบใหม่ = สูงสุด + 1 รวมรอบที่ถูกเปิด · ประวัติ `/pos/closing` มีแถวรวมรายวัน (ยอด/จำนวนบิล/ยกเลิก)
+
+**ปิดร้าน / ลบร้าน (2026-09-30 · รอ PR/deploy · migration 2 ไฟล์ `20260930120000_store_status_closed` (ADD VALUE แยก) → `…120100_store_close_columns` additive + CHECK)**:
+การ์ด "ปิดร้าน / ลบร้าน" ท้าย `/mobile-order/settings` (OWNER · พิมพ์ชื่อร้านยืนยัน · ปิดต้องมีเหตุผลและไม่มีบิลค้าง) · `/no-store` มีรายการ "ร้านที่คุณปิดไว้" + ปุ่มเปิดอีกครั้ง ·
+`/admin/stores` ตัวกรอง/ป้าย "ปิดโดยเจ้าของ" (`STORE_STATUS_CHIP` ใน `lib/format.ts`) · เทส `store-lifecycle.test.ts` 7 (รวม ★ ขายพร้อมกดลบ) + tenant-isolation +3 action
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

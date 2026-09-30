@@ -106,6 +106,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       settings: await import("@/app/actions/settings"),
       "stock-docs": await import("@/app/actions/stock-docs"),
       "store-members": await import("@/app/actions/store-members"),
+      "store-lifecycle": await import("@/app/actions/store-lifecycle"),
       tables: await import("@/app/actions/tables"),
       onboarding: await import("@/app/actions/onboarding"),
       admin: await import("@/app/actions/admin"),
@@ -740,6 +741,22 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         expect((await testPrisma().product.findUniqueOrThrow({ where: { id: b.productId } })).quantity).toBe(10)
         expect(await testPrisma().sale.count({ where: { items: { some: { productId: b.productId } } } })).toBe(1)
       },
+    ],
+    // ปิด/เปิด/ลบร้าน (2026-09-30) — รับ storeId จากฟอร์ม · ต้องเป็น OWNER ของร้านนั้นเท่านั้น (ชื่อยืนยันตรงแล้วก็ไม่ผ่าน)
+    [
+      "closeStore",
+      (b) => makeFormData({ storeId: b.storeId, confirmName: "ร้านทดสอบ B", reason: "ร้าน A พยายามปิดร้าน B" }),
+      async (b) => expect((await testPrisma().store.findUniqueOrThrow({ where: { id: b.storeId } })).status).toBe("ACTIVE"),
+    ],
+    [
+      "deleteStore",
+      (b) => makeFormData({ storeId: b.storeId, confirmName: "ร้านทดสอบ B" }),
+      async (b) => expect(await testPrisma().store.count({ where: { id: b.storeId } })).toBe(1),
+    ],
+    [
+      "reopenStore",
+      (b) => makeFormData({ storeId: b.storeId }),
+      async (b) => expect((await testPrisma().store.findUniqueOrThrow({ where: { id: b.storeId } })).status).toBe("ACTIVE"),
     ],
     [
       "reopenCashierClosing",

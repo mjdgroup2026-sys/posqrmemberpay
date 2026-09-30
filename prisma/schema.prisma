@@ -328,6 +328,7 @@ model User {
   createdBookings           Booking[]           @relation("BookingCreatedBy")
   closings                  CashierClosing[]    @relation("ClosingCashier")
   reopenedClosings          CashierClosing[]    @relation("ClosingReopenedBy")
+  closedStores              Store[]             @relation("StoreClosedBy")
 
   @@map("user")
 }
@@ -1133,6 +1134,8 @@ enum StoreStatus {
   ACTIVE
   /// ผู้ดูแลแพลตฟอร์มระงับ — requireStore() ปฏิเสธทุกคำขอของร้านนี้
   SUSPENDED
+  /// เจ้าของปิดร้านเอง (2026-09-30) — เข้าไม่ได้เหมือน SUSPENDED แต่เจ้าของเปิดกลับเองได้ที่ /no-store · ข้อมูลอยู่ครบ
+  CLOSED
 }
 
 /// บทบาทระดับร้าน — คนละแกนกับ Role (matrix สิทธิ์ F1–F9)
@@ -1162,10 +1165,15 @@ model Store {
   /// วิธีรับเงินจากลูกค้าของร้านนี้ (Phase 15) — เงินเข้าบัญชีร้านโดยตรงทุกระดับ ไม่มี gateway โอนต่อ
   /// SCB_BILLER ตั้งได้เฉพาะผู้ดูแลแพลตฟอร์ม (15a ยังใช้ credential SCB จาก env ของแพลตฟอร์ม — 15c ย้ายเป็นต่อร้าน)
   paymentMode       PaymentMode @default(PROMPTPAY_DIRECT)
+  /// เจ้าของปิดร้าน (status = CLOSED · 2026-09-30) — ล้างเป็น null เมื่อเปิดร้านอีกครั้ง · ตั้งผ่าน lib/store-lifecycle.ts เท่านั้น
+  closedAt          DateTime?
+  closedById        String?
+  closeReason       String?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
   brand             Brand?              @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  closedBy          User?               @relation("StoreClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
   settings          StoreSettings?
   subscriptions     StoreSubscription[]
   members           StoreMember[]

@@ -549,6 +549,13 @@ export const scbPaymentConfirmationSchema = z.object({
 
 // ───────────────────── สมาชิกร้าน (Phase 13) ─────────────────────
 
+/// ปิด/เปิด/ลบร้าน (2026-09-30) — `confirmName` ต้องพิมพ์ชื่อร้านให้ตรง (ตรวจกับชื่อจริงใน action) กันกดผิดร้าน
+export const storeLifecycleSchema = z.object({
+  storeId: requiredId("ไม่พบร้านนี้"),
+  confirmName: z.string({ error: "กรุณาพิมพ์ชื่อร้านเพื่อยืนยัน" }).trim().default(""),
+  reason: z.string({ error: "เหตุผลไม่ถูกต้อง" }).trim().max(200, "เหตุผลยาวเกินไป (ไม่เกิน 200 ตัวอักษร)").default(""),
+})
+
 export const storeSwitchSchema = z.object({
   storeId: requiredId("ไม่พบร้านที่ต้องการสลับไป"),
 })

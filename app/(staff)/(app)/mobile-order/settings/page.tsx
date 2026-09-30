@@ -14,20 +14,23 @@ import { ScbConfigForm } from "@/components/scb-config-form"
 import { requireStorePage } from "@/lib/permissions"
 import { StoreSettingsForm } from "@/components/store-settings-form"
 import { PaymentConfigForm } from "@/components/payment-config-form"
+import { StoreDangerZone } from "@/components/store-danger-zone"
+import { describeUsage, getStoreUsage } from "@/lib/store-lifecycle"
 
 export const metadata = { title: "ตั้งค่าร้าน" }
 
 export default async function StoreSettingsPage() {
-  const { storeId, role } = await requireStorePage()
+  const { storeId, role, store } = await requireStorePage()
   // ตั้งค่าร้านเป็นของเจ้าของร้านเท่านั้น (Phase 13) — action updateStoreSettings ก็กันด้วย requireOwner()
   if (role !== "OWNER") redirect("/access-denied?resource=STORE_SETTINGS")
-  const [settings, menu, openSessionCount, paymentConfig, paymentProfile, scbConfig] = await Promise.all([
+  const [settings, menu, openSessionCount, paymentConfig, paymentProfile, scbConfig, usage] = await Promise.all([
     getStoreSettings(storeId),
     listMenuForSettings(storeId),
     getOpenSessionCount(storeId),
     getPaymentConfig(storeId),
     getStorePaymentProfile(storeId),
     getScbConfig(storeId),
+    getStoreUsage(storeId),
   ])
 
   return (
@@ -61,6 +64,8 @@ export default async function StoreSettingsPage() {
       />
       {/* SCB Biller ของร้าน (Phase 15c) — credential เข้ารหัส + ทดสอบด้วยเงินจริง 1 บาทก่อนเปิดใช้ */}
       <ScbConfigForm config={scbConfig} baseUrl={publicBaseUrl()} secretBoxReady={isSecretBoxConfigured()} />
+      {/* ปิดร้าน / ลบร้าน (2026-09-30) — ลบได้เฉพาะร้านที่ไม่เคยใช้งาน · ยืนยันด้วยชื่อร้าน (Store.name ไม่ใช่ชื่อที่แสดงลูกค้า) */}
+      <StoreDangerZone storeId={storeId} storeName={store.name} usageText={describeUsage(usage)} />
     </>
   )
 }
