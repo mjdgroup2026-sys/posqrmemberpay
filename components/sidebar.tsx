@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { MobileNavClose } from "@/components/mobile-nav"
+import { Copyright } from "@/components/copyright"
 import {
   IconDashboard,
   IconProduct,
@@ -218,6 +219,8 @@ export function Sidebar({
           </div>
         ))}
       </nav>
+
+      <Copyright />
     </aside>
   )
 }

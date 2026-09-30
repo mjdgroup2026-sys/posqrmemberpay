@@ -592,6 +592,31 @@
     font-size: 0.8125rem;
     color: var(--ink-3);
   }
+  /* ลิขสิทธิ์ MJD GROUP — components/copyright.tsx · ใช้ token ร่วม จึงเข้ากับทั้งธีม staff/customer */
+  .copyright {
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--ink-3);
+    text-align: center;
+    letter-spacing: 0.01em;
+  }
+  /* ใน sidebar: ดันลงล่างสุดเสมอ (sidebar เป็น flex column) */
+  .sidebar .copyright {
+    margin-top: auto;
+    padding: var(--sp-4) var(--sp-2) var(--sp-1);
+    border-top: 1px solid var(--line);
+  }
+  .auth-copyright {
+    margin-top: var(--sp-5);
+  }
+  .customer-copyright {
+    margin-top: var(--sp-6);
+  }
+  .copyright strong {
+    font-weight: 600;
+    color: var(--ink-2);
+    letter-spacing: 0.04em;
+  }
   .t-eyebrow {
     font-size: 0.75rem;
     font-weight: 600;

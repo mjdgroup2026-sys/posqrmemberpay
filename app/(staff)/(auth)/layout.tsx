@@ -1,3 +1,5 @@
+import { Copyright } from "@/components/copyright"
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <main
@@ -28,6 +30,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <span style={{ fontWeight: 600, fontSize: "1.05rem" }}>Mobile Order</span>
         </div>
         <div className="card-ui card-pad">{children}</div>
+        <Copyright className="auth-copyright" />
       </div>
     </main>
   )
