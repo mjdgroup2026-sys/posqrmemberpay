@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getSession } from "@/lib/session"
-import { getStoreDaySummary, getTodaySalesSummary, getTodayClosing, listClosings, type ClosingChannelLine } from "@/lib/queries"
+import { getDayClosings, getOpenSalesSummary, getStoreDaySummary, listClosings, type ClosingChannelLine, type ClosingView } from "@/lib/queries"
 import { CLOSING_CHANNELS, CLOSING_CHANNEL_LABEL } from "@/lib/closing-channels"
 import { formatBaht, formatBusinessDate, formatDate, formatDateTime, formatNumber } from "@/lib/format"
 import { businessDayKey, parseBusinessDayKey } from "@/lib/day"
@@ -31,12 +31,20 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
   const isToday = closingKey === todayKey
   // สรุปทั้งร้าน (20g) — เฉพาะคนที่ดูรายงานได้ (เจ้าของได้เสมอ) เพราะเห็นยอดของแคชเชียร์ทุกคน
   const canSeeStore = granted.REPORTS?.includes("VIEW") ?? false
-  const [summary, today, history, storeDay] = await Promise.all([
-    getTodaySalesSummary(storeId, cashierId, closingDay),
-    getTodayClosing(storeId, cashierId, closingDay),
+  // ปิดหลายรอบต่อวัน (2026-09-29): summary = บิลที่ยังไม่ถูกปิดรอบ · rounds = รอบที่ปิดแล้วของวันนั้น
+  const [summary, rounds, history, storeDay] = await Promise.all([
+    getOpenSalesSummary(storeId, cashierId, closingDay),
+    getDayClosings(storeId, cashierId, closingDay),
     listClosings(storeId, { cashierId, limit: 30 }),
     canSeeStore ? getStoreDaySummary(storeId, closingDay) : Promise.resolve(null),
   ])
+
+  const lastRound = rounds.at(-1) ?? null
+  const nextRound = rounds.length + 1
+  const openBills = summary.billCount + summary.voidedCount
+  const dayTotal = rounds.reduce((sum, round) => sum + round.totalSales, 0) + summary.totalSales
+  // ยังไม่เคยปิด = ปิดรอบ 1 ได้เสมอ (แม้ไม่มีบิล เหมือนเดิม) · ปิดไปแล้ว = ต้องมีบิลใหม่ก่อน
+  const canCloseNext = rounds.length === 0 || openBills > 0
 
   return (
     <>
@@ -56,9 +64,14 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
         style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}
       >
         <article className="stat-tile">
-          <span className="t-caption">{isToday ? "ยอดขายรวมวันนี้" : "ยอดขายรวมของวันที่เลือก"}</span>
+          <span className="t-caption">
+            {rounds.length > 0 ? "ยอดที่ยังไม่ปิดรอบ" : isToday ? "ยอดขายรวมวันนี้" : "ยอดขายรวมของวันที่เลือก"}
+          </span>
           <strong className="t-h1 num">฿{formatBaht(summary.totalSales)}</strong>
-          <span className="t-caption num">{formatNumber(summary.billCount)} บิล</span>
+          <span className="t-caption num">
+            {formatNumber(summary.billCount)} บิล
+            {rounds.length > 0 ? ` · ทั้งวัน ฿${formatBaht(dayTotal)} (ปิดแล้ว ${rounds.length} รอบ)` : ""}
+          </span>
         </article>
         <article className="stat-tile">
           <span className="t-caption">เงินสด</span>
@@ -80,7 +93,9 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
           </article>
         ))}
         <article className="stat-tile">
-          <span className="t-caption">{isToday ? "บิลที่ถูกยกเลิกวันนี้" : "บิลที่ถูกยกเลิกในวันนั้น"}</span>
+          <span className="t-caption">
+            {rounds.length > 0 ? "บิลที่ถูกยกเลิก (ยังไม่ปิดรอบ)" : isToday ? "บิลที่ถูกยกเลิกวันนี้" : "บิลที่ถูกยกเลิกในวันนั้น"}
+          </span>
           <strong className="t-h1 num" style={{ color: summary.voidedCount > 0 ? "var(--danger)" : undefined }}>
             {formatNumber(summary.voidedCount)}
           </strong>
@@ -88,53 +103,33 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
       </section>
 
       <div className="form-split">
-        <section className="card-ui card-pad">
-          <h2 className="t-h2" style={{ marginBottom: 16 }}>
-            {today ? (isToday ? "ผลการปิดยอดวันนี้" : "ผลการปิดยอดของวันที่เลือก") : "นับเงินและปิดยอด"}
-          </h2>
+        <section className="card-ui card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {rounds.map((round) => (
+            <RoundResult key={round.id} round={round} />
+          ))}
 
-          {today ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div className="alert-banner info">
-                ปิดยอดรอบวันที่ {formatBusinessDate(closingDay)} เรียบร้อยแล้วเมื่อ {formatDateTime(today.closedAt)} — แก้ไขไม่ได้
-              </div>
-              <div className="datatable-wrap">
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>
-                  <thead>
-                    <tr style={{ textAlign: "left", color: "var(--ink-3)", background: "var(--surface-2)" }}>
-                      <th style={{ padding: "8px 10px", fontWeight: 500 }}>ช่องทาง</th>
-                      <th style={{ padding: "8px 10px", fontWeight: 500, textAlign: "right" }}>ยอดในระบบ</th>
-                      <th style={{ padding: "8px 10px", fontWeight: 500, textAlign: "right" }}>ตรวจได้</th>
-                      <th style={{ padding: "8px 10px", fontWeight: 500, textAlign: "right" }}>ส่วนต่าง</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {today.channels.map((line) => (
-                      <tr key={line.channel} style={{ borderTop: "1px solid var(--line)" }}>
-                        <td style={{ padding: "8px 10px" }}>{CLOSING_CHANNEL_LABEL[line.channel]}</td>
-                        <td className="num" style={{ padding: "8px 10px", textAlign: "right" }}>฿{formatBaht(line.total)}</td>
-                        <td className="num" style={{ padding: "8px 10px", textAlign: "right" }}>
-                          {line.counted === null ? <span className="t-caption">ไม่ได้ตรวจ</span> : `฿${formatBaht(line.counted)}`}
-                        </td>
-                        <td className="num" style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: diffColor(line.difference) }}>
-                          {line.difference === null ? "—" : `${line.difference > 0 ? "+" : ""}${formatBaht(line.difference)}`}
-                        </td>
-                      </tr>
-                    ))}
-                    <tr style={{ borderTop: "2px solid var(--line)", background: "var(--surface-2)" }}>
-                      <td style={{ padding: "8px 10px", fontWeight: 600 }}>รวม</td>
-                      <td className="num" style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>฿{formatBaht(today.totalSales)}</td>
-                      <td colSpan={2} />
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              {today.note ? <p className="t-caption">หมายเหตุ: {today.note}</p> : null}
+          {rounds.length > 0 && openBills > 0 ? (
+            <div className="alert-banner warning">
+              ขายหลังปิดรอบที่ {lastRound?.roundNo} แล้ว <span className="num">{formatNumber(openBills)}</span> บิล · ฿
+              <span className="num">{formatBaht(summary.totalSales)}</span> — ยังไม่ได้ปิด นับเงินแล้วปิดเป็นรอบที่ {nextRound}
             </div>
-          ) : canClose ? (
-            <ClosingForm summary={summary} closingDate={closingKey} isToday={isToday} />
+          ) : null}
+
+          {canCloseNext ? (
+            <div>
+              <h2 className="t-h2" style={{ marginBottom: 16 }}>
+                {rounds.length === 0 ? "นับเงินและปิดยอด" : `นับเงินและปิดรอบที่ ${nextRound}`}
+              </h2>
+              {canClose ? (
+                <ClosingForm summary={summary} closingDate={closingKey} isToday={isToday} roundNo={nextRound} />
+              ) : (
+                <div className="alert-banner info">คุณมีสิทธิ์ดูยอดขายอย่างเดียว — บันทึกรายการไม่ได้ (ติดต่อเจ้าของร้านเพื่อขอสิทธิ์)</div>
+              )}
+            </div>
           ) : (
-            <div className="alert-banner info">คุณมีสิทธิ์ดูยอดขายอย่างเดียว — บันทึกรายการไม่ได้ (ติดต่อเจ้าของร้านเพื่อขอสิทธิ์)</div>
+            <p className="t-caption">
+              ปิดครบทุกบิลของ{isToday ? "วันนี้" : "วันที่เลือก"}แล้ว — ถ้ามีขายเพิ่ม กลับมาปิดเป็นรอบที่ {nextRound} ได้ที่หน้านี้
+            </p>
           )}
         </section>
 
@@ -167,6 +162,7 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
                         <Link href={`/pos/closing?date=${row.closingDate.toISOString().slice(0, 10)}`} style={{ textDecoration: "underline" }}>
                           {formatDate(row.closingDate)}
                         </Link>
+                        <span className="t-caption"> · รอบ {row.roundNo}</span>
                       </td>
                       <td className="num" style={{ padding: "12px", textAlign: "right" }}>
                         ฿{formatBaht(row.totalSales)}
@@ -251,17 +247,17 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
                       ))}
                       <td className="num" style={{ padding: "10px 12px", fontWeight: 600 }}>{formatBaht(row.totalSales)}</td>
                       <td style={{ padding: "10px 24px", textAlign: "left" }}>
-                        {row.closed === null ? (
+                        {row.rounds === null ? (
                           <span className="t-caption">ไม่มีรอบ (อัตโนมัติ)</span>
-                        ) : row.closed ? (
-                          <span className="chip chip-success">
-                            <span className="dot" />
-                            ปิดรอบแล้ว
-                          </span>
-                        ) : (
+                        ) : row.openBills > 0 ? (
                           <span className="chip chip-warning">
                             <span className="dot" />
-                            ยังไม่ปิดรอบ
+                            {row.rounds > 0 ? `ปิด ${row.rounds} รอบ · ค้าง ${row.openBills} บิล` : "ยังไม่ปิดรอบ"}
+                          </span>
+                        ) : (
+                          <span className="chip chip-success">
+                            <span className="dot" />
+                            ปิดแล้ว {row.rounds} รอบ
                           </span>
                         )}
                       </td>
@@ -284,6 +280,58 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
         </section>
       ) : null}
     </>
+  )
+}
+
+/// ผลของรอบที่ปิดแล้ว — ตารางยอดในระบบ/ตรวจได้/ส่วนต่างต่อช่องทาง (แก้ไขไม่ได้)
+function RoundResult({ round }: { round: ClosingView }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <h2 className="t-h2">รอบที่ {round.roundNo}</h2>
+        <span className="chip chip-success">
+          <span className="dot" />
+          ปิดเมื่อ {formatDateTime(round.closedAt)}
+        </span>
+      </div>
+      <div className="datatable-wrap">
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>
+          <thead>
+            <tr style={{ textAlign: "left", color: "var(--ink-3)", background: "var(--surface-2)" }}>
+              <th style={{ padding: "8px 10px", fontWeight: 500 }}>ช่องทาง</th>
+              <th style={{ padding: "8px 10px", fontWeight: 500, textAlign: "right" }}>ยอดในระบบ</th>
+              <th style={{ padding: "8px 10px", fontWeight: 500, textAlign: "right" }}>ตรวจได้</th>
+              <th style={{ padding: "8px 10px", fontWeight: 500, textAlign: "right" }}>ส่วนต่าง</th>
+            </tr>
+          </thead>
+          <tbody>
+            {round.channels.map((line) => (
+              <tr key={line.channel} style={{ borderTop: "1px solid var(--line)" }}>
+                <td style={{ padding: "8px 10px" }}>{CLOSING_CHANNEL_LABEL[line.channel]}</td>
+                <td className="num" style={{ padding: "8px 10px", textAlign: "right" }}>฿{formatBaht(line.total)}</td>
+                <td className="num" style={{ padding: "8px 10px", textAlign: "right" }}>
+                  {line.counted === null ? <span className="t-caption">ไม่ได้ตรวจ</span> : `฿${formatBaht(line.counted)}`}
+                </td>
+                <td className="num" style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: diffColor(line.difference) }}>
+                  {line.difference === null ? "—" : `${line.difference > 0 ? "+" : ""}${formatBaht(line.difference)}`}
+                </td>
+              </tr>
+            ))}
+            <tr style={{ borderTop: "2px solid var(--line)", background: "var(--surface-2)" }}>
+              <td style={{ padding: "8px 10px", fontWeight: 600 }}>
+                รวม{" "}
+                <span className="t-caption num">
+                  · {formatNumber(round.billCount)} บิล / ยกเลิก {formatNumber(round.voidedCount)}
+                </span>
+              </td>
+              <td className="num" style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>฿{formatBaht(round.totalSales)}</td>
+              <td colSpan={2} />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {round.note ? <p className="t-caption">หมายเหตุ: {round.note}</p> : null}
+    </div>
   )
 }
 

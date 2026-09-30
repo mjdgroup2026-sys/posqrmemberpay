@@ -422,10 +422,14 @@ model Sale {
   voidedAt         DateTime?
   voidedById       String?
   voidReason       String?
+  /// รอบปิดยอดที่นับบิลนี้แล้ว (ปิดหลายรอบต่อวัน 2026-09-29) — null = ยังไม่ถูกปิดรอบ
+  /// ตั้งค่าได้ที่ closeCashierDay เท่านั้น (updateMany where closingId null) · ไม่ null = void ไม่ได้
+  closingId        String?
   createdAt        DateTime      @default(now())
 
   store         Store                   @relation(fields: [storeId], references: [id])
   cashier       User                    @relation("SaleCashier", fields: [cashierId], references: [id])
+  closing       CashierClosing?         @relation(fields: [closingId], references: [id], onDelete: Restrict)
   session       TableSession?           @relation(fields: [tableSessionId], references: [id])
   pointTx       MemberPointTransaction?
   voidedBy      User?                   @relation("SaleVoidedBy", fields: [voidedById], references: [id])
@@ -440,6 +444,7 @@ model Sale {
   @@index([cashierId])
   @@index([status])
   @@index([channel])
+  @@index([closingId])
   @@map("sale")
 }
 
@@ -480,6 +485,8 @@ model CashierClosing {
   storeId          String
   cashierId        String
   closingDate      DateTime @db.Date
+  /// รอบที่เท่าไรของวันนั้น (เริ่ม 1) — ปิดหลายรอบต่อวันได้ รอบถัดไปนับเฉพาะบิลที่ยังไม่ถูกปิด (Sale.closingId null)
+  roundNo          Int      @default(1)
   totalSales       Decimal  @db.Decimal(12, 2)
   totalCash        Decimal  @db.Decimal(12, 2)
   totalTransfer    Decimal  @db.Decimal(12, 2)
@@ -503,8 +510,9 @@ model CashierClosing {
 
   store   Store @relation(fields: [storeId], references: [id])
   cashier User  @relation(fields: [cashierId], references: [id])
+  sales   Sale[]
 
-  @@unique([storeId, cashierId, closingDate])
+  @@unique([storeId, cashierId, closingDate, roundNo])
   @@index([storeId])
   @@index([closingDate])
   @@map("cashier_closing")

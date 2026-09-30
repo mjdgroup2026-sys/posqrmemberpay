@@ -162,11 +162,9 @@ describe.skipIf(!dbReady)("Void บิลขาย — ยิงลง PostgreSQ
     })
   })
 
-  describe("ห้าม void หลังปิดยอดประจำวัน (F9)", () => {
-    it("ปิดยอดของวันนี้แล้วต้อง void บิลของวันนี้ไม่ได้", async () => {
-      // arrange
-      const { product, sale } = await sellOne(3, 10)
-      await testPrisma().cashierClosing.create({
+  describe("ห้าม void บิลที่ถูกนับในรอบปิดยอดแล้ว (F9 — ล็อกรายบิล)", () => {
+    function closingRow() {
+      return testPrisma().cashierClosing.create({
         data: {
           storeId: TEST_STORE_ID,
           cashierId: "test-user",
@@ -181,16 +179,33 @@ describe.skipIf(!dbReady)("Void บิลขาย — ยิงลง PostgreSQ
           difference: "0.00",
         },
       })
+    }
+
+    it("บิลที่อยู่ในรอบปิดยอดแล้วต้อง void ไม่ได้", async () => {
+      // arrange
+      const { product, sale } = await sellOne(3, 10)
+      const round = await closingRow()
+      await testPrisma().sale.update({ where: { id: sale.id }, data: { closingId: round.id } })
 
       // act
       const result = await voidSale(makeFormData({ id: sale.id, reason: "ลืมยกเลิก" }))
 
       // assert
       expect(result.ok).toBe(false)
-      expect(result.ok === false && result.error).toContain("ปิดยอดของวันนี้ไปแล้ว")
+      expect(result.ok === false && result.error).toContain("ถูกนับในรอบปิดยอดแล้ว")
 
       const after = await testPrisma().product.findUniqueOrThrow({ where: { id: product.id } })
       expect(after.quantity).toBe(7)
+    })
+
+    it("ปิดรอบไปแล้วแต่บิลนี้ขายทีหลัง (ยังไม่ถูกนับ) → void ได้ตามปกติ", async () => {
+      const { product, sale } = await sellOne(3, 10)
+      await closingRow()
+
+      const result = await voidSale(makeFormData({ id: sale.id, reason: "ขายหลังปิดรอบ" }))
+
+      expect(result.ok).toBe(true)
+      expect((await testPrisma().product.findUniqueOrThrow({ where: { id: product.id } })).quantity).toBe(10)
     })
   })
 })
