@@ -641,7 +641,7 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 (สิทธิ์ `POS_CLOSING:EDIT` ไม่ backfill · เหตุผลบังคับ · เฉพาะรอบล่าสุด · conditional update `where reopenedAt null`) · แถวรอบเดิมไม่ลบ — **ทุก query ที่รวมยอด/นับรอบต้องกรอง `reopenedAt: null`** ·
 เลขรอบใหม่ = สูงสุด + 1 รวมรอบที่ถูกเปิด · ประวัติ `/pos/closing` มีแถวรวมรายวัน (ยอด/จำนวนบิล/ยกเลิก)
 
-**ปิดร้าน / ลบร้าน (2026-09-30 · รอ PR/deploy · migration 2 ไฟล์ `20260930120000_store_status_closed` (ADD VALUE แยก) → `…120100_store_close_columns` additive + CHECK)**:
+**✅ ปิดร้าน / ลบร้าน — ขึ้น production แล้ว 2026-09-30 (PR #51 · CI run 36677663970 · `_prisma_migrations` = 41 · สลับไป blue · backup หลัง deploy `posmobileorderdb-20260930-134246.dump` · เจ้าของลองหน้าจริงผ่านแล้ว · migration 2 ไฟล์ `20260930120000_store_status_closed` (ADD VALUE แยก) → `…120100_store_close_columns` additive + CHECK)**:
 การ์ด "ปิดร้าน / ลบร้าน" ท้าย `/mobile-order/settings` (OWNER · พิมพ์ชื่อร้านยืนยัน · ปิดต้องมีเหตุผลและไม่มีบิลค้าง) · `/no-store` มีรายการ "ร้านที่คุณปิดไว้" + ปุ่มเปิดอีกครั้ง ·
 `/admin/stores` ตัวกรอง/ป้าย "ปิดโดยเจ้าของ" (`STORE_STATUS_CHIP` ใน `lib/format.ts`) · เทส `store-lifecycle.test.ts` 7 (รวม ★ ขายพร้อมกดลบ) + tenant-isolation +3 action
 
@@ -651,7 +651,7 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 
 > ✅ **production รัน schema ครบถึง `20260914120000_add_multi_tenant` (Phase 13) แล้ว — 2026-09-15**
 > ลำดับที่ใช้จริงและควรใช้ซ้ำกับ migration ใหญ่ครั้งหน้า: ซ้อมบนสำเนา dump production ในเครื่อง →
-> `bash ops/backup-db.sh` บน VPS + `scp` ลง `D:\MJD_Backup` → merge → CI `migrate deploy` + สลับสี →
+> `bash ops/backup-db.sh` บน VPS (จาก cmd ของเจ้าของ: `ssh posmobileorder "cd /home/deploy/posmobileorder && bash ops/backup-db.sh"` — ไม่ `cd` ก่อน = หาไฟล์ไม่เจอ) + `scp` ลง `D:\MJD_Backup` → merge → CI `migrate deploy` + สลับสี →
 > ตรวจ `_prisma_migrations`/backfill ในฐานจริง + ยืนยันว่า image ใน container มีโค้ดใหม่ (`ls .next/server/app/...`
 > หา route ใหม่) ไม่ใช่แค่ `/api/health` · **ห้าม merge migration ใหญ่วันที่ร้านเปิดขายอยู่**
 > · วิธีซ้อม: `docker cp <dump> posmobileorder-postgres:/tmp/prod.dump` → `pg_restore` ลงฐานชื่อลงท้าย `_test`
