@@ -59,7 +59,14 @@ export default async function AdminStoreDetailPage({ params }: PageProps<"/admin
             {store.slug} · สร้างเมื่อ {formatDate(store.createdAt)} · เจ้าของ {store.ownerEmails.join(", ") || "—"} · สมาชิก {store.memberCount} คน
           </p>
         </div>
-        <AdminStoreStatusButton storeId={store.id} status={store.status} storeName={store.name} />
+        {store.status === "CLOSED" ? (
+          <span className="chip chip-neutral">
+            <span className="dot" />
+            ปิดโดยเจ้าของ — เจ้าของเปิดกลับเองได้
+          </span>
+        ) : (
+          <AdminStoreStatusButton storeId={store.id} status={store.status} storeName={store.name} />
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation"
 import { requirePlatformAdmin } from "@/lib/session"
 import { listPendingBatchesForAdmin, listPendingSubscriptionsForAdmin, listStoresWithPlanForAdmin, type AdminStoreFilter } from "@/lib/admin-queries"
 import { remainingDays } from "@/lib/subscription"
-import { formatBaht, formatDate, formatDateTime } from "@/lib/format"
+import { formatBaht, formatDate, formatDateTime, STORE_STATUS_CHIP } from "@/lib/format"
 import { AdminStoreStatusButton } from "@/components/admin-store-status-button"
 import { IconShield } from "@/components/icons"
 
@@ -16,6 +16,7 @@ const FILTERS: { key: AdminStoreFilter; label: string }[] = [
   { key: "expired", label: "หมดแล้ว / ยังไม่เปิด" },
   { key: "full", label: "โต๊ะเต็มเพดาน" },
   { key: "suspended", label: "ถูกระงับ" },
+  { key: "closed", label: "ปิดโดยเจ้าของ" },
 ]
 
 function isFilter(value: unknown): value is AdminStoreFilter {
@@ -157,9 +158,9 @@ export default async function AdminStoresPage({ searchParams }: PageProps<"/admi
                       <div className="t-caption num">{store.slug}</div>
                     </td>
                     <td style={{ padding: "12px" }}>
-                      <span className={`chip ${store.status === "ACTIVE" ? "chip-success" : "chip-danger"}`}>
+                      <span className={`chip ${STORE_STATUS_CHIP[store.status].cls}`}>
                         <span className="dot" />
-                        {store.status === "ACTIVE" ? "ใช้งานอยู่" : "ถูกระงับ"}
+                        {STORE_STATUS_CHIP[store.status].label}
                       </span>
                     </td>
                     <td style={{ padding: "12px" }}>
@@ -179,7 +180,10 @@ export default async function AdminStoresPage({ searchParams }: PageProps<"/admi
                     <td className="num" style={{ padding: "12px", textAlign: "right" }}>{formatBaht(store.totalSales)}</td>
                     <td className="num t-caption" style={{ padding: "12px", textAlign: "right" }}>{formatDate(store.createdAt)}</td>
                     <td style={{ padding: "12px 24px", textAlign: "right" }}>
-                      <AdminStoreStatusButton storeId={store.id} status={store.status} storeName={store.name} />
+                      {/* ร้านที่เจ้าของปิดเอง ผู้ดูแลไม่ระงับ/ปลดซ้อน — เจ้าของเปิดกลับเองได้ */}
+                      {store.status === "CLOSED" ? null : (
+                        <AdminStoreStatusButton storeId={store.id} status={store.status} storeName={store.name} />
+                      )}
                     </td>
                   </tr>
                 )

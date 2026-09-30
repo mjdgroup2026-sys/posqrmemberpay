@@ -66,6 +66,7 @@ export async function switchActiveStore(formData: FormData): Promise<ActionResul
   const target = memberships.find((m) => m.storeId === parsed.data.storeId)
   if (!target) return { ok: false, error: "คุณไม่ได้เป็นสมาชิกของร้านนี้" }
   if (target.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ถูกระงับการใช้งาน" }
+  if (target.status === "CLOSED") return { ok: false, error: "ร้านนี้ปิดอยู่ — เจ้าของร้านเปิดอีกครั้งได้ที่หน้า \"ร้านที่คุณปิดไว้\"" }
 
   const jar = await cookies()
   jar.set(ACTIVE_STORE_COOKIE, parsed.data.storeId, {
@@ -286,6 +287,7 @@ export async function acceptInvite(formData: FormData): Promise<ActionResult<{ s
     : await findStoreByInviteId(parsed.data.inviteId ?? "")
   if (!store) return { ok: false, error: "ไม่พบคำเชิญนี้ ลิงก์อาจไม่ถูกต้อง" }
   if (store.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ถูกระงับการใช้งาน ยังเข้าร่วมไม่ได้" }
+  if (store.status === "CLOSED") return { ok: false, error: "เจ้าของปิดร้านนี้ไว้ ยังเข้าร่วมไม่ได้" }
   const db = forStore(store.storeId)
 
   const invite = await db.storeInvite.findFirst({

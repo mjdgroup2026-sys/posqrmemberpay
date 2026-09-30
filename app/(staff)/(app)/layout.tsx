@@ -54,7 +54,10 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
           lowStockCount={lowStockCount}
           pendingNotificationCount={pendingNotificationCount}
           activeStoreId={context?.storeId ?? null}
-          stores={memberships.map((m) => ({ storeId: m.storeId, name: m.name, role: m.role, status: m.status, brandId: m.brandId, brandName: m.brandName }))}
+          // ร้านที่เจ้าของปิดไว้ไม่อยู่ในตัวสลับร้าน — เปิดกลับได้ที่ /no-store (2026-09-30)
+          stores={memberships
+            .filter((m) => m.status !== "CLOSED")
+            .map((m) => ({ storeId: m.storeId, name: m.name, role: m.role, status: m.status as "ACTIVE" | "SUSPENDED", brandId: m.brandId, brandName: m.brandName }))}
         />
         <main className="content">
           {/* เตือนแพ็กเกจ 7/3/1 วัน + หมดอายุ (Phase 14b) — คำนวณสด ไม่ต้องกดรับทราบ */}

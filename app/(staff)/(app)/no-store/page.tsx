@@ -2,6 +2,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getSession, resolveStoreContext } from "@/lib/session"
 import { PendingInvites } from "@/components/pending-invites"
+import { ReopenStoreButton } from "@/components/reopen-store-button"
 import { IconStore } from "@/components/icons"
 
 export const metadata = { title: "ยังไม่มีร้าน" }
@@ -28,31 +29,55 @@ export default async function NoStorePage({
   const otherActiveStores = result.memberships.filter(
     (m) => m.status === "ACTIVE",
   )
+  // ร้านที่เจ้าของปิดไว้ (2026-09-30) — memberships มีร้าน CLOSED เฉพาะของ OWNER อยู่แล้ว (lib/store-context.ts)
+  const closedStores = result.memberships.filter(
+    (m) => m.status === "CLOSED" && m.role === "OWNER",
+  )
+  const onlyClosed = reason === "NO_STORE" && closedStores.length > 0
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {reason === "NO_STORE" ? (
         <PendingInvites email={session.user.email} />
       ) : null}
+      {closedStores.length > 0 ? (
+        <section className="card-ui card-pad" style={{ maxWidth: 560, display: "flex", flexDirection: "column", gap: 12 }}>
+          <h2 className="t-h2">ร้านที่คุณปิดไว้</h2>
+          <p className="t-caption">ข้อมูลทั้งหมดยังอยู่ครบ เปิดร้านอีกครั้งแล้วพนักงานและลูกค้าใช้งานได้ตามปกติ</p>
+          {closedStores.map((m) => (
+            <div key={m.storeId} className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <span>
+                <strong>{m.name}</strong>
+                {m.brandName ? <span className="t-caption"> · {m.brandName}</span> : null}
+              </span>
+              <ReopenStoreButton storeId={m.storeId} storeName={m.name} />
+            </div>
+          ))}
+        </section>
+      ) : null}
       <section className="card-ui card-pad" style={{ maxWidth: 560 }}>
         <span
           className={`chip ${reason === "STORE_SUSPENDED" ? "chip-danger" : "chip-warning"}`}
         >
           <span className="dot" />
-          {reason === "STORE_SUSPENDED" ? "ร้านถูกระงับ" : "ยังไม่มีร้าน"}
+          {reason === "STORE_SUSPENDED" ? "ร้านถูกระงับ" : onlyClosed ? "ร้านปิดอยู่" : "ยังไม่มีร้าน"}
         </span>
 
         <h1 className="t-h1" style={{ marginTop: 12 }}>
           <IconStore size={22} aria-hidden />{" "}
           {reason === "STORE_SUSPENDED"
             ? "ร้านนี้ถูกระงับการใช้งาน"
-            : "บัญชีของคุณยังไม่ได้อยู่ในร้านใด"}
+            : onlyClosed
+              ? "ร้านของคุณปิดอยู่ทั้งหมด"
+              : "บัญชีของคุณยังไม่ได้อยู่ในร้านใด"}
         </h1>
 
         <p className="t-body" style={{ marginTop: 10 }}>
           {reason === "STORE_SUSPENDED"
             ? "ผู้ดูแลระบบระงับร้านนี้ไว้ชั่วคราว ข้อมูลยังอยู่ครบแต่ใช้งานไม่ได้จนกว่าจะปลดระงับ กรุณาติดต่อผู้ดูแลระบบ"
-            : "สร้างร้านของคุณเองได้เลย (คุณจะเป็นเจ้าของร้าน) — หรือถ้าคุณเป็นพนักงาน ให้เจ้าของร้านส่งคำเชิญมาที่อีเมลนี้แล้วกดลิงก์ในอีเมล"}
+            : onlyClosed
+              ? "เปิดร้านที่ปิดไว้อีกครั้งได้จากรายการด้านบน หรือสร้างร้านใหม่"
+              : "สร้างร้านของคุณเองได้เลย (คุณจะเป็นเจ้าของร้าน) — หรือถ้าคุณเป็นพนักงาน ให้เจ้าของร้านส่งคำเชิญมาที่อีเมลนี้แล้วกดลิงก์ในอีเมล"}
         </p>
 
         {otherActiveStores.length > 0 ? (

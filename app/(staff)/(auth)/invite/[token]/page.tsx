@@ -20,6 +20,7 @@ export default async function InvitePage({ params }: PageProps<"/invite/[token]"
       REVOKED: { title: "คำเชิญถูกยกเลิก", body: "เจ้าของร้านยกเลิกคำเชิญนี้แล้ว ถ้าคิดว่าผิดพลาดกรุณาติดต่อเจ้าของร้าน" },
       ACCEPTED: { title: "คำเชิญนี้ถูกใช้ไปแล้ว", body: "ถ้าคุณเป็นคนตอบรับ เข้าสู่ระบบแล้วสลับไปร้านนั้นได้เลย" },
       STORE_SUSPENDED: { title: "ร้านถูกระงับการใช้งาน", body: "ยังเข้าร่วมร้านนี้ไม่ได้จนกว่าผู้ดูแลระบบจะปลดระงับ" },
+      STORE_CLOSED: { title: "ร้านนี้ปิดแล้ว", body: "เจ้าของร้านปิดร้านนี้ไว้ ยังเข้าร่วมไม่ได้จนกว่าเจ้าของจะเปิดร้านอีกครั้ง" },
     }
     const { title, body } = copy[invite.reason]
     return (

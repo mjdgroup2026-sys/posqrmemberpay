@@ -34,7 +34,7 @@ class CustomerAbort extends Error {
 async function resolveCustomerStore(qrToken: string, mustBeSelling = false): Promise<string> {
   const store = await findStoreByQrToken(qrToken)
   if (!store) throw new CustomerAbort({ error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" })
-  if (store.status === "SUSPENDED") throw new CustomerAbort({ error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" })
+  if (store.status !== "ACTIVE") throw new CustomerAbort({ error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" })
   if (mustBeSelling && !isPlanActive(new Date(), store.planExpiresAt)) {
     throw new CustomerAbort({ error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" })
   }

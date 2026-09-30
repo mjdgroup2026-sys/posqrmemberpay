@@ -1704,7 +1704,7 @@ enum ResourceKey {
 - ผู้ดูแลแพลตฟอร์ม (เรา) = `User.isPlatformAdmin` — เป็นคนละแกนกับ `StoreMember.role` และไม่ผูกกับร้านใด
 
 **Schema**
-- [x] `Store` — `id`, `slug` (unique, ใช้ใน URL/รายงาน), `name`, `status` enum `StoreStatus {ACTIVE, SUSPENDED}`,
+- [x] `Store` — `id`, `slug` (unique, ใช้ใน URL/รายงาน), `name`, `status` enum `StoreStatus {ACTIVE, SUSPENDED, CLOSED}` (CLOSED + `closedAt/closedById/closeReason` เพิ่ม 2026-09-30),
       `createdAt`, `updatedAt`
 - [x] `StoreMember` — `userId` FK, `storeId` FK, `role` enum `StoreRole {OWNER, STAFF}`, `createdAt` ·
       `@@unique([userId, storeId])` · **ต้องมี OWNER อย่างน้อย 1 คนต่อร้านเสมอ** (บังคับที่ action ไม่ใช่ DB)
@@ -2448,6 +2448,21 @@ enum ResourceKey {
 - [x] เทส `closing.test.ts` +5 (เปิดแล้วปิดใหม่รวมบิล · void หลังเปิด · เหตุผล/ซ้ำ/ไม่ใช่รอบล่าสุด · ไม่มีสิทธิ์ · ★ เปิดพร้อมกัน 5 คำขอ) · tenant-isolation +1 action
 - [x] deploy: ขึ้น production แล้ว 2026-09-30 (PR #48 · CI run 36670880627 · ซ้อมบน dump 20260929-190235: 36 → 39 · สลับไป green) · เจ้าของลองหน้าจริงผ่านแล้ว
 - [ ] เจ้าของติ๊ก `POS_CLOSING:EDIT` ใน `/roles` ให้บทบาทที่ควรเปิดรอบได้ (ไม่ backfill — ตอนนี้มีแค่ OWNER)
+
+#### ปิดร้าน / ลบร้าน (เจ้าของสั่ง 2026-09-30)
+> ที่มา: เจ้าของถามว่าลบร้านได้ไหม · ตัดสินใจ: **ลบถาวรเฉพาะร้านที่ไม่เคยใช้งาน · ร้านที่มีข้อมูลให้ปิดร้าน (เปิดกลับได้)** ·
+> (A) ร้านที่ปิดแล้ว เจ้าของดูข้อมูลไม่ได้จนกว่าจะเปิดอีกครั้ง · (B) ร้านที่รับแค่สิทธิ์ทดลองลบได้ — แถว TRIAL หายไปกับร้าน แต่ `TrialClaim` คงอยู่ ·
+> ร้านที่เคยจ่าย/ยื่นจ่ายค่าใช้งานลบไม่ได้ · **มี migration 2 ไฟล์** (ADD VALUE แยก)
+- [x] migration `20260930120000_store_status_closed` (`StoreStatus.CLOSED`) + `20260930120100_store_close_columns` (`closedAt/closedById/closeReason` + CHECK `(status = CLOSED) = (closedAt IS NOT NULL)` + FK SetNull)
+- [x] `lib/store-lifecycle.ts`: `getStoreUsage`/`describeUsage` · `closeStoreRow` (ACTIVE → CLOSED · ห้ามถ้ามีบิลโต๊ะค้าง) · `reopenStoreRow` · `deleteUnusedStore`
+      (ล็อกแถว store `FOR UPDATE` → นับการใช้งาน → ลบข้อมูลตั้งค่า/ตัวอย่างลูกก่อนแม่ → ลบ store ให้ cascade · ไม่สั่งลบบิล/ออร์เดอร์/สต็อก — FK RESTRICT เป็นด่านสำรอง)
+- [x] `app/actions/store-lifecycle.ts`: `closeStore`/`reopenStore`/`deleteStore` — OWNER ของร้านนั้น (รวมเจ้าของแบรนด์) ผ่าน `loadStoreContext()` · พิมพ์ชื่อร้านยืนยัน · ปิดต้องมีเหตุผล ≥ 5 ตัวอักษร
+- [x] `lib/store-context.ts`: ร้าน CLOSED ไม่ถูกเลือกเป็นร้านที่ทำงานอยู่ · พนักงานมองไม่เห็น · เจ้าของเห็นใน memberships · `switchActiveStore` ปฏิเสธ
+- [x] ฝั่งลูกค้า (QR/สั่ง/จ่าย/สมัครสมาชิก) และคำเชิญ ปฏิเสธร้านที่ไม่ใช่ ACTIVE · คำเชิญมีข้อความ "ร้านนี้ปิดแล้ว" แยก
+- [x] UI: การ์ดปิด/ลบร้านท้าย `/mobile-order/settings` · "ร้านที่คุณปิดไว้" บน `/no-store` · ตัวสลับร้านไม่แสดงร้านที่ปิด · `/admin/stores` ตัวกรอง/ป้าย "ปิดโดยเจ้าของ"
+- [x] เทส `store-lifecycle.test.ts` 7 (ลบครบทุกตาราง+ร้านอื่นไม่โดน+สิทธิ์ทดลองยังจำ · มีบิล/จ่ายแล้วลบไม่ได้ · ชื่อ/เหตุผล/ระงับ · พนักงาน/คนนอก · ปิด→เปิด · หลายร้าน · ★ ขายพร้อมกดลบ) · tenant-isolation +3 action
+- [x] ซ้อมบนสำเนา production (dump 20260929-190235): 36 → 41 · diff สะอาด · ร้านเดิม 5 ร้าน ACTIVE ไม่มี closedAt
+- [ ] deploy: backup ใหม่ → merge → ตรวจ `_prisma_migrations` = 41
 
 ### ✅ Phase 19 — ปรับปรุงครัว + ปิดรอบ (F24–F26) — ขึ้น production แล้ว 2026-09-22 (PR #24 · CI run 35708166462)
 > **ที่มา (เจ้าของสั่ง 2026-09-22)**: (1) หน้าขายไม่มีวันที่ และปิดรอบเลือกวันไม่ได้ (2) ครัวต้องทำ/เสิร์ฟ/ยกเลิกทีละรายการได้ ไม่ต้องทั้งรอบ

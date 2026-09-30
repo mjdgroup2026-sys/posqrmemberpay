@@ -73,3 +73,11 @@ export function formatBusinessDate(value: Date | string): string {
     timeZone: "Asia/Bangkok",
   })
 }
+
+/// สถานะร้าน → ป้าย (2026-09-30 เพิ่ม CLOSED = เจ้าของปิดเอง) — ใช้ร่วมกันทุกหน้าที่แสดงสถานะร้าน
+export type StoreStatusValue = "ACTIVE" | "SUSPENDED" | "CLOSED"
+export const STORE_STATUS_CHIP: Record<StoreStatusValue, { cls: string; label: string }> = {
+  ACTIVE: { cls: "chip-success", label: "ใช้งานอยู่" },
+  SUSPENDED: { cls: "chip-danger", label: "ถูกระงับ" },
+  CLOSED: { cls: "chip-neutral", label: "ปิดโดยเจ้าของ" },
+}

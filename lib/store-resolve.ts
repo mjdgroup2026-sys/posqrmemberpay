@@ -1,6 +1,7 @@
 import "server-only"
 import { cache } from "react"
 import { prisma } from "@/lib/prisma"
+import type { StoreStatus } from "@/generated/prisma/client"
 
 /// หา "ร้าน" จากค่าที่เดินทางออกนอกระบบ (Phase 13) — ที่เดียวที่อนุญาตให้ค้นข้ามร้านได้
 ///
@@ -9,7 +10,7 @@ import { prisma } from "@/lib/prisma"
 /// ต้องผ่าน forStore(storeId) ตามปกติ
 
 /// planExpiresAt (Phase 14b) — ฝั่งลูกค้าต้องรู้ว่าร้าน "ยังขายได้" ไหมตั้งแต่ตอนหาร้าน (null = ยังไม่มีแพ็กเกจ)
-export type ResolvedStore = { storeId: string; slug: string; status: "ACTIVE" | "SUSPENDED"; planExpiresAt: Date | null }
+export type ResolvedStore = { storeId: string; slug: string; status: StoreStatus; planExpiresAt: Date | null }
 
 /// `cache()` — หน้า/layout/route ฝั่งลูกค้าเรียกซ้ำหลายจุดในคำขอเดียว ยิง query ครั้งเดียวพอ
 export const findStoreByQrToken = cache(async (qrToken: string): Promise<ResolvedStore | null> => {

@@ -216,7 +216,7 @@ export async function startCustomerPayment(
     // ร้านของลูกค้า = ร้านเจ้าของ qrToken (Phase 13)
     const store = await findStoreByQrToken(qrToken)
     if (!store) throw new PaymentAbort("ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน")
-    if (store.status === "SUSPENDED") throw new PaymentAbort("ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน")
+    if (store.status !== "ACTIVE") throw new PaymentAbort("ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน")
     const storeId = store.storeId
 
     const total = await forStore(storeId).$transaction(async (tx) => {
@@ -298,7 +298,7 @@ export async function submitPaymentSlip(formData: FormData): Promise<ActionResul
 
   const store = await findStoreByQrToken(qrToken)
   if (!store) return { ok: false, error: "ไม่พบ QR Code นี้ในระบบ กรุณาแจ้งพนักงาน" }
-  if (store.status === "SUSPENDED") return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" }
+  if (store.status !== "ACTIVE") return { ok: false, error: "ร้านนี้ปิดรับออเดอร์ชั่วคราว กรุณาแจ้งพนักงาน" }
 
   const qr = await forStore(store.storeId).qRCode.findUnique({
     where: { token: qrToken },

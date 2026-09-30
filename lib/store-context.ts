@@ -102,7 +102,10 @@ export async function loadStoreContext(
     }
   }
 
-  const memberships: StoreMembershipSummary[] = access.map((a) => ({
+  // ร้านที่เจ้าของปิดเอง (CLOSED · 2026-09-30): พนักงานมองไม่เห็นเลย · เจ้าของยังเห็นในรายการ (ไว้เปิดกลับที่ /no-store)
+  // แต่ไม่ถูกเลือกเป็นร้านที่ทำงานอยู่ — ไม่มีร้านอื่นที่เปิดอยู่ = NO_STORE
+  const visible = access.filter((a) => a.store.status !== "CLOSED" || a.role === "OWNER")
+  const memberships: StoreMembershipSummary[] = visible.map((a) => ({
     storeId: a.store.id,
     slug: a.store.slug,
     name: a.store.name,
@@ -112,9 +115,10 @@ export async function loadStoreContext(
     brandName: a.store.brand?.name ?? null,
     viaBrand: a.viaBrand,
   }))
-  if (access.length === 0) return { ok: false, reason: "NO_STORE", memberships }
+  const open = access.filter((a) => a.store.status !== "CLOSED")
+  if (open.length === 0) return { ok: false, reason: "NO_STORE", memberships }
 
-  const chosen = access.find((a) => a.store.id === wantedStoreId) ?? access[0]
+  const chosen = open.find((a) => a.store.id === wantedStoreId) ?? open[0]
   if (chosen.store.status === "SUSPENDED") return { ok: false, reason: "STORE_SUSPENDED", memberships }
 
   const store = chosen.store

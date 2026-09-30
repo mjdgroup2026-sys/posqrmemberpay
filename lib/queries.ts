@@ -1327,7 +1327,8 @@ export type CustomerSession =
 export async function resolveCustomerSession(qrToken: string): Promise<CustomerSession> {
   const store = await findStoreByQrToken(qrToken)
   if (!store) return { ok: false, reason: "QR_NOT_FOUND" }
-  if (store.status === "SUSPENDED") return { ok: false, reason: "STORE_SUSPENDED" }
+  // ร้านที่ถูกระงับหรือเจ้าของปิดเอง (CLOSED · 2026-09-30) — ลูกค้าเห็นข้อความเดียวกัน "ปิดรับออเดอร์ชั่วคราว"
+  if (store.status !== "ACTIVE") return { ok: false, reason: "STORE_SUSPENDED" }
   const storeId = store.storeId
   const db = forStore(storeId)
   const qr = await db.qRCode.findUnique({
@@ -2135,7 +2136,7 @@ export type InviteLookup =
       role: "OWNER" | "STAFF"
       expiresAt: Date
     }
-  | { ok: false; reason: "NOT_FOUND" | "EXPIRED" | "REVOKED" | "ACCEPTED" | "STORE_SUSPENDED" }
+  | { ok: false; reason: "NOT_FOUND" | "EXPIRED" | "REVOKED" | "ACCEPTED" | "STORE_SUSPENDED" | "STORE_CLOSED" }
 
 /// อ่านคำเชิญจาก token ดิบใน URL เพื่อแสดงหน้า /invite/[token] — ไม่ต้องล็อกอิน ไม่เขียนอะไร
 /// ไม่รับ storeId เพราะผู้รับยังไม่รู้ร้าน — token คือตัวบอกร้าน (lib/store-resolve.ts) เหมือน qrToken
@@ -2146,7 +2147,8 @@ export async function lookupInvite(rawToken: string): Promise<InviteLookup> {
 
   const store = await findStoreByInviteTokenHash(tokenHash)
   if (!store) return { ok: false, reason: "NOT_FOUND" }
-  if (store.status === "SUSPENDED") return { ok: false, reason: "STORE_SUSPENDED" }
+  if (store.status === "CLOSED") return { ok: false, reason: "STORE_CLOSED" }
+  if (store.status !== "ACTIVE") return { ok: false, reason: "STORE_SUSPENDED" }
 
   const invite = await forStore(store.storeId).storeInvite.findUnique({
     where: { tokenHash },
