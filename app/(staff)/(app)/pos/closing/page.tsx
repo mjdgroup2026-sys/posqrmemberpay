@@ -7,6 +7,7 @@ import { formatBaht, formatBusinessDate, formatDate, formatDateTime, formatNumbe
 import { businessDayKey, parseBusinessDayKey } from "@/lib/day"
 import { ClosingDatePicker } from "@/components/closing-date-picker"
 import { ClosingForm } from "@/components/closing-form"
+import { ReopenClosingButton } from "@/components/reopen-closing-button"
 import { requirePageAccess } from "@/lib/permissions"
 
 export const metadata = { title: "ปิดยอดประจำวัน" }
@@ -15,6 +16,8 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
   const { storeId, granted } = await requirePageAccess("POS_CLOSING")
   const canClose = granted.POS_CLOSING?.includes("ADD") ?? false
+  // เปิดรอบที่ปิดแล้วใหม่ (2026-09-30) — ด่านจริงอยู่ที่ reopenCashierClosing
+  const canReopen = granted.POS_CLOSING?.includes("EDIT") ?? false
 
   const session = await getSession()
   if (!session?.user) redirect("/login")
@@ -39,12 +42,23 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
     canSeeStore ? getStoreDaySummary(storeId, closingDay) : Promise.resolve(null),
   ])
 
-  const lastRound = rounds.at(-1) ?? null
-  const nextRound = rounds.length + 1
+  // รอบที่ถูกเปิดใหม่ (2026-09-30) ยังแสดงเป็นประวัติ แต่ไม่นับยอด — บิลของมันกลับไปอยู่ใน summary แล้ว
+  const active = rounds.filter((round) => round.reopened === null)
+  const lastRound = active.at(-1) ?? null
+  // เลขรอบนับต่อจากรอบสูงสุด รวมรอบที่ถูกเปิดใหม่ (ตรงกับ action)
+  const nextRound = (rounds.at(-1)?.roundNo ?? 0) + 1
   const openBills = summary.billCount + summary.voidedCount
-  const dayTotal = rounds.reduce((sum, round) => sum + round.totalSales, 0) + summary.totalSales
-  // ยังไม่เคยปิด = ปิดรอบ 1 ได้เสมอ (แม้ไม่มีบิล เหมือนเดิม) · ปิดไปแล้ว = ต้องมีบิลใหม่ก่อน
-  const canCloseNext = rounds.length === 0 || openBills > 0
+  const dayTotal = active.reduce((sum, round) => sum + round.totalSales, 0) + summary.totalSales
+  // จำนวนบิลทั้งวันของคนนี้ (บิลสำเร็จ · ยกเลิก) = รอบที่ใช้อยู่ + ที่ยังไม่ปิดรอบ
+  const dayBills = active.reduce((sum, round) => sum + round.billCount, 0) + summary.billCount
+  const dayVoided = active.reduce((sum, round) => sum + round.voidedCount, 0) + summary.voidedCount
+  // ยังไม่มีรอบที่ใช้อยู่ = ปิดได้เสมอ (แม้ไม่มีบิล เหมือนเดิม) · มีแล้ว = ต้องมีบิลใหม่ก่อน
+  const canCloseNext = active.length === 0 || openBills > 0
+  // รอบล่าสุดของวันเพิ่งถูกเปิดใหม่ = ใส่ยอดที่เคยนับไว้ให้ในฟอร์ม
+  const latest = rounds.at(-1)
+  const initialCounted = latest?.reopened
+    ? Object.fromEntries(latest.channels.map((line) => [line.channel, line.counted]))
+    : undefined
 
   return (
     <>
@@ -65,12 +79,14 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
       >
         <article className="stat-tile">
           <span className="t-caption">
-            {rounds.length > 0 ? "ยอดที่ยังไม่ปิดรอบ" : isToday ? "ยอดขายรวมวันนี้" : "ยอดขายรวมของวันที่เลือก"}
+            {active.length > 0 ? "ยอดที่ยังไม่ปิดรอบ" : isToday ? "ยอดขายรวมวันนี้" : "ยอดขายรวมของวันที่เลือก"}
           </span>
           <strong className="t-h1 num">฿{formatBaht(summary.totalSales)}</strong>
           <span className="t-caption num">
             {formatNumber(summary.billCount)} บิล
-            {rounds.length > 0 ? ` · ทั้งวัน ฿${formatBaht(dayTotal)} (ปิดแล้ว ${rounds.length} รอบ)` : ""}
+            {active.length > 0
+              ? ` · ทั้งวัน ฿${formatBaht(dayTotal)} · ${formatNumber(dayBills)} บิล (ปิดแล้ว ${active.length} รอบ)`
+              : ""}
           </span>
         </article>
         <article className="stat-tile">
@@ -94,21 +110,26 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
         ))}
         <article className="stat-tile">
           <span className="t-caption">
-            {rounds.length > 0 ? "บิลที่ถูกยกเลิก (ยังไม่ปิดรอบ)" : isToday ? "บิลที่ถูกยกเลิกวันนี้" : "บิลที่ถูกยกเลิกในวันนั้น"}
+            {active.length > 0 ? "บิลที่ถูกยกเลิก (ยังไม่ปิดรอบ)" : isToday ? "บิลที่ถูกยกเลิกวันนี้" : "บิลที่ถูกยกเลิกในวันนั้น"}
           </span>
           <strong className="t-h1 num" style={{ color: summary.voidedCount > 0 ? "var(--danger)" : undefined }}>
             {formatNumber(summary.voidedCount)}
           </strong>
+          {active.length > 0 ? <span className="t-caption num">ทั้งวัน {formatNumber(dayVoided)} บิล</span> : null}
         </article>
       </section>
 
       <div className="form-split">
         <section className="card-ui card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {rounds.map((round) => (
-            <RoundResult key={round.id} round={round} />
+            <RoundResult
+              key={round.id}
+              round={round}
+              reopenable={canReopen && round.id === lastRound?.id}
+            />
           ))}
 
-          {rounds.length > 0 && openBills > 0 ? (
+          {active.length > 0 && openBills > 0 ? (
             <div className="alert-banner warning">
               ขายหลังปิดรอบที่ {lastRound?.roundNo} แล้ว <span className="num">{formatNumber(openBills)}</span> บิล · ฿
               <span className="num">{formatBaht(summary.totalSales)}</span> — ยังไม่ได้ปิด นับเงินแล้วปิดเป็นรอบที่ {nextRound}
@@ -118,10 +139,18 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
           {canCloseNext ? (
             <div>
               <h2 className="t-h2" style={{ marginBottom: 16 }}>
-                {rounds.length === 0 ? "นับเงินและปิดยอด" : `นับเงินและปิดรอบที่ ${nextRound}`}
+                {nextRound === 1 ? "นับเงินและปิดยอด" : `นับเงินและปิดรอบที่ ${nextRound}`}
               </h2>
               {canClose ? (
-                <ClosingForm summary={summary} closingDate={closingKey} isToday={isToday} roundNo={nextRound} />
+                <ClosingForm
+                  // key เปลี่ยนตามรอบ — เปิดรอบใหม่แล้ว refresh ฟอร์มต้องรับยอดเดิมชุดใหม่ ไม่ค้าง state เก่า
+                  key={`${closingKey}-${nextRound}`}
+                  summary={summary}
+                  closingDate={closingKey}
+                  isToday={isToday}
+                  roundNo={nextRound}
+                  initialCounted={initialCounted}
+                />
               ) : (
                 <div className="alert-banner info">คุณมีสิทธิ์ดูยอดขายอย่างเดียว — บันทึกรายการไม่ได้ (ติดต่อเจ้าของร้านเพื่อขอสิทธิ์)</div>
               )}
@@ -156,13 +185,27 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((row) => (
-                    <tr key={row.id} style={{ borderTop: "1px solid var(--line)" }}>
+                  {groupByDay(history).map((day) => [
+                    ...day.rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      style={{ borderTop: "1px solid var(--line)", opacity: row.reopened ? 0.55 : 1 }}
+                      title={row.reopened ? `เปิดใหม่โดย ${row.reopened.byName} · ${row.reopened.reason}` : undefined}
+                    >
                       <td className="num" style={{ padding: "12px 24px" }}>
                         <Link href={`/pos/closing?date=${row.closingDate.toISOString().slice(0, 10)}`} style={{ textDecoration: "underline" }}>
                           {formatDate(row.closingDate)}
                         </Link>
                         <span className="t-caption"> · รอบ {row.roundNo}</span>
+                        {row.reopened ? (
+                          <>
+                            <br />
+                            <span className="chip chip-warning">
+                              <span className="dot" />
+                              เปิดใหม่แล้ว
+                            </span>
+                          </>
+                        ) : null}
                       </td>
                       <td className="num" style={{ padding: "12px", textAlign: "right" }}>
                         ฿{formatBaht(row.totalSales)}
@@ -197,7 +240,23 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
                         {formatNumber(row.billCount)} / ยกเลิก {formatNumber(row.voidedCount)}
                       </td>
                     </tr>
-                  ))}
+                    )),
+                    // สรุปรายวัน (2026-09-30) — นับเฉพาะรอบที่ยังใช้อยู่ · แสดงเมื่อวันนั้นมีมากกว่า 1 แถว
+                    day.rows.length > 1 ? (
+                      <tr key={`${day.key}-total`} style={{ background: "var(--surface-2)" }}>
+                        <td className="t-caption" style={{ padding: "8px 24px" }}>
+                          รวมวันที่ {formatDate(day.rows[0].closingDate)} · {formatNumber(day.activeRounds)} รอบ
+                        </td>
+                        <td className="num" style={{ padding: "8px 12px", textAlign: "right", fontWeight: 700 }}>
+                          ฿{formatBaht(day.totalSales)}
+                        </td>
+                        <td colSpan={4} />
+                        <td className="num" style={{ padding: "8px 24px", textAlign: "right", fontWeight: 700 }}>
+                          {formatNumber(day.billCount)} / ยกเลิก {formatNumber(day.voidedCount)}
+                        </td>
+                      </tr>
+                    ) : null,
+                  ])}
                 </tbody>
               </table>
             </div>
@@ -284,16 +343,32 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
 }
 
 /// ผลของรอบที่ปิดแล้ว — ตารางยอดในระบบ/ตรวจได้/ส่วนต่างต่อช่องทาง (แก้ไขไม่ได้)
-function RoundResult({ round }: { round: ClosingView }) {
+/// รอบที่ถูกเปิดใหม่ (2026-09-30) แสดงจางพร้อมคนเปิด/เวลา/เหตุผล · `reopenable` = แสดงปุ่มเปิดรอบใหม่ (มีสิทธิ์ + เป็นรอบล่าสุด)
+function RoundResult({ round, reopenable }: { round: ClosingView; reopenable: boolean }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, opacity: round.reopened ? 0.6 : 1 }}>
       <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <h2 className="t-h2">รอบที่ {round.roundNo}</h2>
-        <span className="chip chip-success">
-          <span className="dot" />
-          ปิดเมื่อ {formatDateTime(round.closedAt)}
+        <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          {round.reopened ? (
+            <span className="chip chip-warning">
+              <span className="dot" />
+              เปิดใหม่แล้ว — ไม่นับยอด
+            </span>
+          ) : (
+            <span className="chip chip-success">
+              <span className="dot" />
+              ปิดเมื่อ {formatDateTime(round.closedAt)}
+            </span>
+          )}
+          {reopenable ? <ReopenClosingButton closingId={round.id} roundNo={round.roundNo} /> : null}
         </span>
       </div>
+      {round.reopened ? (
+        <p className="t-caption">
+          เปิดใหม่โดย {round.reopened.byName} เมื่อ {formatDateTime(round.reopened.at)} · เหตุผล: {round.reopened.reason}
+        </p>
+      ) : null}
       <div className="datatable-wrap">
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>
           <thead>
@@ -333,6 +408,27 @@ function RoundResult({ round }: { round: ClosingView }) {
       {round.note ? <p className="t-caption">หมายเหตุ: {round.note}</p> : null}
     </div>
   )
+}
+
+/// จัดประวัติเป็นกลุ่มรายวัน + ยอดรวมของวัน (2026-09-30) — รวมเฉพาะรอบที่ยังใช้อยู่ (รอบที่ถูกเปิดใหม่ไม่นับ)
+/// history มาเรียงวันใหม่ → เก่าแล้ว จึงจัดกลุ่มตามลำดับที่มาได้เลย
+function groupByDay<T extends ClosingView>(rows: T[]) {
+  const days: { key: string; rows: T[]; activeRounds: number; totalSales: number; billCount: number; voidedCount: number }[] = []
+  for (const row of rows) {
+    const key = row.closingDate.toISOString().slice(0, 10)
+    let day = days.at(-1)
+    if (day?.key !== key) {
+      day = { key, rows: [], activeRounds: 0, totalSales: 0, billCount: 0, voidedCount: 0 }
+      days.push(day)
+    }
+    day.rows.push(row)
+    if (row.reopened) continue
+    day.activeRounds += 1
+    day.totalSales += row.totalSales
+    day.billCount += row.billCount
+    day.voidedCount += row.voidedCount
+  }
+  return days
 }
 
 /// สีส่วนต่าง: เกิน = น้ำเงิน · ขาด = แดง · ตรง/ไม่ได้ตรวจ = สีปกติ (ตรงกับป้ายในฟอร์มปิดรอบ — เขียวสงวนไว้ให้ "ตรงพอดี")

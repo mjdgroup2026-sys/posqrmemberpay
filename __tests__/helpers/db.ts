@@ -166,7 +166,7 @@ const FULL_PERMISSIONS = [
   { resource: "STOCK_ADJUST", actions: ["VIEW", "ADD", "DELETE"] },
   { resource: "POS", actions: ["VIEW", "ADD"] },
   { resource: "POS_HISTORY", actions: ["VIEW", "DELETE"] },
-  { resource: "POS_CLOSING", actions: ["VIEW", "ADD"] },
+  { resource: "POS_CLOSING", actions: ["VIEW", "ADD", "EDIT"] },
   { resource: "REPORTS", actions: ["VIEW"] },
   { resource: "USERS", actions: ["VIEW", "ADD", "EDIT", "DELETE"] },
 ] as const

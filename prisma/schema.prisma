@@ -326,7 +326,8 @@ model User {
   uploadedAssets            StoreAsset[]        @relation("AssetUploadedBy")
   brandAssets               BrandAsset[]        @relation("BrandAssetOwner")
   createdBookings           Booking[]           @relation("BookingCreatedBy")
-  closings                  CashierClosing[]
+  closings                  CashierClosing[]    @relation("ClosingCashier")
+  reopenedClosings          CashierClosing[]    @relation("ClosingReopenedBy")
 
   @@map("user")
 }
@@ -507,10 +508,16 @@ model CashierClosing {
   countedCard      Decimal? @db.Decimal(12, 2)
   note             String?
   closedAt         DateTime @default(now())
+  /// เปิดรอบใหม่ (2026-09-30) — ไม่ null = รอบนี้ถูกเปิดใหม่แล้ว: บิลถูกถอดกลับเป็น "ยังไม่ปิดรอบ" ·
+  /// แถวคงไว้เป็นประวัติ (ยอด ณ ตอนปิด) แต่ไม่นับในสรุปใด ๆ · ตั้งได้ทางเดียวคือ reopenCashierClosing
+  reopenedAt       DateTime?
+  reopenedById     String?
+  reopenReason     String?
 
-  store   Store @relation(fields: [storeId], references: [id])
-  cashier User  @relation(fields: [cashierId], references: [id])
-  sales   Sale[]
+  store      Store @relation(fields: [storeId], references: [id])
+  cashier    User  @relation("ClosingCashier", fields: [cashierId], references: [id])
+  reopenedBy User? @relation("ClosingReopenedBy", fields: [reopenedById], references: [id])
+  sales      Sale[]
 
   @@unique([storeId, cashierId, closingDate, roundNo])
   @@index([storeId])

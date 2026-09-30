@@ -549,6 +549,9 @@ type ClosingRow = {
   countedCard: Prisma.Decimal | null
   note: string | null
   closedAt: Date
+  reopenedAt: Date | null
+  reopenReason: string | null
+  reopenedBy?: { name: string } | null
 }
 
 /// ยอดในระบบ / ยอดจริงที่กรอก / ส่วนต่าง ต่อช่องทาง (20g) — ไม่ได้กรอก = counted/difference เป็น null
@@ -593,17 +596,22 @@ function closingView(row: ClosingRow) {
     channels,
     note: row.note,
     closedAt: row.closedAt,
+    /// เปิดรอบใหม่แล้ว (2026-09-30) — แสดงเป็นประวัติ ไม่นับในยอดรวมใด ๆ
+    reopened: row.reopenedAt
+      ? { at: row.reopenedAt, reason: row.reopenReason ?? "", byName: row.reopenedBy?.name ?? "ไม่ทราบชื่อ" }
+      : null,
   }
 }
 
 export type ClosingView = ReturnType<typeof closingView>
 
-/// ทุกรอบที่ปิดแล้วของแคชเชียร์คนหนึ่งในวันนั้น เรียงรอบ 1 → n
+/// ทุกรอบที่ปิดแล้วของแคชเชียร์คนหนึ่งในวันนั้น เรียงรอบ 1 → n — รวมรอบที่ถูกเปิดใหม่ (`reopened` ไม่ null) ผู้เรียกต้องกรองเองก่อนรวมยอด
 export async function getDayClosings(storeId: string, cashierId: string, date: Date = new Date()): Promise<ClosingView[]> {
   const db = forStore(storeId)
   const rows = await db.cashierClosing.findMany({
     where: { cashierId, closingDate: businessDateOnly(date) },
     orderBy: { roundNo: "asc" },
+    include: { reopenedBy: { select: { name: true } } },
   })
   return rows.map(closingView)
 }
@@ -614,7 +622,7 @@ export async function listClosings(storeId: string, params: { cashierId?: string
     where: params.cashierId ? { cashierId: params.cashierId } : {},
     orderBy: [{ closingDate: "desc" }, { roundNo: "desc" }],
     take: params.limit ?? 60,
-    include: { cashier: { select: { name: true } } },
+    include: { cashier: { select: { name: true } }, reopenedBy: { select: { name: true } } },
   })
   return rows.map((row) => ({ ...closingView(row), cashierName: row.cashier.name }))
 }
@@ -653,7 +661,12 @@ export async function getStoreDaySummary(storeId: string, date: Date = new Date(
       _sum: { total: true },
       _count: { _all: true },
     }),
-    db.cashierClosing.groupBy({ by: ["cashierId"], where: { closingDate: businessDateOnly(date) }, _count: { _all: true } }),
+    db.cashierClosing.groupBy({
+      by: ["cashierId"],
+      // รอบที่ถูกเปิดใหม่ไม่นับ — บิลของมันกลับไปอยู่ใน openBills แล้ว
+      where: { closingDate: businessDateOnly(date), reopenedAt: null },
+      _count: { _all: true },
+    }),
     db.sale.groupBy({ by: ["cashierId"], where: { closingId: null, createdAt: { gte: start, lt: end } }, _count: { _all: true } }),
   ])
 

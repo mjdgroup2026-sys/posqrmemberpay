@@ -53,15 +53,24 @@ export function ClosingForm({
   closingDate,
   isToday,
   roundNo = 1,
+  initialCounted,
 }: {
   summary: ClosingSummary
   closingDate: string
   isToday: boolean
   /// รอบที่กำลังจะปิด (ปิดหลายรอบต่อวัน 2026-09-29)
   roundNo?: number
+  /// ยอดที่เคยนับไว้ของรอบที่เพิ่งถูกเปิดใหม่ (2026-09-30) — ใส่ให้ในช่องไว้ก่อน ไม่ต้องนับ/กรอกใหม่ทั้งหมด
+  initialCounted?: Partial<Record<ClosingChannel, number | null>>
 }) {
   const router = useRouter()
-  const [counted, setCounted] = useState<Record<ClosingChannel, string>>({ CASH: "", TRANSFER: "", QR: "", PROMPTPAY: "", CARD: "" })
+  const [counted, setCounted] = useState<Record<ClosingChannel, string>>(() => {
+    const text = (channel: ClosingChannel) => {
+      const value = initialCounted?.[channel]
+      return value === null || value === undefined ? "" : String(value)
+    }
+    return { CASH: text("CASH"), TRANSFER: text("TRANSFER"), QR: text("QR"), PROMPTPAY: text("PROMPTPAY"), CARD: text("CARD") }
+  })
   const [note, setNote] = useState("")
   const [pending, setPending] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
@@ -234,7 +243,7 @@ export function ClosingForm({
         {isToday ? `ยืนยันปิดยอดรอบที่ ${roundNo}` : `ยืนยันปิดยอดรอบที่ ${roundNo} ย้อนหลัง ${formatBusinessDate(closingDate)}`}
       </button>
       <p className="t-caption">
-        บิลที่ถูกนับในรอบนี้จะยกเลิกไม่ได้อีก · ถ้ามีขายเพิ่มหลังปิด ปิดเป็นรอบถัดไปได้ที่หน้านี้ · ยอดที่กรอกแก้ย้อนหลังไม่ได้
+        บิลที่ถูกนับในรอบนี้จะยกเลิกไม่ได้อีก · ถ้ามีขายเพิ่มหลังปิด ปิดเป็นรอบถัดไปได้ที่หน้านี้ · ยอดที่กรอกแก้ได้ทางเดียวคือให้ผู้มีสิทธิ์กด &quot;เปิดรอบใหม่&quot; พร้อมเหตุผล
       </p>
     </form>
   )

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { guardAction } from "@/lib/permissions"
 import { businessDateOnly, businessDayKey, businessDayRange, parseBusinessDayKey } from "@/lib/day"
-import { closingSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
+import { closingSchema, firstIssueMessage, reopenClosingSchema, zodToFieldErrors } from "@/lib/validation"
 import { formatBusinessDate, toNumber } from "@/lib/format"
 import { bucketByChannel } from "@/lib/closing-channels"
 import type { ActionResult } from "@/lib/types"
@@ -26,7 +26,8 @@ class ClosingAbort extends Error {
 /// ลำดับในทรานแซคชันเดียว: สร้างแถวรอบ n (unique ร้าน+คน+วัน+รอบ กันกดซ้อน) → ผูกบิลที่ยังว่างเข้ารอบนี้ด้วย
 /// updateMany where closingId null → คำนวณยอดจากบิลที่ผูกได้จริง → บันทึกยอด
 /// บิลที่ commit ระหว่างนั้นไม่ถูกผูก จึงไปอยู่รอบถัดไปเอง ไม่หล่นและไม่นับซ้ำ · บิลที่ผูกแล้ว void ไม่ได้ (sales.ts)
-/// รอบ 1 ปิดได้แม้ไม่มีบิล (เหมือนเดิม) · รอบ 2 ขึ้นไปต้องมีบิลใหม่อย่างน้อย 1 ใบ
+/// ยังไม่มีรอบที่ใช้อยู่ = ปิดได้แม้ไม่มีบิล (เหมือนเดิม) · มีรอบที่ปิดอยู่แล้ว = ต้องมีบิลใหม่อย่างน้อย 1 ใบ
+/// เลขรอบ = สูงสุด + 1 นับรวมรอบที่ถูกเปิดใหม่ (แถวเดิมยังอยู่เป็นประวัติ) — รอบ 2 ถูกเปิดใหม่ ปิดอีกครั้งได้รอบ 3
 /// ยอดทั้งหมดคำนวณสดจาก Sale ในทรานแซคชันเดียวกัน ไม่รับตัวเลขสรุปจากฝั่ง client
 export async function closeCashierDay(formData: FormData): Promise<ActionResult> {
   // ด่านชั้นที่ 2 ของ §4 — เช็คสิทธิ์ POS_CLOSING:ADD ก่อนแตะข้อมูลเสมอ
@@ -77,7 +78,8 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
         _max: { roundNo: true },
       })
       const roundNo = (last._max.roundNo ?? 0) + 1
-      if (roundNo > 1 && (await tx.sale.count({ where: openBills })) === 0) {
+      const activeRounds = await tx.cashierClosing.count({ where: { cashierId: user.id, closingDate, reopenedAt: null } })
+      if (activeRounds > 0 && (await tx.sale.count({ where: openBills })) === 0) {
         throw new ClosingAbort("ไม่มีบิลใหม่หลังปิดรอบล่าสุด — ยังไม่ต้องปิดรอบเพิ่ม")
       }
 
@@ -153,5 +155,61 @@ export async function closeCashierDay(formData: FormData): Promise<ActionResult>
       return { ok: false, error: "มีการปิดรอบนี้พร้อมกันจากอีกหน้าจอ — รีเฟรชหน้าแล้วตรวจยอดอีกครั้ง" }
     }
     return { ok: false, error: "ปิดยอดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
+}
+
+/// เปิดรอบที่ปิดแล้วใหม่ (2026-09-30) — ต้องมีสิทธิ์ POS_CLOSING:EDIT และใส่เหตุผล
+///
+/// ถอดบิลของรอบนั้นกลับเป็น "ยังไม่ปิดรอบ" (void ได้อีกครั้ง) แล้วแคชเชียร์เจ้าของบิลปิดเป็นรอบถัดไปเอง ·
+/// แถวรอบเดิมไม่ลบ ตั้ง reopenedAt/คนเปิด/เหตุผลไว้เป็นประวัติ และไม่ถูกนับในสรุปใดอีก ·
+/// เปิดได้เฉพาะรอบล่าสุดที่ยังใช้อยู่ของคนนั้นในวันนั้น (บิลจะได้ไม่สลับลำดับรอบ) ·
+/// กดพร้อมกัน = conditional update where reopenedAt null ผ่านได้ครั้งเดียว ·
+/// ถ้าแคชเชียร์ปิดรอบถัดไปชนจังหวะเดียวกันพอดี ผลที่แย่ที่สุดคือเปิดรอบที่ไม่ใช่ล่าสุด — บิลที่ถูกถอดไปอยู่รอบถัดไป ไม่หล่นและไม่นับซ้ำ
+export async function reopenCashierClosing(formData: FormData): Promise<ActionResult> {
+  const guard = await guardAction("POS_CLOSING", "EDIT")
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const db = forStore(guard.user.storeId)
+
+  const parsed = reopenClosingSchema.safeParse({ id: formData.get("id"), reason: formData.get("reason") })
+  if (!parsed.success) {
+    return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
+  }
+  const { id, reason } = parsed.data
+
+  try {
+    const round = await db.$transaction(async (tx) => {
+      const round = await tx.cashierClosing.findUnique({
+        where: { id },
+        select: { id: true, cashierId: true, closingDate: true, roundNo: true, reopenedAt: true },
+      })
+      if (!round) throw new ClosingAbort("ไม่พบรอบปิดยอดนี้")
+      if (round.reopenedAt) throw new ClosingAbort(`รอบที่ ${round.roundNo} ถูกเปิดใหม่ไปแล้ว`)
+
+      const later = await tx.cashierClosing.findFirst({
+        where: { cashierId: round.cashierId, closingDate: round.closingDate, reopenedAt: null, roundNo: { gt: round.roundNo } },
+        orderBy: { roundNo: "desc" },
+        select: { roundNo: true },
+      })
+      if (later) throw new ClosingAbort(`เปิดใหม่ได้เฉพาะรอบล่าสุด — รอบล่าสุดของวันนั้นคือรอบที่ ${later.roundNo}`)
+
+      const claimed = await tx.cashierClosing.updateMany({
+        where: { id, reopenedAt: null },
+        data: { reopenedAt: new Date(), reopenedById: guard.user.id, reopenReason: reason },
+      })
+      if (claimed.count !== 1) throw new ClosingAbort("รอบนี้ถูกเปิดใหม่จากอีกหน้าจอแล้ว — รีเฟรชหน้าแล้วตรวจอีกครั้ง")
+
+      await tx.sale.updateMany({ where: { closingId: id }, data: { closingId: null } })
+      return round
+    })
+
+    revalidatePath("/pos/closing")
+    revalidatePath("/pos/history")
+    return {
+      ok: true,
+      message: `เปิดรอบที่ ${round.roundNo} ของวันที่ ${formatBusinessDate(round.closingDate)} ใหม่แล้ว — บิลกลับไปรอปิดรอบถัดไป`,
+    }
+  } catch (error) {
+    if (error instanceof ClosingAbort) return { ok: false, error: error.reason }
+    return { ok: false, error: "เปิดรอบใหม่ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 }

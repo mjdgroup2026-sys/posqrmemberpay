@@ -627,9 +627,13 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 `StockDocumentLine.receivedQty` เป็นค่า denormalized (CHECK `received + cancelled ≤ quantity`) · ledger ผูก `receiptRoundId` + `documentId` · ใบรับเดิมถูก backfill เป็นรอบที่ 1 ·
 ยังเรียก `createStockReceipt` แบบไม่ส่ง `mode` ได้ = รับครบทันที (ขั้นตอนเดิม) · เทส `stock-receipt-rounds.test.ts` 14
 
-**ปิดยอดหลายรอบต่อวัน (2026-09-29 · รอ PR/deploy · migration `20260929150000_closing_rounds` มี backfill)**: `Sale.closingId` ผูกบิลกับรอบที่นับมัน ·
+**✅ ปิดยอดหลายรอบต่อวัน — ขึ้น production แล้ว 2026-09-30 (PR #47 · CI run 36660547567 · พร้อม #45 โลโก้แบรนด์ + #46 ลิขสิทธิ์ · `_prisma_migrations` = 38 · สลับไป blue)**: `Sale.closingId` ผูกบิลกับรอบที่นับมัน ·
 **ทางเดียวที่ตั้ง `closingId` คือ `closeCashierDay`** (สร้างรอบ → `updateMany where closingId null` → คำนวณยอดจากบิลที่ผูก ในทรานแซคชันเดียว) · void ล็อกรายบิล
 (`where closingId: null`) · รอบ 2+ ต้องมีบิลใหม่ · query ที่ใช้: `getOpenSalesSummary` / `getDayClosings` (ชื่อเดิม `getTodaySalesSummary`/`getTodayClosing` ถูกลบ)
+
+**เปิดรอบปิดยอดใหม่ (2026-09-30 · รอ PR/deploy · migration `20260930090000_closing_reopen` additive)**: **ทางเดียวที่ถอด `closingId` คือ `reopenCashierClosing`**
+(สิทธิ์ `POS_CLOSING:EDIT` ไม่ backfill · เหตุผลบังคับ · เฉพาะรอบล่าสุด · conditional update `where reopenedAt null`) · แถวรอบเดิมไม่ลบ — **ทุก query ที่รวมยอด/นับรอบต้องกรอง `reopenedAt: null`** ·
+เลขรอบใหม่ = สูงสุด + 1 รวมรอบที่ถูกเปิด · ประวัติ `/pos/closing` มีแถวรวมรายวัน (ยอด/จำนวนบิล/ยกเลิก)
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —
