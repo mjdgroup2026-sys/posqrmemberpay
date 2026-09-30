@@ -631,7 +631,7 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 **ทางเดียวที่ตั้ง `closingId` คือ `closeCashierDay`** (สร้างรอบ → `updateMany where closingId null` → คำนวณยอดจากบิลที่ผูก ในทรานแซคชันเดียว) · void ล็อกรายบิล
 (`where closingId: null`) · รอบ 2+ ต้องมีบิลใหม่ · query ที่ใช้: `getOpenSalesSummary` / `getDayClosings` (ชื่อเดิม `getTodaySalesSummary`/`getTodayClosing` ถูกลบ)
 
-**เปิดรอบปิดยอดใหม่ (2026-09-30 · รอ PR/deploy · migration `20260930090000_closing_reopen` additive)**: **ทางเดียวที่ถอด `closingId` คือ `reopenCashierClosing`**
+**✅ เปิดรอบปิดยอดใหม่ — ขึ้น production แล้ว 2026-09-30 (PR #48 · CI run 36670880627 · migration `20260930090000_closing_reopen` additive · `_prisma_migrations` = 39 · สลับไป green · เจ้าของลองหน้าจริงผ่านแล้ว)**: **ทางเดียวที่ถอด `closingId` คือ `reopenCashierClosing`**
 (สิทธิ์ `POS_CLOSING:EDIT` ไม่ backfill · เหตุผลบังคับ · เฉพาะรอบล่าสุด · conditional update `where reopenedAt null`) · แถวรอบเดิมไม่ลบ — **ทุก query ที่รวมยอด/นับรอบต้องกรอง `reopenedAt: null`** ·
 เลขรอบใหม่ = สูงสุด + 1 รวมรอบที่ถูกเปิด · ประวัติ `/pos/closing` มีแถวรวมรายวัน (ยอด/จำนวนบิล/ยกเลิก)
 
