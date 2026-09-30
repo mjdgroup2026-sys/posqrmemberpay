@@ -593,7 +593,7 @@ tenant-isolation +6 query +6 action (651 ทั้งชุด)
 `docker exec posmobileorder-app-green ls .next/server/app/(staff)/(app)/spa` → board/bookings/shifts/therapists ครบ (ไม่ใช่แค่ `/api/health`)
 · ⚠️ **กับดักใหม่ที่เจอจริง**: Prisma 7 ถอด `migrate diff --from-url` ออกแล้ว — ใส่ไปมันพ่นหน้า help แล้ว **exit 0 เหมือนผ่าน** ต้องใช้ `--from-config-datasource`
 (ตั้ง `DATABASE_URL` ของฐานที่จะตรวจเป็น env นำหน้าคำสั่ง — `prisma7.config.ts` โหลด dotenv ซึ่งไม่ override env ที่ตั้งมาก่อน)
-· **20c รายงานต่อพนักงานนวด เสร็จในเครื่องแล้ว (รอ PR · ไม่มี migration/env)**: `getTherapistSalesReport`/`getTherapistHistory` ใน `lib/queries.ts` (raw SQL อ่าน `SaleItem.therapistId` ของบิล COMPLETED · กรอง storeId เอง) ·
+· **✅ 20c รายงานต่อพนักงานนวด — ขึ้น production แล้ว 2026-09-24 พร้อม 20e (PR #32 รวม #28 · CI run 35960037250 · ไม่มี migration/env)**: `getTherapistSalesReport`/`getTherapistHistory` ใน `lib/queries.ts` (raw SQL อ่าน `SaleItem.therapistId` ของบิล COMPLETED · กรอง storeId เอง) ·
 `/spa/reports?from=&to=` (สิทธิ์ `SPA_THERAPISTS` หรือ `REPORTS`) + `/spa/therapists/[therapistId]` ประวัติรายคน · `resolveDayRange()` ใน `lib/day.ts` · เทส `therapist-report.test.ts` 6
 
 **✅ 20e ปรับร้านสปารอบ 2 + แยกรายงานอาหาร/นวด — ขึ้น production แล้ว 2026-09-24 (PR #32 รวม #28 + #31 · CI run 35960037250 · backup `posmobileorderdb-20260924-121414.dump` · ซ้อมบนสำเนาแล้ว · `_prisma_migrations` = 31 · สลับ green → blue · ยืนยัน `sales-csv` ในคอนเทนเนอร์ blue)**:
