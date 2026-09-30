@@ -67,3 +67,14 @@ export function parseAssetId(url: string | null | undefined): string | null {
   const match = /^\/api\/assets\/([A-Za-z0-9_-]{1,64})$/.exec(url.trim())
   return match ? match[1] : null
 }
+
+/// โลโก้แบรนด์ — เก็บคนละตารางกับรูปของร้าน (brand_asset) จึงมี path ของตัวเอง
+export function brandAssetUrl(id: string): string {
+  return `/api/brand-assets/${id}`
+}
+
+export function parseBrandAssetId(url: string | null | undefined): string | null {
+  if (!url) return null
+  const match = /^\/api\/brand-assets\/([A-Za-z0-9_-]{1,64})$/.exec(url.trim())
+  return match ? match[1] : null
+}

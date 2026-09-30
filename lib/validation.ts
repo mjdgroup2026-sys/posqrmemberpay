@@ -679,9 +679,12 @@ export const createBrandSchema = z.object({
   name: brandName,
   /// สาขาที่จะดึงเข้าแบรนด์ทันที (เลือกได้หลายร้าน · ว่างได้) — ต้องเป็น OWNER ของทุกร้านที่เลือก
   storeIds: z.array(requiredId("ไม่พบร้านที่เลือก")).max(50, "เลือกร้านได้ไม่เกิน 50 ร้านต่อครั้ง"),
+  logoUrl: imageUrl,
 })
 
 export const renameBrandSchema = z.object({ name: brandName })
+
+export const brandLogoSchema = z.object({ logoUrl: imageUrl })
 
 export const attachStoreToBrandSchema = z.object({
   storeId: requiredId("ไม่พบร้านที่ต้องการดึงเข้าแบรนด์"),

@@ -78,7 +78,9 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    · เพิ่ม query/action ใหม่ต้องเพิ่มในตารางของ `__tests__/integration/tenant-isolation.test.ts` ไม่งั้นเทสแดง
    · **การค้นข้ามร้านทำได้ 4 ที่เท่านั้น** (Phase 13–14c): `lib/store-resolve.ts` (หาร้านจากค่าที่เดินทางออกนอกระบบ —
    qrToken / ref1 / invite token / อีเมลของตัวผู้ใช้ · **Phase 17a เพิ่ม `findAssetById()`** — `<img src="/api/assets/<id>">`
-   อยู่ใน HTML ของหน้าลูกค้าที่ไม่มี session ตัวระบุจึงเหลือแค่ id · คืนเฉพาะไบต์รูป), `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
+   อยู่ใน HTML ของหน้าลูกค้าที่ไม่มี session ตัวระบุจึงเหลือแค่ id · คืนเฉพาะไบต์รูป · **2026-09-29 เพิ่ม `findBrandAssetById()`** โลโก้แบรนด์
+   `/api/brand-assets/<id>` เหตุผลเดียวกัน — ตาราง `brand_asset` ผูก `ownerId` ไม่มี storeId · สาขาที่ไม่ตั้งโลโก้เองใช้โลโก้แบรนด์ผ่าน
+   `getStoreSettings().displayLogoUrl`), `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
    ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว), `lib/plan-queries.ts` (แพ็กเกจ = ข้อมูลอ้างอิงของ
    แพลตฟอร์ม ไม่มี storeId) และ `lib/brand-queries.ts` + `app/actions/brand.ts` (Phase 14c — ขอบเขต tenant คือ
    `brand.ownerId = userId` ทุกฟังก์ชันรับ userId แล้วกรองเงื่อนไขนี้ ไม่รับ brandId จากผู้ใช้) — ที่อื่นห้าม

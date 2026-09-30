@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import { deleteStoreAsset, uploadStoreAsset } from "@/app/actions/assets"
 import { ACCEPT_ATTRIBUTE, ASSET_JPEG_QUALITY, MAX_ASSET_BYTES, MAX_ASSET_EDGE } from "@/lib/assets"
 import { IconImagePlus, IconSpinner, IconTrash } from "@/components/icons"
+import type { ActionResult } from "@/lib/types"
 
 /// เลือกรูปจากเครื่อง/ถ่ายจากมือถือ แล้วอัปโหลดเก็บในระบบ (Phase 17a)
 ///
@@ -22,6 +23,9 @@ type Props = {
   hint?: string
   error?: string
   disabled?: boolean
+  /// ปลายทางอัปโหลด/ลบรูปที่ยังไม่บันทึก — ค่าเริ่มต้นคือรูปของร้าน · โลโก้แบรนด์ส่ง uploadBrandAsset/deleteBrandAsset
+  upload?: (formData: FormData) => Promise<ActionResult<{ url: string }>>
+  remove?: (formData: FormData) => Promise<ActionResult>
 }
 
 async function shrinkImage(file: File): Promise<Blob> {
@@ -41,7 +45,17 @@ async function shrinkImage(file: File): Promise<Blob> {
   return blob ?? file
 }
 
-export function ImagePicker({ name, value, onChange, label, hint, error, disabled = false }: Props) {
+export function ImagePicker({
+  name,
+  value,
+  onChange,
+  label,
+  hint,
+  error,
+  disabled = false,
+  upload = uploadStoreAsset,
+  remove = deleteStoreAsset,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -59,7 +73,7 @@ export function ImagePicker({ name, value, onChange, label, hint, error, disable
       const fd = new FormData()
       fd.set("url", previous)
       // ลบเบื้องหลัง — ล้มเหลวก็แค่เหลือรูปกำพร้าในฐาน ไม่ควรขวางผู้ใช้
-      void deleteStoreAsset(fd)
+      void remove(fd)
     }
   }
 
@@ -79,7 +93,7 @@ export function ImagePicker({ name, value, onChange, label, hint, error, disable
 
       const fd = new FormData()
       fd.set("file", new File([blob], "image.jpg", { type: blob.type || "image/jpeg" }))
-      const result = await uploadStoreAsset(fd)
+      const result = await upload(fd)
       if (!result.ok) {
         setLocalError(result.error)
         return

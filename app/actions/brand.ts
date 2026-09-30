@@ -9,10 +9,12 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/prisma"
 import { requireOwner, requireUser, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { copyMenu } from "@/lib/menu-copy"
+import { brandAssetUrl, checkImageBytes, parseBrandAssetId } from "@/lib/assets"
 import { batchRequestRef, computeRenewalPeriod, subscriptionRequestRef } from "@/lib/subscription"
 import {
   attachStoreToBrandSchema,
   batchIdSchema,
+  brandLogoSchema,
   brandBatchSchema,
   copyMenuSchema,
   createBrandSchema,
@@ -69,17 +71,21 @@ export async function createBrand(formData: FormData): Promise<ActionResult<{ br
     return { ok: false, error: storeErrorMessage(error) }
   }
 
-  const parsed = createBrandSchema.safeParse({ name: formData.get("name"), storeIds: formData.getAll("storeIds") })
+  const parsed = createBrandSchema.safeParse({
+    name: formData.get("name"),
+    storeIds: formData.getAll("storeIds"),
+    logoUrl: formData.get("logoUrl") ?? "",
+  })
   if (!parsed.success) {
     return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
   }
-  const { name, storeIds } = parsed.data
+  const { name, storeIds, logoUrl } = parsed.data
 
   try {
     const brandId = await prisma.$transaction(async (tx) => {
       if (await brandOf(tx, userId)) throw new BrandAbort("คุณมีแบรนด์อยู่แล้ว — 1 บัญชีเป็นเจ้าของได้ 1 แบรนด์")
 
-      const brand = await tx.brand.create({ data: { name, ownerId: userId }, select: { id: true } })
+      const brand = await tx.brand.create({ data: { name, ownerId: userId, logoUrl }, select: { id: true } })
       if (storeIds.length > 0) await attachStores(tx, userId, brand.id, storeIds)
       return brand.id
     })
@@ -147,6 +153,91 @@ export async function renameBrand(formData: FormData): Promise<ActionResult> {
 
   revalidateBrand()
   return { ok: true, message: "เปลี่ยนชื่อแบรนด์แล้ว" }
+}
+
+/// อัปโหลดโลโก้แบรนด์ — ขอบเขตคือเจ้าของ (ownerId = userId) เหมือน Brand จึงอัปได้ตั้งแต่ก่อนสร้างแบรนด์
+/// ตรวจชนิด/ขนาดด้วย checkImageBytes ตัวเดียวกับรูปของร้าน
+export async function uploadBrandAsset(formData: FormData): Promise<ActionResult<{ url: string }>> {
+  let userId: string
+  try {
+    userId = (await requireUser()).id
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+
+  const file = formData.get("file")
+  if (!(file instanceof File)) return { ok: false, error: "ไม่พบไฟล์รูปที่อัปโหลด กรุณาเลือกรูปใหม่" }
+
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const checked = checkImageBytes(bytes)
+  if (!checked.ok) return { ok: false, error: checked.error }
+
+  try {
+    const asset = await prisma.brandAsset.create({
+      data: { ownerId: userId, contentType: checked.contentType, byteSize: bytes.byteLength, data: Buffer.from(bytes) },
+      select: { id: true },
+    })
+    return { ok: true, message: "อัปโหลดโลโก้เรียบร้อยแล้ว", data: { url: brandAssetUrl(asset.id) } }
+  } catch (error) {
+    console.error("[brand] uploadBrandAsset:", error)
+    return { ok: false, error: "อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
+}
+
+/// ลบโลโก้ที่เพิ่งอัปแล้วเปลี่ยนใจก่อนกดบันทึก (ImagePicker เรียกเฉพาะรูปที่ยังไม่ถูกบันทึก)
+/// กันซ้ำอีกชั้น: ไม่ลบรูปที่เป็นโลโก้ปัจจุบันของแบรนด์ และไม่ลบรูปของคนอื่น (ownerId ใน where)
+export async function deleteBrandAsset(formData: FormData): Promise<ActionResult> {
+  let userId: string
+  try {
+    userId = (await requireUser()).id
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+
+  const url = String(formData.get("url") ?? "")
+  const id = parseBrandAssetId(url)
+  if (!id) return { ok: false, error: "ไม่พบรูปที่ต้องการลบ" }
+
+  const inUse = await prisma.brand.count({ where: { ownerId: userId, logoUrl: url } })
+  if (inUse > 0) return { ok: false, error: "รูปนี้เป็นโลโก้แบรนด์อยู่ ลบไม่ได้" }
+
+  await prisma.brandAsset.deleteMany({ where: { id, ownerId: userId } })
+  return { ok: true, message: "ลบรูปแล้ว" }
+}
+
+/// ลบไฟล์โลโก้เก่าที่ถูกแทนที่ — เฉพาะรูปที่เก็บในระบบและเป็นของเจ้าของคนนี้ (ลิงก์ภายนอกไม่ใช่ของเรา)
+async function dropReplacedLogo(tx: Tx, userId: string, previous: string | null, next: string | null) {
+  const oldId = previous !== next ? parseBrandAssetId(previous) : null
+  if (oldId) await tx.brandAsset.deleteMany({ where: { id: oldId, ownerId: userId } })
+}
+
+/// ตั้ง/เปลี่ยน/เอาโลโก้แบรนด์ออก — สาขาที่ยังไม่ตั้งโลโก้ของตัวเองแสดงโลโก้นี้บนหน้าเมนูลูกค้า
+export async function updateBrandLogo(formData: FormData): Promise<ActionResult> {
+  let userId: string
+  try {
+    userId = (await requireUser()).id
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+
+  const parsed = brandLogoSchema.safeParse({ logoUrl: formData.get("logoUrl") ?? "" })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
+  const { logoUrl } = parsed.data
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const brand = await tx.brand.findFirst({ where: { ownerId: userId }, select: { id: true, logoUrl: true } })
+      if (!brand) throw new BrandAbort("คุณยังไม่มีแบรนด์")
+      await tx.brand.update({ where: { id: brand.id }, data: { logoUrl } })
+      await dropReplacedLogo(tx, userId, brand.logoUrl, logoUrl)
+    })
+    revalidateBrand()
+    return { ok: true, message: logoUrl ? "บันทึกโลโก้แบรนด์แล้ว" : "เอาโลโก้แบรนด์ออกแล้ว" }
+  } catch (error) {
+    if (error instanceof BrandAbort) return { ok: false, error: error.reason }
+    console.error("[brand] updateBrandLogo:", error)
+    return { ok: false, error: "บันทึกโลโก้ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
 }
 
 /// คัดลอกเมนูจากสาขาอื่นมาลง "ร้านที่ทำงานอยู่" — ต้องเป็น OWNER ของทั้งสองร้าน (ต้นทางดูจาก memberships ที่

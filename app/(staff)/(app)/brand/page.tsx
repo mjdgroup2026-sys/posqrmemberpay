@@ -4,7 +4,7 @@ import { getSession, resolveStoreContext } from "@/lib/session"
 import { getBrandOverview } from "@/lib/brand-queries"
 import { remainingDays, TIER_SPEC } from "@/lib/subscription"
 import { formatBaht, formatDate } from "@/lib/format"
-import { AttachStoreForm, CopyMenuForm, CreateBrandForm, RenameBrandForm } from "@/components/brand-manager"
+import { AttachStoreForm, BrandLogoForm, CopyMenuForm, CreateBrandForm, RenameBrandForm } from "@/components/brand-manager"
 import { IconBrand, IconCard, IconPlus, IconReports } from "@/components/icons"
 
 export const metadata = { title: "แบรนด์" }
@@ -33,8 +33,20 @@ export default async function BrandPage() {
       <div className="page-head">
         <div>
           <p className="t-eyebrow">ร้านหลายสาขา</p>
-          <h1 className="t-h1">
-            <IconBrand size={22} aria-hidden /> {overview.brand ? overview.brand.name : "แบรนด์"}
+          <h1 className="t-h1 row" style={{ gap: 10, alignItems: "center" }}>
+            {overview.brand?.logoUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element -- โลโก้มาได้ทั้งจาก /api/brand-assets และลิงก์ภายนอก */
+              <img
+                src={overview.brand.logoUrl}
+                alt=""
+                width={36}
+                height={36}
+                style={{ width: 36, height: 36, objectFit: "contain", borderRadius: 8 }}
+              />
+            ) : (
+              <IconBrand size={22} aria-hidden />
+            )}
+            {overview.brand ? overview.brand.name : "แบรนด์"}
           </h1>
           <p className="t-body" style={{ marginTop: 4 }}>
             แบรนด์ครอบหลายสาขาเพื่อลดงานซ้ำของเจ้าของ — เมนู โต๊ะ QR รายงาน และแพ็กเกจยังแยกรายสาขา
@@ -149,6 +161,14 @@ export default async function BrandPage() {
               </p>
               <AttachStoreForm attachable={overview.attachable} />
             </div>
+          </section>
+
+          <section className="card-ui card-pad">
+            <h2 className="t-h2">โลโก้แบรนด์</h2>
+            <p className="t-caption" style={{ margin: "4px 0 10px" }}>
+              ใช้แทนโลโก้ของสาขาที่ยังไม่ได้ตั้งเอง · สาขาที่ตั้งโลโก้ในหน้าตั้งค่าร้านแล้วยังแสดงโลโก้ของสาขาตามเดิม
+            </p>
+            <BrandLogoForm logoUrl={overview.brand.logoUrl} />
           </section>
 
           {ctx && copySources.length > 0 ? (

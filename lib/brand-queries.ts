@@ -47,7 +47,7 @@ export type BrandBatchRow = {
 }
 
 export type BrandOverview = {
-  brand: { id: string; name: string; createdAt: Date } | null
+  brand: { id: string; name: string; logoUrl: string | null; createdAt: Date } | null
   /// สาขาใต้แบรนด์ (เรียงตามวันที่สร้าง)
   stores: BrandStoreRow[]
   /// ร้านที่ผู้ใช้เป็น OWNER (StoreMember) และยังไม่อยู่ใต้แบรนด์ใด — ดึงเข้าแบรนด์ได้
@@ -134,6 +134,7 @@ export async function getBrandOverview(userId: string): Promise<BrandOverview> {
       select: {
         id: true,
         name: true,
+        logoUrl: true,
         createdAt: true,
         stores: {
           orderBy: { createdAt: "asc" },
@@ -166,7 +167,7 @@ export async function getBrandOverview(userId: string): Promise<BrandOverview> {
 
   const batches = brand ? brand.batches.map(toBatchRow) : []
   return {
-    brand: brand ? { id: brand.id, name: brand.name, createdAt: brand.createdAt } : null,
+    brand: brand ? { id: brand.id, name: brand.name, logoUrl: brand.logoUrl, createdAt: brand.createdAt } : null,
     stores: brand
       ? brand.stores.map((s) => ({
           id: s.id,

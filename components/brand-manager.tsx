@@ -4,7 +4,16 @@ import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { attachStoreToBrand, copyMenuFromStore, createBrand, renameBrand } from "@/app/actions/brand"
+import {
+  attachStoreToBrand,
+  copyMenuFromStore,
+  createBrand,
+  deleteBrandAsset,
+  renameBrand,
+  updateBrandLogo,
+  uploadBrandAsset,
+} from "@/app/actions/brand"
+import { ImagePicker } from "@/components/image-picker"
 import type { ActionResult, FieldErrors } from "@/lib/types"
 import { IconCopy, IconPlus, IconStore } from "@/components/icons"
 
@@ -43,6 +52,7 @@ type StoreOption = { id: string; name: string; slug: string }
 /// ยังไม่มีแบรนด์ — ตั้งชื่อ + ติ๊กร้านที่ตัวเองเป็นเจ้าของเพื่อดึงเข้ามาทันที
 export function CreateBrandForm({ attachable }: { attachable: StoreOption[] }) {
   const { run, pending, fieldErrors } = useRun()
+  const [logoUrl, setLogoUrl] = useState("")
   return (
     <form
       className="card-ui card-pad"
@@ -60,6 +70,18 @@ export function CreateBrandForm({ attachable }: { attachable: StoreOption[] }) {
         <label htmlFor="brand-name">ชื่อแบรนด์</label>
         <input id="brand-name" name="name" className="input" required maxLength={60} placeholder="เช่น ครัวคุณแม่" autoComplete="organization" />
         {fieldErrors.name ? <span className="field-hint error">{fieldErrors.name}</span> : null}
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <ImagePicker
+          name="logoUrl"
+          value={logoUrl}
+          onChange={setLogoUrl}
+          label="โลโก้แบรนด์ (ไม่บังคับ)"
+          hint={LOGO_HINT}
+          error={fieldErrors.logoUrl}
+          upload={uploadBrandAsset}
+          remove={deleteBrandAsset}
+        />
       </div>
       {attachable.length > 0 ? (
         <fieldset className="field" style={{ marginTop: 10, border: 0, padding: 0 }}>
@@ -79,6 +101,38 @@ export function CreateBrandForm({ attachable }: { attachable: StoreOption[] }) {
       <button type="submit" className="btn btn-primary" disabled={pending} style={{ marginTop: 12 }}>
         <IconPlus size={16} aria-hidden />
         สร้างแบรนด์
+      </button>
+    </form>
+  )
+}
+
+const LOGO_HINT = "สาขาที่ยังไม่ตั้งโลโก้ของตัวเองจะแสดงโลโก้นี้บนหน้าเมนูลูกค้า"
+
+/// โลโก้แบรนด์ — บันทึกแยกจากชื่อ · เอาออกได้ (สาขากลับไปไม่มีโลโก้ ยกเว้นสาขาที่ตั้งของตัวเองไว้)
+export function BrandLogoForm({ logoUrl: saved }: { logoUrl: string | null }) {
+  const { run, pending, fieldErrors } = useRun()
+  const [logoUrl, setLogoUrl] = useState(saved ?? "")
+  const dirty = logoUrl !== (saved ?? "")
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        void run(updateBrandLogo, new FormData(e.currentTarget))
+      }}
+    >
+      <ImagePicker
+        name="logoUrl"
+        value={logoUrl}
+        onChange={setLogoUrl}
+        label="โลโก้แบรนด์"
+        hint={LOGO_HINT}
+        error={fieldErrors.logoUrl}
+        disabled={pending}
+        upload={uploadBrandAsset}
+        remove={deleteBrandAsset}
+      />
+      <button type="submit" className="btn btn-primary btn-sm" disabled={pending || !dirty} style={{ marginTop: 8 }}>
+        บันทึกโลโก้
       </button>
     </form>
   )

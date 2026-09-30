@@ -324,6 +324,7 @@ model User {
   sentInvites               StoreInvite[]       @relation("StoreInviteInvitedBy")
   acceptedInvites           StoreInvite[]       @relation("StoreInviteAcceptedBy")
   uploadedAssets            StoreAsset[]        @relation("AssetUploadedBy")
+  brandAssets               BrandAsset[]        @relation("BrandAssetOwner")
   createdBookings           Booking[]           @relation("BookingCreatedBy")
   closings                  CashierClosing[]
 
@@ -1233,6 +1234,8 @@ model Brand {
   id        String   @id @default(cuid())
   name      String
   ownerId   String
+  /// โลโก้แบรนด์ (/api/brand-assets/<id> หรือลิงก์ภายนอก) — สาขาที่ยังไม่ตั้ง StoreSettings.logoUrl ใช้ตัวนี้แทน
+  logoUrl   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1464,4 +1467,21 @@ model StoreAsset {
 
   @@index([storeId])
   @@map("store_asset")
+}
+
+/// รูปของแบรนด์ (โลโก้) — แยกจาก StoreAsset เพราะแบรนด์ไม่มี storeId · ขอบเขตคือเจ้าของ (ownerId = userId)
+/// เหมือน Brand เอง จึงอัปโหลดได้ตั้งแต่ก่อนสร้างแบรนด์ (ฟอร์มสร้างแบรนด์มีช่องโลโก้)
+model BrandAsset {
+  id          String   @id @default(cuid())
+  ownerId     String
+  /// ชนิดที่ "ตรวจจากไบต์จริง" แล้ว (lib/assets.ts)
+  contentType String
+  byteSize    Int
+  data        Bytes
+  createdAt   DateTime @default(now())
+
+  owner User @relation("BrandAssetOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("brand_asset")
 }
