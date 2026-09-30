@@ -29,6 +29,9 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     : [0, 0, null, null]
 
   const user = context?.user ?? (await requireUserSummary())
+  // โมดูลคลังที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) — ไม่มีป้าย/badge สินค้าใกล้หมด
+  const inventoryOn = settings?.modules.inventory ?? true
+  const shownLowStock = inventoryOn ? lowStockCount : 0
 
   // เมนูที่ไม่มีสิทธิ์ VIEW ต้องหายไปจาก Sidebar (§4) — อ่านจาก DB ทุกคำขอ ไม่ cache ข้ามคำขอ
   // จึงมีผลทันทีในคำขอถัดไปหลังผู้ดูแลเปลี่ยนบทบาทให้
@@ -41,17 +44,19 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       {/* ฉากหลัง + ปิดลิ้นชักอัตโนมัติเมื่อเปลี่ยนหน้า — โผล่เฉพาะจอเล็ก (CSS) */}
       <MobileNavBackdrop />
       <Sidebar
-        lowStockCount={lowStockCount}
+        lowStockCount={shownLowStock}
         pendingNotificationCount={pendingNotificationCount}
         viewableResources={viewableResources}
         isPlatformAdmin={user.isPlatformAdmin}
         isOwner={context?.role === "OWNER"}
         spaEnabled={settings?.spaEnabled ?? false}
+        inventoryEnabled={inventoryOn}
       />
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Topbar
           user={{ name: user.name, email: user.email }}
-          lowStockCount={lowStockCount}
+          lowStockCount={shownLowStock}
+          showStockStatus={inventoryOn}
           pendingNotificationCount={pendingNotificationCount}
           activeStoreId={context?.storeId ?? null}
           // ร้านที่เจ้าของปิดไว้ไม่อยู่ในตัวสลับร้าน — เปิดกลับได้ที่ /no-store (2026-09-30)

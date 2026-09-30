@@ -7,7 +7,8 @@ import { prisma } from "@/lib/prisma"
 import { requirePlatformAdmin, storeErrorMessage } from "@/lib/session"
 import { isStoreScbReady } from "@/lib/scb-store"
 import { isSlipVerificationConfigured } from "@/lib/slip-provider"
-import { adminPaymentModeSchema, firstIssueMessage, storeStatusSchema } from "@/lib/validation"
+import { adminPaymentModeSchema, firstIssueMessage, storeModulesSchema, storeStatusSchema } from "@/lib/validation"
+import { MODULE_LABEL, STORE_MODULES } from "@/lib/modules"
 import type { ActionResult } from "@/lib/types"
 
 /// การกระทำของผู้ดูแลแพลตฟอร์ม (Phase 14a) — แตะได้แค่ Store.status (+ Store.paymentMode ใน 15a) ไม่แก้ข้อมูลในร้าน
@@ -77,4 +78,43 @@ export async function setStorePaymentMode(formData: FormData): Promise<ActionRes
         ? "เปิดโหมดตรวจสลิปอัตโนมัติให้ร้านแล้ว"
         : "เปลี่ยนเป็นพร้อมเพย์ตรงของร้านแล้ว"
   return { ok: true, message }
+}
+
+/// เปิด/ปิดโมดูลของร้าน (2026-09-30) — ผู้ดูแลแพลตฟอร์มเท่านั้น · ร้านเปลี่ยนเองไม่ได้
+///
+/// เก็บเป็นรายการโมดูลที่ **ปิด** (ว่าง = ได้ครบ) · ปิดแล้วไม่แตะข้อมูลใด ๆ ของร้าน — ด่านอยู่ที่ permissionsFromContext()
+/// (lib/permissions.ts) และ getStoreSettings() (lib/queries.ts) ซึ่งอ่านค่านี้ทุกคำขอ จึงมีผลทันทีในคำขอถัดไป
+/// รับ `disabled` เป็น JSON array ของชื่อโมดูล
+export async function setStoreModules(formData: FormData): Promise<ActionResult> {
+  try {
+    await requirePlatformAdmin()
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+
+  let disabled: unknown
+  try {
+    disabled = JSON.parse(String(formData.get("disabled") ?? "[]"))
+  } catch {
+    return { ok: false, error: "ข้อมูลโมดูลไม่ถูกต้อง กรุณารีเฟรชหน้าแล้วลองใหม่" }
+  }
+  const parsed = storeModulesSchema.safeParse({ storeId: formData.get("storeId"), disabled })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
+  const { storeId } = parsed.data
+  // เรียงตามลำดับคงที่ + ตัดซ้ำ — เทียบ/แสดงผลได้ตรงกันเสมอ
+  const modules = STORE_MODULES.filter((m) => parsed.data.disabled.includes(m))
+
+  const result = await prisma.store.updateMany({ where: { id: storeId }, data: { disabledModules: modules } })
+  if (result.count === 0) return { ok: false, error: "ไม่พบร้านนี้" }
+
+  revalidatePath("/admin/stores")
+  revalidatePath(`/admin/stores/${storeId}`)
+  revalidatePath("/", "layout")
+  return {
+    ok: true,
+    message:
+      modules.length === 0
+        ? "เปิดครบทุกโมดูลแล้ว"
+        : `บันทึกแล้ว — ปิด ${modules.map((m) => MODULE_LABEL[m]).join(", ")}`,
+  }
 }

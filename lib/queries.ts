@@ -14,6 +14,7 @@ import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
 import { bucketByChannel, CLOSING_CHANNELS, type ClosingChannel } from "@/lib/closing-channels"
 import type { PaymentMethodValue } from "@/lib/types"
 import { daysOfStockLeft, REORDER_LOOKBACK_DAYS, suggestReorderQty } from "@/lib/reorder"
+import { hasModule } from "@/lib/modules"
 import { Prisma } from "@/generated/prisma/client"
 import type { PaymentMode, PermissionAction as PermissionActionValue, ResourceKey } from "@/generated/prisma/client"
 
@@ -1281,9 +1282,10 @@ export async function getStoreSettings(storeId: string) {
   const db = forStore(storeId)
   const settings = await db.storeSettings.findUnique({
     where: { storeId },
-    include: { store: { select: { brand: { select: { logoUrl: true } } } } },
+    include: { store: { select: { disabledModules: true, brand: { select: { logoUrl: true } } } } },
   })
   if (!settings) return null
+  const disabled = settings.store.disabledModules
   return {
     id: settings.id,
     storeName: settings.storeName,
@@ -1297,12 +1299,21 @@ export async function getStoreSettings(storeId: string) {
     themeColor: settings.themeColor,
     hasKDS: settings.hasKDS,
     serviceChargePercent: toNumber(settings.serviceChargePercent),
-    crmEnabled: settings.crmEnabled,
+    /// สวิตช์สปา/สมาชิกที่ "มีผลจริง" = ร้านเปิด **และ** โมดูลไม่ถูกผู้ดูแลแพลตฟอร์มปิด (2026-09-30) — ทุกหน้าอ่านค่านี้
+    /// ค่าที่ร้านตั้งไว้ยังเก็บในฐาน เปิดโมดูลกลับแล้วกลับมาเหมือนเดิม
+    crmEnabled: settings.crmEnabled && hasModule(disabled, "CRM"),
     posDefaultMode: settings.posDefaultMode,
     kitchenAlertSound: settings.kitchenAlertSound,
     kitchenAutoPrint: settings.kitchenAutoPrint,
-    spaEnabled: settings.spaEnabled,
+    spaEnabled: settings.spaEnabled && hasModule(disabled, "SPA"),
     bookingBufferMinutes: settings.bookingBufferMinutes,
+    /// โมดูลที่ร้านนี้ใช้ได้ (หน้าเช็คของที่ไม่ใช่ resource เช่น แท็บสินค้า/ป้ายสินค้าใกล้หมด · ฟอร์มตั้งค่าซ่อนสวิตช์)
+    modules: {
+      spa: hasModule(disabled, "SPA"),
+      inventory: hasModule(disabled, "INVENTORY"),
+      crm: hasModule(disabled, "CRM"),
+      reports: hasModule(disabled, "REPORTS"),
+    },
   }
 }
 

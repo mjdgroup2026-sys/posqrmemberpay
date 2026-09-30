@@ -28,6 +28,9 @@ export type StoreSettingsValues = {
   /// พักระหว่างคิวนวด (นาที) — StoreSettings.bookingBufferMinutes
   bookingBufferMinutes: number
   crmEnabled: boolean
+  /// โมดูลที่ผู้ดูแลแพลตฟอร์มเปิดให้ร้านนี้ (2026-09-30) — ปิด = ซ่อนสวิตช์ (action ไม่ทับค่าที่เก็บไว้)
+  spaModule?: boolean
+  crmModule?: boolean
   /// โหมดเริ่มต้นของจอขายอาหาร (2026-09-17)
   posDefaultMode: "TABLE" | "TAKEAWAY"
 }
@@ -304,17 +307,21 @@ export function StoreSettingsForm({
             </div>
 
             {/* ตัวเลือกร้านนวด (Phase 20) — เพิ่มจากของเดิม ไม่ใช่โหมดสลับ: เมนูอาหาร/โต๊ะ/ครัวยังใช้ร่วมกันได้ */}
-            <label className="checkbox-row">
-              <input type="checkbox" checked={spaEnabled} onChange={(e) => setSpaEnabled(e.target.checked)} />
-              <span>
-                เปิดตัวเลือกร้านนวด / สปา
-                <br />
-                <span className="t-caption">
-                  เพิ่มเมนู “พนักงานนวด” · เมนูสร้างเป็น “โปรแกรมนวด” (มีระยะเวลา ต้องเลือกพนักงาน) · โต๊ะสร้างเป็น “ห้องนวด” ได้ ·
-                  ของเดิมทั้งหมดยังอยู่และใช้ร่วมกันได้ (เช่น สั่งน้ำเข้าห้องนวด) — ปิดแล้วข้อมูลไม่หาย แค่ซ่อนเมนู
+            {settings.spaModule === false ? (
+              <p className="t-caption">ร้านนวด / สปา: ร้านนี้ยังไม่ได้เปิดใช้โมดูลนี้ — ติดต่อผู้ดูแลระบบเพื่อเปิด</p>
+            ) : (
+              <label className="checkbox-row">
+                <input type="checkbox" checked={spaEnabled} onChange={(e) => setSpaEnabled(e.target.checked)} />
+                <span>
+                  เปิดตัวเลือกร้านนวด / สปา
+                  <br />
+                  <span className="t-caption">
+                    เพิ่มเมนู “พนักงานนวด” · เมนูสร้างเป็น “โปรแกรมนวด” (มีระยะเวลา ต้องเลือกพนักงาน) · โต๊ะสร้างเป็น “ห้องนวด” ได้ ·
+                    ของเดิมทั้งหมดยังอยู่และใช้ร่วมกันได้ (เช่น สั่งน้ำเข้าห้องนวด) — ปิดแล้วข้อมูลไม่หาย แค่ซ่อนเมนู
+                  </span>
                 </span>
-              </span>
-            </label>
+              </label>
+            )}
 
             {/* พักระหว่างคิว (2026-09-23) — เดิมตั้งไว้ 10 นาทีโดยไม่มีที่ให้เปลี่ยน เจ้าของร้านจองต่อคิวที่ 17:31 ไม่ได้แล้วงงว่าทำไม */}
             {spaEnabled ? (
@@ -342,14 +349,18 @@ export function StoreSettingsForm({
               </div>
             ) : null}
 
-            <label className="checkbox-row">
-              <input type="checkbox" checked={crmEnabled} onChange={(e) => setCrmEnabled(e.target.checked)} />
-              <span>
-                เปิดระบบสมาชิกสะสมแต้ม
-                <br />
-                <span className="t-caption">ลูกค้าสมัครด้วยเบอร์โทรบนหน้าชำระเงินสำเร็จ</span>
-              </span>
-            </label>
+            {settings.crmModule === false ? (
+              <p className="t-caption">สมาชิกสะสมแต้ม: ร้านนี้ยังไม่ได้เปิดใช้โมดูลนี้ — ติดต่อผู้ดูแลระบบเพื่อเปิด</p>
+            ) : (
+              <label className="checkbox-row">
+                <input type="checkbox" checked={crmEnabled} onChange={(e) => setCrmEnabled(e.target.checked)} />
+                <span>
+                  เปิดระบบสมาชิกสะสมแต้ม
+                  <br />
+                  <span className="t-caption">ลูกค้าสมัครด้วยเบอร์โทรบนหน้าชำระเงินสำเร็จ</span>
+                </span>
+              </label>
+            )}
 
             <button type="submit" className="btn btn-primary btn-block" disabled={pending}>
               {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : <IconStore size={17} aria-hidden />}

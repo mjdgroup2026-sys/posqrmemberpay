@@ -6,7 +6,8 @@ import { resolveStoreContext, type StoreContext, type StorePlan } from "@/lib/se
 import { isPlanActive } from "@/lib/subscription"
 import { PermissionDenied, storeErrorMessage } from "@/lib/store-errors"
 import type { StoreRole } from "@/generated/prisma/client"
-import type { PermissionAction, ResourceKey } from "@/generated/prisma/client"
+import type { PermissionAction, ResourceKey, StoreModule } from "@/generated/prisma/client"
+import { isResourceEnabled } from "@/lib/modules"
 
 export type { PermissionAction, ResourceKey }
 export { PermissionDenied }
@@ -123,6 +124,8 @@ export type CurrentUserPermissions = {
   storeRole: StoreRole
   /// แพ็กเกจของร้าน (Phase 14b) — action ที่ขายใหม่ต้องเช็ก isPlanActive ก่อน (ผ่าน guardAction(..., { selling: true }))
   plan: StorePlan
+  /// โมดูลที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) — resource ของโมดูลเหล่านี้ถูกตัดออกจาก granted แล้ว
+  disabledModules: StoreModule[]
   roleId: string | null
   roleName: string | null
   /// resource → action ที่ทำได้ · ไม่มีคีย์ = ไม่มีสิทธิ์เลยกับ resource นั้น
@@ -147,7 +150,25 @@ export const getCurrentPermissions = cache(async (): Promise<CurrentUserPermissi
   return permissionsFromContext(result.context)
 })
 
+/// ตัด resource ของโมดูลที่ร้านถูกปิดออก (2026-09-30) — ทำที่นี่ที่เดียว ทุกด่าน (หน้า/action/เมนู/ปุ่ม) จึงเห็นตรงกัน
+function withoutDisabledModules(
+  granted: Partial<Record<ResourceKey, PermissionAction[]>>,
+  disabled: readonly StoreModule[],
+): Partial<Record<ResourceKey, PermissionAction[]>> {
+  if (disabled.length === 0) return granted
+  const kept: Partial<Record<ResourceKey, PermissionAction[]>> = {}
+  for (const [resource, actions] of Object.entries(granted) as [ResourceKey, PermissionAction[]][]) {
+    if (isResourceEnabled(disabled, resource)) kept[resource] = actions
+  }
+  return kept
+}
+
 async function permissionsFromContext(context: StoreContext): Promise<CurrentUserPermissions> {
+  const permissions = await grantsFromRole(context)
+  return { ...permissions, granted: withoutDisabledModules(permissions.granted, context.disabledModules) }
+}
+
+async function grantsFromRole(context: StoreContext): Promise<CurrentUserPermissions> {
   const base = {
     id: context.user.id,
     name: context.user.name,
@@ -155,6 +176,7 @@ async function permissionsFromContext(context: StoreContext): Promise<CurrentUse
     storeId: context.storeId,
     storeRole: context.role,
     plan: context.plan,
+    disabledModules: context.disabledModules,
   }
 
   if (context.role === "OWNER") {

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
+import { hasModule } from "@/lib/modules"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { toNumber } from "@/lib/format"
 import { registerMemberSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
@@ -53,9 +54,10 @@ export async function registerMember(formData: FormData): Promise<ActionResult<R
     const result = await forStore(storeId).$transaction(async (tx) => {
       const settings = await tx.storeSettings.findUnique({
         where: { storeId },
-        select: { crmEnabled: true },
+        select: { crmEnabled: true, store: { select: { disabledModules: true } } },
       })
-      if (!settings?.crmEnabled) throw new MemberAbort("ร้านนี้ยังไม่ได้เปิดระบบสมาชิก")
+      // สวิตช์ของร้าน + โมดูลสมาชิกที่ผู้ดูแลแพลตฟอร์มเปิดให้ (2026-09-30)
+      if (!settings?.crmEnabled || !hasModule(settings.store.disabledModules, "CRM")) throw new MemberAbort("ร้านนี้ยังไม่ได้เปิดระบบสมาชิก")
 
       const qr = await tx.qRCode.findUnique({
         where: { token: qrToken },

@@ -1,4 +1,4 @@
-import type { PlanTier, PrismaClient, StoreRole, StoreStatus } from "@/generated/prisma/client"
+import type { PlanTier, PrismaClient, StoreModule, StoreRole, StoreStatus } from "@/generated/prisma/client"
 
 /// ตรรกะ "ผู้ใช้คนนี้ทำงานกับร้านไหน ในบทบาทอะไร" (Phase 13 + 14c) — แยกจาก lib/session.ts เพราะไม่แตะ
 /// server-only/next/headers จึงให้ทั้ง production (lib/session.ts) และ mock ของเทส (__tests__/helpers/session-mock.ts)
@@ -31,6 +31,8 @@ export type StoreContext = {
   storeId: string
   store: { id: string; slug: string; name: string; status: StoreStatus }
   plan: StorePlan
+  /// โมดูลที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) — ว่าง = ได้ครบ · ใช้ตัดสิทธิ์ใน permissionsFromContext() (lib/modules.ts)
+  disabledModules: StoreModule[]
   role: StoreRole
   /// บทบาท matrix สิทธิ์ F1–F9 ในร้านนี้ (null = ยังไม่กำหนด) — OWNER ไม่ใช้ค่านี้
   permissionRoleId: string | null
@@ -52,6 +54,7 @@ const STORE_SELECT = {
   planTier: true,
   tableLimit: true,
   planExpiresAt: true,
+  disabledModules: true,
   brand: { select: { id: true, name: true, ownerId: true } },
 } as const
 
@@ -129,6 +132,7 @@ export async function loadStoreContext(
       storeId: store.id,
       store: { id: store.id, slug: store.slug, name: store.name, status: store.status },
       plan: { tier: store.planTier, tableLimit: store.tableLimit, expiresAt: store.planExpiresAt },
+      disabledModules: store.disabledModules,
       role: chosen.role,
       permissionRoleId: chosen.role === "OWNER" ? null : chosen.roleId,
       brand: store.brand ? { id: store.brand.id, name: store.brand.name, isOwner: store.brand.ownerId === user.id } : null,

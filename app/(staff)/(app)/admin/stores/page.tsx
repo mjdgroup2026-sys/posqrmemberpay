@@ -4,6 +4,7 @@ import { requirePlatformAdmin } from "@/lib/session"
 import { listPendingBatchesForAdmin, listPendingSubscriptionsForAdmin, listStoresWithPlanForAdmin, type AdminStoreFilter } from "@/lib/admin-queries"
 import { remainingDays } from "@/lib/subscription"
 import { formatBaht, formatDate, formatDateTime, STORE_STATUS_CHIP } from "@/lib/format"
+import { MODULE_LABEL } from "@/lib/modules"
 import { AdminStoreStatusButton } from "@/components/admin-store-status-button"
 import { IconShield } from "@/components/icons"
 
@@ -162,6 +163,11 @@ export default async function AdminStoresPage({ searchParams }: PageProps<"/admi
                         <span className="dot" />
                         {STORE_STATUS_CHIP[store.status].label}
                       </span>
+                      {store.disabledModules.length > 0 ? (
+                        <div className="t-caption" title={store.disabledModules.map((m) => MODULE_LABEL[m]).join(", ")}>
+                          ปิด {store.disabledModules.length} โมดูล
+                        </div>
+                      ) : null}
                     </td>
                     <td style={{ padding: "12px" }}>
                       <span className={`chip ${planChip.cls}`}>

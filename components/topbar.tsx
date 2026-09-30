@@ -22,13 +22,15 @@ import {
 type Props = {
   user: { name: string; email: string }
   lowStockCount: number
+  /// false = ร้านไม่ได้ใช้โมดูลคลังสินค้า (2026-09-30) — ไม่แสดงป้ายสถานะสต็อกเลย
+  showStockStatus?: boolean
   pendingNotificationCount?: number
   /// ร้านที่ทำงานอยู่ (Phase 13) — null เมื่อผู้ใช้ยังไม่ได้อยู่ในร้านใด
   activeStoreId?: string | null
   stores?: StoreOption[]
 }
 
-export function Topbar({ user, lowStockCount, pendingNotificationCount = 0, activeStoreId = null, stores = [] }: Props) {
+export function Topbar({ user, lowStockCount, showStockStatus = true, pendingNotificationCount = 0, activeStoreId = null, stores = [] }: Props) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
 
@@ -74,7 +76,7 @@ export function Topbar({ user, lowStockCount, pendingNotificationCount = 0, acti
             ลูกค้าเรียก <span className="num">{pendingNotificationCount}</span> โต๊ะ
           </Link>
         ) : null}
-        {lowStockCount > 0 ? (
+        {!showStockStatus ? null : lowStockCount > 0 ? (
           <Link href="/products?filter=low" className="chip chip-warning">
             <IconWarning size={14} aria-hidden />
             สินค้าใกล้หมด <span className="num">{lowStockCount}</span> รายการ

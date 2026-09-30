@@ -50,6 +50,8 @@ export default async function StoreSettingsPage() {
           spaEnabled: settings?.spaEnabled ?? false,
           bookingBufferMinutes: settings?.bookingBufferMinutes ?? 10,
           crmEnabled: settings?.crmEnabled ?? false,
+          spaModule: settings?.modules.spa ?? true,
+          crmModule: settings?.modules.crm ?? true,
           posDefaultMode: settings?.posDefaultMode ?? "TABLE",
         }}
         menu={menu}

@@ -1,7 +1,7 @@
 import "server-only"
 import { prisma } from "@/lib/prisma"
 import { toNumber, type StoreStatusValue } from "@/lib/format"
-import type { PaymentMode } from "@/generated/prisma/client"
+import type { PaymentMode, StoreModule } from "@/generated/prisma/client"
 
 /// ชั้นอ่านข้อมูลของ "ผู้ดูแลแพลตฟอร์ม" (Phase 14a) — ค้นข้ามทุกร้านโดยตั้งใจ
 ///
@@ -22,6 +22,8 @@ export type AdminStoreRow = {
   /// ยอดขายรวมของบิลที่ไม่ถูก void — คำนวณจากทุกช่องทาง
   totalSales: number
   lastSaleAt: Date | null
+  /// โมดูลที่ปิดไว้ (2026-09-30) — ว่าง = ได้ครบ
+  disabledModules: StoreModule[]
 }
 
 export async function listStoresForAdmin(): Promise<AdminStoreRow[]> {
@@ -33,6 +35,7 @@ export async function listStoresForAdmin(): Promise<AdminStoreRow[]> {
       name: true,
       status: true,
       createdAt: true,
+      disabledModules: true,
       _count: { select: { members: true, tables: true } },
       members: { where: { role: "OWNER" }, select: { user: { select: { email: true } } } },
     },
@@ -62,6 +65,7 @@ export async function listStoresForAdmin(): Promise<AdminStoreRow[]> {
       saleCount: agg?._count._all ?? 0,
       totalSales: agg?._sum.total ? toNumber(agg._sum.total) : 0,
       lastSaleAt: agg?._max.createdAt ?? null,
+      disabledModules: store.disabledModules,
     }
   })
 }
@@ -134,6 +138,8 @@ export type AdminStoreDetail = {
   trialClaimed: boolean
   /// วิธีรับเงิน (Phase 15a) — SCB_BILLER ตั้งได้เฉพาะผู้ดูแล
   paymentMode: PaymentMode
+  /// โมดูลที่ปิดไว้ (2026-09-30)
+  disabledModules: StoreModule[]
 }
 
 export async function getStoreForAdmin(storeId: string): Promise<AdminStoreDetail | null> {
@@ -149,6 +155,7 @@ export async function getStoreForAdmin(storeId: string): Promise<AdminStoreDetai
       tableLimit: true,
       planExpiresAt: true,
       paymentMode: true,
+      disabledModules: true,
       paymentConfig: { select: { promptPayId: true } },
       _count: { select: { tables: true, members: true } },
       members: { where: { role: "OWNER" }, select: { user: { select: { email: true } } } },
@@ -171,6 +178,7 @@ export async function getStoreForAdmin(storeId: string): Promise<AdminStoreDetai
     promptPayIdSet: Boolean(store.paymentConfig?.promptPayId),
     trialClaimed,
     paymentMode: store.paymentMode,
+    disabledModules: store.disabledModules,
   }
 }
 

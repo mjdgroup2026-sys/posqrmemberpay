@@ -1138,6 +1138,15 @@ enum StoreStatus {
   CLOSED
 }
 
+/// โมดูลที่ผู้ดูแลแพลตฟอร์มปิดได้รายร้าน (2026-09-30) — ขายอาหาร/QR เป็นแกนหลัก ไม่อยู่ในนี้ (ปิดไม่ได้)
+/// resource ไหนอยู่โมดูลไหนกำหนดที่ lib/modules.ts ที่เดียว
+enum StoreModule {
+  SPA
+  INVENTORY
+  CRM
+  REPORTS
+}
+
 /// บทบาทระดับร้าน — คนละแกนกับ Role (matrix สิทธิ์ F1–F9)
 /// OWNER ได้สิทธิ์เต็มทุก resource อัตโนมัติ และเป็นคนเดียวที่แก้ตั้งค่าร้าน/พนักงานได้
 enum StoreRole {
@@ -1169,6 +1178,9 @@ model Store {
   closedAt          DateTime?
   closedById        String?
   closeReason       String?
+  /// โมดูลที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) — ว่าง = ได้ครบทุกโมดูล (ค่าเริ่มต้นของทุกร้าน) · ปิดแล้วข้อมูลไม่ถูกแตะ
+  /// ด่านอยู่ที่ permissionsFromContext() (ตัด resource ของโมดูลที่ปิด แม้เป็น OWNER) + getStoreSettings() (สวิตช์สปา/สมาชิก)
+  disabledModules   StoreModule[] @default([])
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 

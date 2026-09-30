@@ -1,6 +1,7 @@
 import "server-only"
 import type { StoreTx } from "@/lib/db"
 import { toNumber } from "@/lib/format"
+import { hasModule } from "@/lib/modules"
 
 /// แปลง "ตะกร้า" เป็นบรรทัดออร์เดอร์พร้อมราคา — ใช้ร่วมกันระหว่างลูกค้าที่สแกน QR สั่งเอง
 /// กับพนักงานที่กดสั่งแทนบนจอขาย (Phase 17) · **ห้ามคำนวณราคาซ้ำที่อื่น** ด้วยเหตุผลเดียวกับ
@@ -138,6 +139,12 @@ export type ProductLine = {
 /// สินค้าร้านอื่นจึงหาไม่เจอ (กติกาข้อ 5) · สินค้าซ้ำในตะกร้ารวมเป็นบรรทัดเดียว · **ยังไม่ตัดสต็อก** ผู้เรียกตัดเองผ่าน takeStock
 export async function buildProductLines(tx: StoreTx, items: ProductCartInput[]): Promise<ProductLine[]> {
   if (items.length === 0) return []
+  // โมดูลคลังสินค้าที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) — ด่านเดียวของการขายสินค้าจากจอขายอาหารทั้งกลับบ้านและเข้าโต๊ะ
+  // storeSettings ผ่าน forStore จึงได้แถวของร้านนี้เท่านั้น
+  const owner = await tx.storeSettings.findFirst({ select: { store: { select: { disabledModules: true } } } })
+  if (owner && !hasModule(owner.store.disabledModules, "INVENTORY")) {
+    throw new OrderLineError("ร้านนี้ไม่ได้เปิดใช้โมดูลคลังสินค้า — ขายสินค้าจากคลังไม่ได้")
+  }
   const merged = new Map<string, number>()
   for (const item of items) merged.set(item.productId, (merged.get(item.productId) ?? 0) + item.quantity)
 
