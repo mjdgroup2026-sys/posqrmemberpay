@@ -157,6 +157,16 @@ export type CategoryInput = z.infer<typeof categorySchema>
 export type SaleInput = z.infer<typeof saleSchema>
 export type ClosingInput = z.infer<typeof closingSchema>
 
+/// เปิดรอบที่ปิดแล้วใหม่ (2026-09-30) — บังคับเหตุผลเสมอ เพราะเป็นการย้อนสิ่งที่นับเงินยืนยันไปแล้ว
+export const reopenClosingSchema = z.object({
+  id: z.string({ error: "ไม่พบรอบที่ต้องการเปิดใหม่" }).trim().min(1, "ไม่พบรอบที่ต้องการเปิดใหม่"),
+  reason: z
+    .string({ error: "กรุณาระบุเหตุผลที่เปิดรอบใหม่" })
+    .trim()
+    .min(5, "เหตุผลต้องมีอย่างน้อย 5 ตัวอักษร")
+    .max(200, "เหตุผลยาวเกินไป (ไม่เกิน 200 ตัวอักษร)"),
+})
+
 // ───────────────────── MJD Mobile Order (Phase 6) ─────────────────────
 
 const requiredId = (label: string) =>

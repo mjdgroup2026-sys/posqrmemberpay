@@ -192,6 +192,7 @@ routes ดู [§6a](#6a-routes--ui-mjd-mobile-order))
 | `difference` | Decimal | = countedCash − totalCash | ส่วนต่างเงินสด (ขาด/เกิน) |
 | `note` | String? | optional | หมายเหตุ (เช่น เหตุผลที่เงินขาด/เกิน) |
 | `closedAt` | DateTime | auto | เวลาที่กดปิดยอด |
+| `reopenedAt` / `reopenedById` / `reopenReason` | DateTime? / FK → User? / String? | CHECK: `reopenedAt` กับ `reopenReason` null พร้อมกัน (2026-09-30) | รอบนี้ถูกเปิดใหม่แล้ว — บิลถูกถอดกลับเป็นยังไม่ปิดรอบ · แถวคงไว้เป็นประวัติ ไม่นับในสรุปใด ๆ |
 
 ### MJD Mobile Order — Data Model
 
@@ -625,6 +626,11 @@ enum ResourceKey {
 - **ล็อก void รายบิล**: บิลที่ถูกนับในรอบแล้ว (`closingId` ไม่ null) void ไม่ได้ · บิลที่ขายหลังปิดรอบยัง void ได้ (และถูกนับเป็นบิลยกเลิกของรอบถัดไป)
   · void ใช้ `updateMany where { status: COMPLETED, closingId: null }` จึงไม่ชนกับการปิดรอบที่กำลังผูกบิลเดียวกัน (มีเทส concurrent)
 - บันทึกการปิดยอด (`CashierClosing`) เป็นข้อมูล immutable — แก้ไข/ลบไม่ได้ผ่านหน้า UI ปกติ
+- **เปิดรอบใหม่** (2026-09-30): ทางเดียวที่ย้อนรอบที่ปิดแล้วคือ `reopenCashierClosing` — สิทธิ์ `POS_CLOSING:EDIT` (ไม่ backfill = OWNER เท่านั้นจนกว่าจะติ๊กใน `/roles`)
+  + **เหตุผล 5–200 ตัวอักษรบังคับ** · เปิดได้เฉพาะรอบล่าสุดที่ยังใช้อยู่ของคนนั้นในวันนั้น · ถอดบิลกลับเป็น `closingId = null` (void ได้อีก)
+  · แถวเดิมไม่ลบ ตั้ง `reopenedAt/ById/Reason` (conditional update `where reopenedAt null` — กดพร้อมกันผ่านครั้งเดียว) · แคชเชียร์เจ้าของบิลปิดเป็นรอบถัดไป
+  (เลขรอบต่อจากรอบสูงสุดรวมรอบที่ถูกเปิด) ฟอร์มใส่ยอดที่เคยนับไว้ให้ · สรุป/ยอดทั้งวัน/จำนวนรอบนับเฉพาะรอบที่ `reopenedAt` null
+  · ประวัติการปิดยอดมีแถวสรุปรายวัน (ยอด · จำนวนบิล · บิลยกเลิก)
 
 ### MJD Mobile Order — กติกาธุรกิจ
 
@@ -2430,7 +2436,17 @@ enum ResourceKey {
       `getStoreDaySummary` คืน `rounds`/`openBills` แทน `closed` · `listSales.canVoid` ตาม `closingId`
 - [x] หน้า `/pos/closing`: ผลทุกรอบ · แถบเตือนขายหลังปิดรอบ + ฟอร์มปิดรอบถัดไป · ประวัติมีเลขรอบ · สรุปทั้งร้าน "ปิด n รอบ · ค้าง x บิล"
 - [x] เทส `closing.test.ts` +3 (รอบ 2 นับเฉพาะบิลใหม่ · void หลังปิด · ★ ปิดรอบพร้อม void บิลเดียวกัน 5 รอบ) · `void-sale.test.ts` +1
-- [ ] deploy: backup ใหม่ + ซ้อม → merge · เจ้าของลองปิดรอบ 2 จริง
+- [x] deploy: ขึ้น production แล้ว 2026-09-30 (PR #47 · CI run 36660547567 · ซ้อมรวมกับ #45 บน dump 20260929-190235: 36 → 38 · `_prisma_migrations` = 38)
+
+#### เปิดรอบปิดยอดใหม่ + จำนวนบิลรายวัน (เจ้าของสั่ง 2026-09-30)
+> ที่มา: "ถ้าปิดแล้วมาเปิดใหม่แล้วปิดต้องมีเหตุผลและอาจจะมีสิทธิ์ในการปิดด้วย" + "count จำนวนบิลของแต่ละวันด้วย" · **มี migration 1 ไฟล์ additive ล้วน**
+- [x] migration `20260930090000_closing_reopen`: `CashierClosing.reopenedAt/reopenedById/reopenReason` + CHECK เหตุผลคู่กับเวลา + FK SetNull
+- [x] `reopenCashierClosing` (`POS_CLOSING:EDIT` ใหม่ ไม่ backfill) · `closeCashierDay` ตัดสิน "ต้องมีบิลใหม่" จากรอบที่ยังใช้อยู่ ไม่ใช่เลขรอบ
+- [x] `getDayClosings`/`listClosings` คืน `reopened` · `getStoreDaySummary` ไม่นับรอบที่ถูกเปิด
+- [x] หน้า `/pos/closing`: ปุ่ม "เปิดรอบใหม่" + dialog เหตุผล (ซ่อนถ้าไม่มีสิทธิ์) · รอบที่ถูกเปิดขึ้นจาง + คนเปิด/เหตุผล · ฟอร์มใส่ยอดเดิม ·
+      การ์ดบนบอกจำนวนบิล/บิลยกเลิกทั้งวัน · ประวัติมีแถวรวมรายวัน
+- [x] เทส `closing.test.ts` +5 (เปิดแล้วปิดใหม่รวมบิล · void หลังเปิด · เหตุผล/ซ้ำ/ไม่ใช่รอบล่าสุด · ไม่มีสิทธิ์ · ★ เปิดพร้อมกัน 5 คำขอ) · tenant-isolation +1 action
+- [ ] deploy: ซ้อม migration บน dump ล่าสุด → merge · เจ้าของติ๊ก `POS_CLOSING:EDIT` ให้บทบาทที่ควรเปิดรอบได้
 
 ### ✅ Phase 19 — ปรับปรุงครัว + ปิดรอบ (F24–F26) — ขึ้น production แล้ว 2026-09-22 (PR #24 · CI run 35708166462)
 > **ที่มา (เจ้าของสั่ง 2026-09-22)**: (1) หน้าขายไม่มีวันที่ และปิดรอบเลือกวันไม่ได้ (2) ครัวต้องทำ/เสิร์ฟ/ยกเลิกทีละรายการได้ ไม่ต้องทั้งรอบ

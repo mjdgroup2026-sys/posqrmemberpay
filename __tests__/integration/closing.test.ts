@@ -4,11 +4,13 @@ import {
   createTestProduct,
   disconnectTestDb,
   ensureTestUser,
+  giveFullPermissions,
   isTestDbReachable,
   resetDb,
   testPrisma,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
+import { setTestUser } from "../helpers/session-mock"
 import { businessDayKey, parseBusinessDayKey } from "@/lib/day"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
@@ -21,6 +23,7 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
   let createSale: (formData: FormData) => Promise<ActionResult<ReceiptData>>
   let voidSale: (formData: FormData) => Promise<ActionResult>
   let closeCashierDay: (formData: FormData) => Promise<ActionResult>
+  let reopenCashierClosing: (formData: FormData) => Promise<ActionResult>
 
   beforeAll(async () => {
     const sales = await import("@/app/actions/sales")
@@ -28,6 +31,7 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     createSale = sales.createSale
     voidSale = sales.voidSale
     closeCashierDay = closing.closeCashierDay
+    reopenCashierClosing = closing.reopenCashierClosing
   })
 
   beforeEach(async () => {
@@ -376,5 +380,127 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     expect(later.byCashier.find((r) => r.cashierId === "test-user")).toMatchObject({ rounds: 1, openBills: 1 })
     // ระบบอยู่ท้ายเสมอ
     expect(day.byCashier.at(-1)?.cashierId).toBe("system")
+  })
+  // ───── เปิดรอบที่ปิดแล้วใหม่ (2026-09-30) ─────
+
+  const REASON = "นับเงินผิด ต้องนับใหม่"
+
+  async function storeIdOf(userId = "test-user") {
+    return (await testPrisma().storeMember.findFirstOrThrow({ where: { userId } })).storeId
+  }
+
+  it("เปิดรอบใหม่ → บิลกลับเป็นยังไม่ปิดรอบ · ปิดอีกครั้งได้รอบถัดไปที่รวมบิลเดิม + บิลใหม่ · รอบเดิมเก็บคนเปิด/เหตุผล", async () => {
+    await bill("CASH", "100.00")
+    await bill("CASH", "50.00")
+    expect((await closeCashierDay(makeFormData({ countedCash: "140" }))).ok).toBe(true)
+    const first = await testPrisma().cashierClosing.findFirstOrThrow()
+
+    const reopened = await reopenCashierClosing(makeFormData({ id: first.id, reason: REASON }))
+    expect(reopened.ok).toBe(true)
+    expect(await testPrisma().sale.count({ where: { closingId: null } })).toBe(2)
+
+    await bill("CASH", "20.00")
+    const again = await closeCashierDay(makeFormData({ countedCash: "170" }))
+    expect(again.ok).toBe(true)
+    expect(again.ok && again.message).toContain("รอบที่ 2")
+
+    const rows = await testPrisma().cashierClosing.findMany({ orderBy: { roundNo: "asc" } })
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ roundNo: 1, reopenedById: "test-user", reopenReason: REASON, billCount: 2 })
+    expect(rows[0]!.reopenedAt).not.toBeNull()
+    expect(rows[1]).toMatchObject({ roundNo: 2, reopenedAt: null, billCount: 3 })
+    expect(Number(rows[1]!.totalSales)).toBe(170)
+    expect(Number(rows[1]!.difference)).toBe(0)
+    expect(await testPrisma().sale.count({ where: { closingId: rows[1]!.id } })).toBe(3)
+
+    // หน้าจอ: รอบเดิมมีข้อมูลคนเปิด · สรุปทั้งร้านนับแค่รอบที่ใช้อยู่
+    const queries = await import("@/lib/queries")
+    const storeId = await storeIdOf()
+    const views = await queries.getDayClosings(storeId, "test-user")
+    expect(views[0]!.reopened).toMatchObject({ reason: REASON, byName: "ผู้ทดสอบ" })
+    expect(views[1]!.reopened).toBeNull()
+    const day = await queries.getStoreDaySummary(storeId)
+    expect(day.byCashier.find((r) => r.cashierId === "test-user")).toMatchObject({ rounds: 1, openBills: 0 })
+  })
+
+  it("เปิดรอบใหม่แล้ว บิลที่เคยล็อกกลับมายกเลิก (void) ได้ · ปิดใหม่ได้แม้ไม่มีบิลใหม่", async () => {
+    const product = await createTestProduct({ quantity: 10, price: "100.00" })
+    const sold = await sell(product.id, 1, "CASH")
+    if (!sold.ok || !sold.data) throw new Error("ขายไม่สำเร็จ")
+    await closeCashierDay(makeFormData({ countedCash: "100" }))
+    expect((await voidSale(makeFormData({ id: sold.data.id, reason: "คีย์ผิด" }))).ok).toBe(false)
+
+    const round = await testPrisma().cashierClosing.findFirstOrThrow()
+    expect((await reopenCashierClosing(makeFormData({ id: round.id, reason: "ต้องยกเลิกบิลที่คีย์ผิด" }))).ok).toBe(true)
+    expect((await voidSale(makeFormData({ id: sold.data.id, reason: "คีย์ผิด" }))).ok).toBe(true)
+
+    const again = await closeCashierDay(makeFormData({ countedCash: "0" }))
+    expect(again.ok).toBe(true)
+    const latest = await testPrisma().cashierClosing.findFirstOrThrow({ where: { reopenedAt: null } })
+    expect(latest).toMatchObject({ roundNo: 2, billCount: 0, voidedCount: 1 })
+  })
+
+  it("เปิดรอบใหม่: ไม่มีเหตุผล/สั้นเกิน · เปิดซ้ำ · ไม่ใช่รอบล่าสุด ต้องถูกปฏิเสธเป็นภาษาไทย", async () => {
+    await bill("CASH", "100.00")
+    await closeCashierDay(makeFormData({ countedCash: "100" }))
+    await bill("CASH", "30.00")
+    await closeCashierDay(makeFormData({ countedCash: "30" }))
+    const [r1, r2] = await testPrisma().cashierClosing.findMany({ orderBy: { roundNo: "asc" } })
+
+    const empty = await reopenCashierClosing(makeFormData({ id: r2!.id, reason: "" }))
+    expect(empty.ok === false && empty.error).toContain("อย่างน้อย 5 ตัวอักษร")
+    const short = await reopenCashierClosing(makeFormData({ id: r2!.id, reason: "ผิด" }))
+    expect(short.ok).toBe(false)
+
+    const notLatest = await reopenCashierClosing(makeFormData({ id: r1!.id, reason: REASON }))
+    expect(notLatest.ok === false && notLatest.error).toContain("เฉพาะรอบล่าสุด")
+
+    expect((await reopenCashierClosing(makeFormData({ id: r2!.id, reason: REASON }))).ok).toBe(true)
+    const twice = await reopenCashierClosing(makeFormData({ id: r2!.id, reason: REASON }))
+    expect(twice.ok === false && twice.error).toContain("ถูกเปิดใหม่ไปแล้ว")
+
+    // รอบ 2 ถูกเปิดแล้ว → รอบ 1 กลายเป็นรอบล่าสุดที่ใช้อยู่ เปิดต่อได้
+    expect((await reopenCashierClosing(makeFormData({ id: r1!.id, reason: REASON }))).ok).toBe(true)
+    expect(await testPrisma().sale.count({ where: { closingId: { not: null } } })).toBe(0)
+  })
+
+  it("เปิดรอบใหม่ต้องมีสิทธิ์ POS_CLOSING:EDIT — พนักงานที่ปิดยอดได้แต่ไม่มีสิทธิ์นี้ถูกปฏิเสธ", async () => {
+    await bill("CASH", "100.00")
+    await closeCashierDay(makeFormData({ countedCash: "100" }))
+    const round = await testPrisma().cashierClosing.findFirstOrThrow()
+
+    await ensureTestUser("staff-closer", "พนักงานปิดยอด", { role: "STAFF" })
+    const roleId = await giveFullPermissions("staff-closer", await storeIdOf())
+    await testPrisma().rolePermission.updateMany({
+      where: { roleId, resource: "POS_CLOSING" },
+      data: { actions: ["VIEW", "ADD"] },
+    })
+
+    setTestUser("staff-closer")
+    try {
+      const denied = await reopenCashierClosing(makeFormData({ id: round.id, reason: REASON }))
+      expect(denied.ok).toBe(false)
+    } finally {
+      setTestUser("test-user")
+    }
+    expect((await testPrisma().cashierClosing.findUniqueOrThrow({ where: { id: round.id } })).reopenedAt).toBeNull()
+    expect(await testPrisma().sale.count({ where: { closingId: round.id } })).toBe(1)
+  })
+
+  it("★ กดเปิดรอบใหม่พร้อมกัน 5 คำขอ → สำเร็จครั้งเดียว บิลไม่หายและไม่ถูกผูกซ้ำ", async () => {
+    await bill("CASH", "100.00")
+    await bill("CARD", "40.00")
+    await closeCashierDay(makeFormData({ countedCash: "100" }))
+    const round = await testPrisma().cashierClosing.findFirstOrThrow()
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => reopenCashierClosing(makeFormData({ id: round.id, reason: REASON }))),
+    )
+    expect(results.filter((r) => r.ok)).toHaveLength(1)
+    expect(await testPrisma().sale.count({ where: { closingId: null } })).toBe(2)
+
+    await closeCashierDay(makeFormData({ countedCash: "100" }))
+    expect(await testPrisma().cashierClosing.count({ where: { reopenedAt: null } })).toBe(1)
+    expect(await testPrisma().sale.count({ where: { closingId: null } })).toBe(0)
   })
 })

@@ -742,6 +742,11 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       },
     ],
     [
+      "reopenCashierClosing",
+      (b) => makeFormData({ id: b.closingId, reason: "ร้าน A พยายามเปิดรอบของร้าน B" }),
+      async (b) => expect((await testPrisma().cashierClosing.findUniqueOrThrow({ where: { id: b.closingId } })).reopenedAt).toBeNull(),
+    ],
+    [
       "voidSale",
       (b) => makeFormData({ id: b.saleId, reason: "ร้าน A พยายาม void" }),
       async (b) => expect((await testPrisma().sale.findUniqueOrThrow({ where: { id: b.saleId } })).status).toBe("COMPLETED"),

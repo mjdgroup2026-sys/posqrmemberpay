@@ -34,8 +34,8 @@ export const RESOURCE_ACTIONS: Record<ResourceKey, PermissionAction[]> = {
   POS: ["VIEW", "ADD"],
   // DELETE = สิทธิ์กดปุ่ม void บิล
   POS_HISTORY: ["VIEW", "DELETE"],
-  // ADD = สิทธิ์กดปิดยอดประจำวัน
-  POS_CLOSING: ["VIEW", "ADD"],
+  // ADD = สิทธิ์กดปิดยอดประจำวัน · EDIT = เปิดรอบที่ปิดแล้วใหม่ (2026-09-30 · ไม่ backfill — ได้เฉพาะ OWNER จนกว่าจะติ๊กใน /roles)
+  POS_CLOSING: ["VIEW", "ADD", "EDIT"],
   REPORTS: ["VIEW"],
   // EDIT ครอบการเปลี่ยนบทบาทผู้ใช้อื่น และเป็นสิทธิ์เดียวกับที่ใช้เข้าหน้า /roles
   USERS: ["VIEW", "ADD", "EDIT", "DELETE"],
@@ -96,6 +96,7 @@ export const ACTION_HINT: Partial<Record<`${ResourceKey}:${PermissionAction}`, s
   "STOCK_ADJUST:DELETE": "ยกเลิกใบปรับยอดสต็อก",
   "POS_HISTORY:DELETE": "ยกเลิก (void) บิล",
   "POS_CLOSING:ADD": "กดปิดยอดประจำวัน",
+  "POS_CLOSING:EDIT": "เปิดรอบที่ปิดแล้วใหม่ (ต้องใส่เหตุผล)",
   "USERS:EDIT": "แก้ผู้ใช้และจัดการบทบาท/สิทธิ์",
   "MO_TABLES:ADD": "เปิดโต๊ะ/รวมโต๊ะ",
   "MO_TABLES:EDIT": "ปิดบิล ยืนยันชำระเงิน กดเสิร์ฟด้วยมือ",
