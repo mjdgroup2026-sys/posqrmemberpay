@@ -5,6 +5,7 @@ import { forStore } from "@/lib/db"
 import { requireOwner, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { parseAssetId } from "@/lib/assets"
+import { hasModule } from "@/lib/modules"
 import {
   storeSettingsSchema,
   featuredMenuSchema,
@@ -59,6 +60,11 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
   }
 
   const data = parsed.data
+  // โมดูลที่ผู้ดูแลปิดไว้ (2026-09-30) — ฟอร์มซ่อนสวิตช์และส่งค่า "ปิด" มา ห้ามทับค่าที่ร้านตั้งไว้ เปิดโมดูลกลับแล้วต้องกลับมาเหมือนเดิม
+  const moduleSwitches = {
+    ...(hasModule(ctx.disabledModules, "SPA") ? { spaEnabled: data.spaEnabled } : {}),
+    ...(hasModule(ctx.disabledModules, "CRM") ? { crmEnabled: data.crmEnabled } : {}),
+  }
 
   try {
     await db.$transaction(async (tx) => {
@@ -103,10 +109,9 @@ export async function updateStoreSettings(formData: FormData): Promise<ActionRes
           hasKDS: data.hasKDS,
           kitchenAlertSound: data.kitchenAlertSound,
           kitchenAutoPrint: data.kitchenAutoPrint,
-          spaEnabled: data.spaEnabled,
+          ...moduleSwitches,
           ...(data.bookingBufferMinutes === undefined ? {} : { bookingBufferMinutes: data.bookingBufferMinutes }),
           posDefaultMode: data.posDefaultMode,
-          crmEnabled: data.crmEnabled,
           updatedById: user.id,
         },
         create: {

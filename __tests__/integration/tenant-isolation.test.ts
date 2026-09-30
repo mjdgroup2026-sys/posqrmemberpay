@@ -596,6 +596,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "inviteMember",
     "acceptInvite",
     "setStoreStatus",
+    // โมดูลต่อร้าน (2026-09-30) — ผู้ดูแลแพลตฟอร์มตั้งข้ามร้านโดยตั้งใจ (เทสสิทธิ์อยู่ที่ store-modules.test.ts)
+    "setStoreModules",
     // Phase 14b: ฝั่งร้านไม่รับ id ของข้อมูลร้าน (แพ็กเกจเป็นของแพลตฟอร์ม) · ฝั่งแพลตฟอร์มทำงานข้ามร้านโดยตั้งใจ
     // (เทสสิทธิ์อยู่ที่ billing.test.ts — ผู้ที่ไม่ใช่ admin ถูกปฏิเสธทุกตัว)
     "claimTrial",

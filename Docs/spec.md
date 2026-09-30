@@ -2464,6 +2464,20 @@ enum ResourceKey {
 - [x] ซ้อมบนสำเนา production (dump 20260929-190235): 36 → 41 · diff สะอาด · ร้านเดิม 5 ร้าน ACTIVE ไม่มี closedAt
 - [x] deploy: ขึ้น production แล้ว 2026-09-30 13:27 (PR #51 · CI run 36677663970 · `_prisma_migrations` = 41 · สลับไป blue) · backup ก่อน merge ไม่ได้รัน (สคริปต์ต้อง `cd /home/deploy/posmobileorder` ก่อน) — ได้ backup หลัง deploy `posmobileorderdb-20260930-134246.dump` แทน · เจ้าของลองลบ/ปิด/เปิดร้านบน production ผ่านแล้ว
 
+#### โมดูลต่อร้าน (เจ้าของสั่ง 2026-09-30)
+> ที่มา: อยากให้ฝั่งแพลตฟอร์มกำหนดว่าร้านไหนได้ใช้เมนูชุดไหน (เช่น ร้าน A ซื้อแค่ QR ไม่เห็นคลัง) · ตัดสินใจ: **ผู้ดูแลตั้งเองรายร้าน ไม่ผูกราคา** ·
+> 5 กลุ่มตาม sidebar · ขายอาหาร/QR เป็นแกนได้ทุกร้าน · ปิดแล้วข้อมูลไม่หาย · ร้านเดิมทุกร้านได้ครบตอน deploy · **มี migration 1 ไฟล์ additive**
+- [x] migration `20260930150000_store_modules`: enum `StoreModule {SPA, INVENTORY, CRM, REPORTS}` + `Store.disabledModules StoreModule[] @default([])`
+- [x] `lib/modules.ts` — `RESOURCE_MODULE` (Record ครบทุก ResourceKey) · `MODULE_LABEL/HINT` · `hasModule`/`isResourceEnabled`
+- [x] `permissionsFromContext()` ตัด resource ของโมดูลที่ปิด แม้เป็น OWNER · `StoreContext.disabledModules`
+- [x] `getStoreSettings()`: `spaEnabled`/`crmEnabled` มีผลจริง = ค่าร้าน และ โมดูล · `modules` · `updateStoreSettings` ไม่ทับสวิตช์ของโมดูลที่ปิด · ฟอร์มซ่อนสวิตช์
+- [x] คลัง: `buildProductLines` ปฏิเสธ · แท็บสินค้าบนจอขายหาย · ป้าย/badge สินค้าใกล้หมดหาย · รายงานสต็อก 2 หน้า + CSV ต้องมีโมดูลคลัง · แดชบอร์ดเหลือยอดขาย/บิลล่าสุด
+- [x] สมาชิก: `registerMember` เช็คโมดูล · `/roles` ซ่อนแถวของโมดูลที่ปิด + `updateRole` คงสิทธิ์เดิมของแถวที่ซ่อน
+- [x] ผู้ดูแล: `setStoreModules` + การ์ด "โมดูลที่ร้านใช้ได้" ที่ `/admin/stores/[id]` · รายการร้านแสดง "ปิด n โมดูล"
+- [x] เทส `store-modules.test.ts` 6 (คลังปิด/เปิด · สิทธิ์ OWNER ถูกตัดเฉพาะโมดูลที่ปิด · สวิตช์สปา/สมาชิกไม่หาย · สมัครสมาชิกไม่ได้ · บทบาทคงสิทธิ์ · เฉพาะผู้ดูแล) · 785 เทสผ่าน
+- [x] ซ้อมบน dump `20260930-134246`: 41 → 42 · diff สะอาด · ทุกร้าน `disabledModules = {}`
+- [ ] deploy: backup → merge → ตรวจ `_prisma_migrations` = 42
+
 ### ✅ Phase 19 — ปรับปรุงครัว + ปิดรอบ (F24–F26) — ขึ้น production แล้ว 2026-09-22 (PR #24 · CI run 35708166462)
 > **ที่มา (เจ้าของสั่ง 2026-09-22)**: (1) หน้าขายไม่มีวันที่ และปิดรอบเลือกวันไม่ได้ (2) ครัวต้องทำ/เสิร์ฟ/ยกเลิกทีละรายการได้ ไม่ต้องทั้งรอบ
 > (3) มีประเภทครัว (ของทอด ของผัด ต้ม/นึ่ง บาร์น้ำ ของหวาน ผลไม้) ผูกกับเมนู (4) เตือนรับออร์เดอร์ + ตั้งค่าพิมพ์อัตโนมัติได้/ไม่ได้

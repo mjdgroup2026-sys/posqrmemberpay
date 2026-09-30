@@ -5,7 +5,8 @@ import { forStore, type StoreTx } from "@/lib/db"
 import { guardAction, RESOURCE_ACTIONS } from "@/lib/permissions"
 import { roleSchema, assignRoleSchema, idSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
-import type { PermissionAction, ResourceKey } from "@/generated/prisma/client"
+import type { PermissionAction, ResourceKey, StoreModule } from "@/generated/prisma/client"
+import { isResourceEnabled } from "@/lib/modules"
 
 /// จัดการบทบาทและสิทธิ์ (§4) — ทุก action ใช้สิทธิ์ `USERS:EDIT` ตัวเดียวกัน
 /// ไม่มี resource แยกสำหรับหน้า /roles ตามที่สเปกกำหนด
@@ -57,12 +58,17 @@ async function writePermissions(
   tx: StoreTx,
   roleId: string,
   rows: { resource: ResourceKey; actions: PermissionAction[] }[],
+  disabledModules: readonly StoreModule[],
 ) {
   // เขียนทับทั้งชุดทุกครั้ง — resource ที่ไม่ได้ส่งมาถือว่าไม่มีสิทธิ์เลย
-  await tx.rolePermission.deleteMany({ where: { roleId } })
-  if (rows.length === 0) return
+  // ยกเว้น resource ของโมดูลที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30): หน้า /roles ไม่แสดงแถวเหล่านี้ จึงคงสิทธิ์เดิมไว้ไม่แตะ
+  // เปิดโมดูลกลับแล้วบทบาทได้สิทธิ์เดิมคืนมา · ค่าที่ส่งมาของ resource เหล่านี้ถูกทิ้ง
+  const editable = (Object.keys(RESOURCE_ACTIONS) as ResourceKey[]).filter((r) => isResourceEnabled(disabledModules, r))
+  await tx.rolePermission.deleteMany({ where: { roleId, resource: { in: editable } } })
+  const kept = rows.filter((row) => editable.includes(row.resource))
+  if (kept.length === 0) return
   await tx.rolePermission.createMany({
-    data: rows.map((row) => ({ roleId, resource: row.resource, actions: row.actions })),
+    data: kept.map((row) => ({ roleId, resource: row.resource, actions: row.actions })),
   })
 }
 
@@ -87,7 +93,7 @@ export async function createRole(formData: FormData): Promise<ActionResult> {
         data: { storeId, name: parsed.data.name, description: parsed.data.description },
         select: { id: true },
       })
-      await writePermissions(tx, role.id, rows)
+      await writePermissions(tx, role.id, rows, guard.user.disabledModules)
     })
   } catch (error) {
     if (error instanceof RoleAbort) return { ok: false, error: error.reason }
@@ -136,7 +142,7 @@ export async function updateRole(formData: FormData): Promise<ActionResult> {
         where: { id },
         data: { name: parsed.data.name, description: parsed.data.description },
       })
-      await writePermissions(tx, id, rows)
+      await writePermissions(tx, id, rows, guard.user.disabledModules)
     })
   } catch (error) {
     if (error instanceof RoleAbort) return { ok: false, error: error.reason }

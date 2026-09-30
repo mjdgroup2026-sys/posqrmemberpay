@@ -6,6 +6,7 @@ import { remainingDays, TIER_SPEC } from "@/lib/subscription"
 import { formatBaht, formatDate, formatDateTime } from "@/lib/format"
 import { AdminStoreStatusButton } from "@/components/admin-store-status-button"
 import { AdminPaymentModeForm } from "@/components/admin-payment-mode-form"
+import { AdminStoreModules } from "@/components/admin-store-modules"
 import { isStoreScbReady } from "@/lib/scb-store"
 import { isSlipVerificationConfigured } from "@/lib/slip-provider"
 import { ConfirmSubscriptionForm, GrantCustomDaysForm, SetTableLimitForm, VoidSubscriptionButton } from "@/components/admin-billing-controls"
@@ -99,6 +100,14 @@ export default async function AdminStoreDetailPage({ params }: PageProps<"/admin
           </span>
         </div>
       </div>
+
+      {/* โมดูลของร้าน (2026-09-30) — ผู้ดูแลตั้งรายร้าน ร้านเปลี่ยนเองไม่ได้ */}
+      <section className="card-ui card-pad">
+        <h2 className="t-h2" style={{ marginBottom: 10 }}>
+          โมดูลที่ร้านใช้ได้
+        </h2>
+        <AdminStoreModules storeId={store.id} disabled={store.disabledModules} />
+      </section>
 
       {/* วิธีรับเงินของร้าน (Phase 15a) — SCB_BILLER ตั้งได้ที่นี่ที่เดียว */}
       <section className="card-ui card-pad">

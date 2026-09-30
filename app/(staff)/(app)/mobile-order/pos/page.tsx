@@ -20,6 +20,8 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
     // Phase 21b — สินค้าในสต็อกเฉพาะหมวดที่เปิดขายที่หน้าขายอาหาร (ว่าง = ไม่มีแท็บสินค้า)
     listPosProducts(storeId),
   ])
+  // โมดูลคลังที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) = ไม่มีแท็บสินค้า · ด่านจริงอยู่ที่ buildProductLines
+  const sellableProducts = settings?.modules.inventory ? products : []
   // ร้านนวด (Phase 20): โปรแกรมนวดต้องเลือกพนักงานก่อนใส่ตะกร้า — ร้านที่ไม่เปิดตัวเลือกไม่ต้องโหลด
   const therapists = settings?.spaEnabled ? await listTherapistOptions(storeId) : []
   // ?table=<id> มาจากปุ่ม "สั่งเพิ่ม" บนหน้าโต๊ะ (F13) — เลือกโต๊ะนั้นให้เลย · id แปลก ๆ ถูกกรองด้วยรายชื่อโต๊ะของร้านนี้
@@ -34,7 +36,7 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
   return (
     <MenuPos
       menu={menu}
-      products={products}
+      products={sellableProducts}
       tables={tables}
       allowed={granted.MO_POS ?? []}
       initialTableId={initialTableId}

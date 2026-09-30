@@ -49,6 +49,8 @@ type NavItem = {
   ownerOnly?: true
   /// เมนูของร้านนวด (Phase 20) — โผล่เมื่อร้านเปิด StoreSettings.spaEnabled (ยังต้องมีสิทธิ์ VIEW ของ resource ด้วย)
   spaOnly?: true
+  /// ต้องมีโมดูลคลังด้วย (2026-09-30) — รายงานสต็อกผูก resource REPORTS จึงต้องเช็คโมดูลแยก (ด่านจริงอยู่ที่ตัวหน้า)
+  inventoryOnly?: true
   /// ชื่อเมนูเมื่อร้านเปิดตัวเลือกร้านนวด (2026-09-23 เจ้าของสั่ง) — หน้าเดียวกันดูแลทั้งอาหารและสปา
   spaLabel?: string
 }
@@ -95,8 +97,8 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
       { href: "/stock/issues", label: "ใบเบิกสินค้า", Icon: IconStockOut, resource: "STOCK_OUT" },
       { href: "/stock/adjustments", label: "ปรับยอดสต็อก", Icon: IconStockAdjust, resource: "STOCK_ADJUST" },
       { href: "/reports", label: "รายงาน", Icon: IconReports, resource: "REPORTS" },
-      { href: "/reports/stock-sales", label: "รายงานขายตัดสต็อก", Icon: IconDocument, resource: "REPORTS" },
-      { href: "/reports/reorder", label: "สินค้าต้องสั่งซื้อ", Icon: IconReorder, resource: "REPORTS" },
+      { href: "/reports/stock-sales", label: "รายงานขายตัดสต็อก", Icon: IconDocument, resource: "REPORTS", inventoryOnly: true },
+      { href: "/reports/reorder", label: "สินค้าต้องสั่งซื้อ", Icon: IconReorder, resource: "REPORTS", inventoryOnly: true },
     ],
   },
   {
@@ -128,6 +130,7 @@ export function Sidebar({
   isPlatformAdmin = false,
   isOwner = false,
   spaEnabled = false,
+  inventoryEnabled = true,
 }: {
   lowStockCount: number
   pendingNotificationCount?: number
@@ -137,6 +140,8 @@ export function Sidebar({
   isOwner?: boolean
   /// ร้านเปิดตัวเลือกร้านนวดไหม (Phase 20) — คุมกลุ่มเมนู "ร้านนวด"
   spaEnabled?: boolean
+  /// ร้านได้โมดูลคลังสินค้าไหม (2026-09-30 · ผู้ดูแลแพลตฟอร์มตั้ง)
+  inventoryEnabled?: boolean
 }) {
   const pathname = usePathname()
 
@@ -146,6 +151,7 @@ export function Sidebar({
     if (item.platformAdmin) return isPlatformAdmin
     if (item.ownerOnly) return isOwner
     if (item.spaOnly && !spaEnabled) return false
+    if (item.inventoryOnly && !inventoryEnabled) return false
     return !item.resource || viewableResources.includes(item.resource)
   }
 

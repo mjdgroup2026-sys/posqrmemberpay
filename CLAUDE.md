@@ -140,6 +140,12 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    ทับไปทั้งที่ยังไม่ได้รัน ต้องดูผลจริงก่อน resolve เสมอ (ตรงกับกับดักใน CLAUDE.md)
    · **ปุ่มใน UI ซ่อนตามสิทธิ์ด้วย** (§4): client component รับ `allowed?: AllowedActions` / `can*` จาก `lib/types.ts` (ค่าเริ่มต้น `FULL_ACCESS`)
    หน้าเป็นคนส่ง `granted[RESOURCE]` จาก `requirePageAccess()` — เพิ่มปุ่มใหม่ต้องครอบด้วย `allowed.includes(...)` ให้ตรงกับ action ที่ guard
+13. **(2026-09-30) โมดูลต่อร้าน — resource ไหนอยู่โมดูลไหนกำหนดที่ `lib/modules.ts` ที่เดียว** (`RESOURCE_MODULE` เป็น Record ครบทุก ResourceKey
+   · เพิ่ม resource ใหม่ TypeScript บังคับให้ประกาศ · `null` = แกนหลักขายอาหาร/QR ปิดไม่ได้) · ผู้ดูแลแพลตฟอร์มปิดโมดูลรายร้านที่ `/admin/stores/[id]`
+   (`setStoreModules` · เก็บเป็น `Store.disabledModules` = รายการที่**ปิด** ว่าง = ครบ) · ด่านมี 2 จุดห้ามข้าม: `permissionsFromContext()` ตัด resource ของโมดูลที่ปิด
+   **แม้เป็น OWNER** (เมนู/หน้า/action/ปุ่มหายเองทั้งหมด) และ `getStoreSettings()` คืน `spaEnabled`/`crmEnabled` = ค่าร้าน **และ** โมดูล ·
+   ของที่ไม่ใช่ resource เช็ค `hasModule()` เอง: `buildProductLines` (ขายสินค้าจากจอขาย) · `registerMember` · ป้ายสินค้าใกล้หมด · รายงานสต็อก 2 หน้า + CSV · แดชบอร์ด ·
+   **ปิดโมดูลห้ามแตะข้อมูล** — `updateStoreSettings` ไม่ทับสวิตช์ของโมดูลที่ปิด · `updateRole` คงสิทธิ์ของ resource ในโมดูลที่ปิด (แถวถูกซ่อนจาก `/roles`)
 12. **Realtime = SSE ผ่าน `lib/realtime.ts`** (2026-09-16 — แทน Socket.IO ที่ต้องมี custom server) — action/เส้นทางปิดบิลที่แตะข้อมูลของ
    Mobile Order ต้องเรียก `publishStoreEvent(storeId, topic)` หลังเขียน DB สำเร็จ (ผ่าน helper `revalidateXPages(storeId)` ของแต่ละไฟล์ action
    หรือ `closeSessionWithPayment`) · **event ห้ามพกข้อมูล** แค่ topic ให้ client refresh/fetch ผ่านด่านสิทธิ์ตามปกติ · client ใช้
@@ -644,6 +650,10 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 **✅ ปิดร้าน / ลบร้าน — ขึ้น production แล้ว 2026-09-30 (PR #51 · CI run 36677663970 · `_prisma_migrations` = 41 · สลับไป blue · backup หลัง deploy `posmobileorderdb-20260930-134246.dump` · เจ้าของลองหน้าจริงผ่านแล้ว · migration 2 ไฟล์ `20260930120000_store_status_closed` (ADD VALUE แยก) → `…120100_store_close_columns` additive + CHECK)**:
 การ์ด "ปิดร้าน / ลบร้าน" ท้าย `/mobile-order/settings` (OWNER · พิมพ์ชื่อร้านยืนยัน · ปิดต้องมีเหตุผลและไม่มีบิลค้าง) · `/no-store` มีรายการ "ร้านที่คุณปิดไว้" + ปุ่มเปิดอีกครั้ง ·
 `/admin/stores` ตัวกรอง/ป้าย "ปิดโดยเจ้าของ" (`STORE_STATUS_CHIP` ใน `lib/format.ts`) · เทส `store-lifecycle.test.ts` 7 (รวม ★ ขายพร้อมกดลบ) + tenant-isolation +3 action
+
+**โมดูลต่อร้าน (2026-09-30 · รอ PR/deploy · migration `20260930150000_store_modules` additive ไม่มี backfill — ทุกร้านได้ครบเหมือนเดิม)**: 5 กลุ่ม
+ขายอาหาร/QR (แกน) · ร้านนวด/สปา · คลังสินค้า+ขายสินค้า · สมาชิกสะสมแต้ม · รายงาน · ผู้ดูแลตั้งรายร้าน ไม่ผูกราคา (ตัดสินใจ 2026-09-30 — ต่อยอดผูกแพ็กเกจทีหลังได้โดยไม่แก้ด่าน) ·
+ดูกติกาข้อ 13 · เทส `store-modules.test.ts` 6
 
 **ยังไม่ได้ทำ**: **Phase 11 (LINE — เจ้าของสั่งข้ามไปก่อน 2026-09-16)** · เปิดใช้ 15b/15c จริง (รอ API key ตรวจสลิป / ย้าย credential SCB ของร้าน default) ·
 ทดสอบสแกน QR ด้วยมือถือจริง (Phase 9) · **Phase 18 เว็บสาธารณะค้นหาร้าน (`/explore` + Longdo Map + รีวิว) — ⛔ ยกเลิกแล้ว ไม่ทำในโปรเจกต์นี้ (เจ้าของสั่ง 2026-09-22) ห้ามหยิบมาทำ** — Phase 5 ปิดครบแล้ว 2026-09-17 (สมัครด้วยอีเมลจริงผ่าน: อีเมลเข้ากล่องหลัก · ยืนยันแล้วล็อกอินได้) —

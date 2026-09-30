@@ -1,6 +1,8 @@
 import Link from "next/link"
 import { getStockSalesReport, type StockSalesRow } from "@/lib/queries"
+import { redirect } from "next/navigation"
 import { requirePageAccess } from "@/lib/permissions"
+import { hasModule } from "@/lib/modules"
 import { businessDayKey, resolveDayRange } from "@/lib/day"
 import { formatBaht, formatBusinessDate, formatNumber } from "@/lib/format"
 import { DayRangePicker } from "@/components/day-range-picker"
@@ -80,7 +82,9 @@ function StockTable({ rows, showOnHand }: { rows: StockSalesRow[]; showOnHand: b
 /// จำนวนขายนับจาก ledger ตามวันที่ตัดสต็อกจริง (หักคืนจาก void/ยกเลิกแล้ว) · ยอดเงินนับจากบิลที่ปิดแล้วตามวันออกบิล —
 /// สินค้าบนโต๊ะตัดสต็อกตอนส่งแต่ออกบิลตอนปิดโต๊ะ สองตัวเลขจึงอาจตกคนละวันได้ถ้าโต๊ะข้ามเที่ยงคืน
 export default async function StockSalesReportPage({ searchParams }: PageProps<"/reports/stock-sales">) {
-  const { storeId } = await requirePageAccess("REPORTS")
+  const { storeId, disabledModules } = await requirePageAccess("REPORTS")
+  // รายงานสต็อกต้องมีโมดูลคลังด้วย (2026-09-30) — ผู้ดูแลแพลตฟอร์มปิดไว้ = เข้าไม่ได้แม้มีสิทธิ์รายงาน
+  if (!hasModule(disabledModules, "INVENTORY")) redirect("/access-denied?resource=PRODUCTS")
   const query = await searchParams
   const range = resolveDayRange(query.from, query.to)
   const report = await getStockSalesReport(storeId, range)

@@ -17,12 +17,15 @@ import {
   IconWarning,
 } from "@/components/icons"
 import { requirePageAccess } from "@/lib/permissions"
+import { hasModule } from "@/lib/modules"
 
 export const metadata = { title: "ภาพรวม — MJD Mobile Order" }
 
 export default async function DashboardPage() {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId } = await requirePageAccess("DASHBOARD")
+  const { storeId, disabledModules } = await requirePageAccess("DASHBOARD")
+  // โมดูลคลังที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) — เหลือแค่ยอดขายกับบิลล่าสุด
+  const inventory = hasModule(disabledModules, "INVENTORY")
 
   const [stats, lowStock, recent, recentSales] = await Promise.all([
     getDashboardStats(storeId),
@@ -36,15 +39,19 @@ export default async function DashboardPage() {
       <div className="page-head">
         <div>
           <p className="t-eyebrow">ภาพรวม</p>
-          <h1 className="t-h1">สรุปสถานะคลังสินค้า</h1>
+          <h1 className="t-h1">{inventory ? "สรุปสถานะคลังสินค้า" : "สรุปยอดขาย"}</h1>
         </div>
         <div className="row">
-          <Link href="/stock/receipts/new" className="btn btn-subtle">
-            <IconArrowIn size={17} aria-hidden /> ใบรับสินค้า
-          </Link>
-          <Link href="/stock/issues/new" className="btn btn-subtle">
-            <IconArrowOut size={17} aria-hidden /> ใบเบิกสินค้า
-          </Link>
+          {inventory ? (
+            <>
+              <Link href="/stock/receipts/new" className="btn btn-subtle">
+                <IconArrowIn size={17} aria-hidden /> ใบรับสินค้า
+              </Link>
+              <Link href="/stock/issues/new" className="btn btn-subtle">
+                <IconArrowOut size={17} aria-hidden /> ใบเบิกสินค้า
+              </Link>
+            </>
+          ) : null}
           {/* Phase 21 — ขายหน้าร้านย้ายไปที่จอขายอาหาร */}
           <Link href="/mobile-order/pos" className="btn btn-primary">
             <IconPos size={17} aria-hidden /> ขายอาหาร/สินค้า
@@ -64,37 +71,41 @@ export default async function DashboardPage() {
           <span className="t-caption num">{formatNumber(stats.todayBillCount)} บิลวันนี้</span>
         </article>
 
-        <article className="stat-tile">
-          <span className="row" style={{ gap: 8, color: "var(--ink-3)" }}>
-            <IconProduct size={17} aria-hidden />
-            <span className="t-caption">สินค้าทั้งหมด</span>
-          </span>
-          <strong className="t-h1 num">{formatNumber(stats.productCount)}</strong>
-          <span className="t-caption">รายการในระบบ</span>
-        </article>
+        {inventory ? (
+          <>
+            <article className="stat-tile">
+              <span className="row" style={{ gap: 8, color: "var(--ink-3)" }}>
+                <IconProduct size={17} aria-hidden />
+                <span className="t-caption">สินค้าทั้งหมด</span>
+              </span>
+              <strong className="t-h1 num">{formatNumber(stats.productCount)}</strong>
+              <span className="t-caption">รายการในระบบ</span>
+            </article>
 
-        <article className="stat-tile">
-          <span className="row" style={{ gap: 8, color: "var(--ink-3)" }}>
-            <IconWallet size={17} aria-hidden />
-            <span className="t-caption">มูลค่าสต็อกรวม</span>
-          </span>
-          <strong className="t-h1 num">฿{formatBaht(stats.stockValue)}</strong>
-          <span className="t-caption">Σ (คงเหลือ × ราคาต่อหน่วย)</span>
-        </article>
+            <article className="stat-tile">
+              <span className="row" style={{ gap: 8, color: "var(--ink-3)" }}>
+                <IconWallet size={17} aria-hidden />
+                <span className="t-caption">มูลค่าสต็อกรวม</span>
+              </span>
+              <strong className="t-h1 num">฿{formatBaht(stats.stockValue)}</strong>
+              <span className="t-caption">Σ (คงเหลือ × ราคาต่อหน่วย)</span>
+            </article>
 
-        <article className="stat-tile">
-          <span className="row" style={{ gap: 8, color: "var(--ink-3)" }}>
-            <IconWarning size={17} aria-hidden />
-            <span className="t-caption">สินค้าใกล้หมด</span>
-          </span>
-          <strong className="t-h1 num" style={{ color: stats.lowStockCount > 0 ? "var(--danger)" : undefined }}>
-            {formatNumber(stats.lowStockCount)}
-          </strong>
-          <span className="t-caption">คงเหลือ ≤ จุดสั่งซื้อ</span>
-        </article>
+            <article className="stat-tile">
+              <span className="row" style={{ gap: 8, color: "var(--ink-3)" }}>
+                <IconWarning size={17} aria-hidden />
+                <span className="t-caption">สินค้าใกล้หมด</span>
+              </span>
+              <strong className="t-h1 num" style={{ color: stats.lowStockCount > 0 ? "var(--danger)" : undefined }}>
+                {formatNumber(stats.lowStockCount)}
+              </strong>
+              <span className="t-caption">คงเหลือ ≤ จุดสั่งซื้อ</span>
+            </article>
+          </>
+        ) : null}
       </section>
 
-      {lowStock.length > 0 ? (
+      {inventory && lowStock.length > 0 ? (
         <section className="card-ui">
           <div className="panel-head">
             <div className="row" style={{ gap: 8 }}>
@@ -192,53 +203,55 @@ export default async function DashboardPage() {
         )}
       </section>
 
-      <section className="card-ui">
-        <div className="panel-head">
-          <h2 className="t-h2">รายการเคลื่อนไหวล่าสุด</h2>
-          <Link href="/reports" className="btn btn-ghost btn-sm">
-            ดูรายงานทั้งหมด
-          </Link>
-        </div>
+      {inventory ? (
+        <section className="card-ui">
+          <div className="panel-head">
+            <h2 className="t-h2">รายการเคลื่อนไหวล่าสุด</h2>
+            <Link href="/reports" className="btn btn-ghost btn-sm">
+              ดูรายงานทั้งหมด
+            </Link>
+          </div>
 
-        {recent.length === 0 ? (
-          <p className="t-body" style={{ padding: "24px" }}>
-            ยังไม่มีการเคลื่อนไหวสต็อก — เริ่มจากรับสินค้าเข้าหรือเบิกจ่ายได้เลย
-          </p>
-        ) : (
-          <ul style={{ display: "flex", flexDirection: "column" }}>
-            {recent.map((t) => (
-              <li
-                key={t.id}
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  padding: "12px 24px",
-                  borderTop: "1px solid var(--line)",
-                }}
-              >
-                <span className="row" style={{ gap: 10 }}>
-                  <span className={`chip ${t.type === "IN" ? "chip-success" : "chip-info"}`}>
-                    <span className="dot" />
-                    {t.type === "IN" ? "รับเข้า" : "เบิกออก"}
+          {recent.length === 0 ? (
+            <p className="t-body" style={{ padding: "24px" }}>
+              ยังไม่มีการเคลื่อนไหวสต็อก — เริ่มจากรับสินค้าเข้าหรือเบิกจ่ายได้เลย
+            </p>
+          ) : (
+            <ul style={{ display: "flex", flexDirection: "column" }}>
+              {recent.map((t) => (
+                <li
+                  key={t.id}
+                  className="row"
+                  style={{
+                    justifyContent: "space-between",
+                    padding: "12px 24px",
+                    borderTop: "1px solid var(--line)",
+                  }}
+                >
+                  <span className="row" style={{ gap: 10 }}>
+                    <span className={`chip ${t.type === "IN" ? "chip-success" : "chip-info"}`}>
+                      <span className="dot" />
+                      {t.type === "IN" ? "รับเข้า" : "เบิกออก"}
+                    </span>
+                    <span>
+                      <span style={{ fontWeight: 500 }}>{t.productName}</span>{" "}
+                      <span className="t-caption num">({t.productSku})</span>
+                      {t.note ? <span className="t-caption"> · {t.note}</span> : null}
+                    </span>
                   </span>
-                  <span>
-                    <span style={{ fontWeight: 500 }}>{t.productName}</span>{" "}
-                    <span className="t-caption num">({t.productSku})</span>
-                    {t.note ? <span className="t-caption"> · {t.note}</span> : null}
+                  <span className="row" style={{ gap: 14 }}>
+                    <span className="t-small num" style={{ fontWeight: 600 }}>
+                      {t.type === "IN" ? "+" : "−"}
+                      {formatNumber(t.quantity)} {t.unit}
+                    </span>
+                    <span className="t-caption num">{formatDateTime(t.createdAt)}</span>
                   </span>
-                </span>
-                <span className="row" style={{ gap: 14 }}>
-                  <span className="t-small num" style={{ fontWeight: 600 }}>
-                    {t.type === "IN" ? "+" : "−"}
-                    {formatNumber(t.quantity)} {t.unit}
-                  </span>
-                  <span className="t-caption num">{formatDateTime(t.createdAt)}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
     </>
   )
 }

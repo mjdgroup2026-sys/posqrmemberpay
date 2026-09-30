@@ -1,6 +1,8 @@
 import Link from "next/link"
 import { getReorderReport, getStoreSettings } from "@/lib/queries"
+import { redirect } from "next/navigation"
 import { requirePageAccess } from "@/lib/permissions"
+import { hasModule } from "@/lib/modules"
 import { REORDER_COVER_DAYS } from "@/lib/reorder"
 import { formatBaht, formatBusinessDate, formatNumber } from "@/lib/format"
 import { PrintButton } from "@/components/print-button"
@@ -16,7 +18,9 @@ const numCell = { padding: "8px 12px", textAlign: "right" } as const
 /// รายงานสินค้าใกล้หมดและต้องสั่งซื้อ (Phase 21c · F33) — คงเหลือ ≤ จุดสั่งซื้อ พร้อมจำนวนแนะนำ (สูตรใน lib/reorder.ts)
 /// พิมพ์เป็นใบสั่งซื้อร่างได้ · ปุ่มสร้างใบรับสินค้าเติมบรรทัดตามจำนวนแนะนำให้ (แก้ได้ก่อนบันทึก)
 export default async function ReorderReportPage() {
-  const { storeId, granted } = await requirePageAccess("REPORTS")
+  const { storeId, granted, disabledModules } = await requirePageAccess("REPORTS")
+  // รายงานสต็อกต้องมีโมดูลคลังด้วย (2026-09-30) — ผู้ดูแลแพลตฟอร์มปิดไว้ = เข้าไม่ได้แม้มีสิทธิ์รายงาน
+  if (!hasModule(disabledModules, "INVENTORY")) redirect("/access-denied?resource=PRODUCTS")
   const canReceive = granted.STOCK_IN?.includes("ADD") ?? false
   const [report, settings] = await Promise.all([getReorderReport(storeId), getStoreSettings(storeId)])
   const estimatedTotal = report.rows.reduce((sum, row) => sum + (row.estimatedCost ?? 0), 0)

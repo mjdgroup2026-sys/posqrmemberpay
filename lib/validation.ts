@@ -616,6 +616,12 @@ export const acceptInviteSchema = z
   .refine((v) => Boolean(v.token || v.inviteId), { message: "ไม่พบคำเชิญที่ต้องการตอบรับ" })
   .refine((v) => !v.token || /^[A-Za-z0-9_-]{32,64}$/.test(v.token), { message: "ลิงก์คำเชิญไม่ถูกต้อง", path: ["token"] })
 
+/// เปิด/ปิดโมดูลต่อร้าน (2026-09-30 · ผู้ดูแลแพลตฟอร์ม) — `disabled` = รายการโมดูลที่ปิด (ว่าง = ได้ครบ)
+export const storeModulesSchema = z.object({
+  storeId: requiredId("ไม่พบร้านที่ต้องการแก้ไข"),
+  disabled: z.array(z.enum(["SPA", "INVENTORY", "CRM", "REPORTS"], { message: "โมดูลไม่ถูกต้อง" })),
+})
+
 export const storeStatusSchema = z.object({
   storeId: requiredId("ไม่พบร้านที่ต้องการแก้ไข"),
   status: z.enum(["ACTIVE", "SUSPENDED"], { message: "สถานะร้านไม่ถูกต้อง" }),
