@@ -25,6 +25,9 @@ const ALWAYS_PUBLIC_PREFIXES = [
   "/invite",
   // งานตามเวลา (Phase 14b) — ผู้เรียกคือ cron บน VPS ไม่มี cookie · ด่านคือ secret ใน path (ตอบ 401 ถ้าผิด)
   "/api/cron",
+  // หน้าแนะนำระบบ + คู่มือ (2026-10-02) — คนที่ยังไม่สมัครต้องอ่านได้ และพนักงานที่ล็อกอินอยู่ก็เปิดคู่มือจากเมนูได้
+  "/welcome",
+  "/guide",
 ]
 
 // หน้า auth ของพนักงาน — เข้าได้โดยไม่ต้องล็อกอิน แต่ถ้าล็อกอินอยู่แล้วให้เด้งกลับหน้าแรก
@@ -51,6 +54,11 @@ export default function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/", request.url))
     }
     return NextResponse.next()
+  }
+
+  // หน้าแรกของคนที่ยังไม่ล็อกอิน = หน้าแนะนำระบบ (ไม่ใช่หน้าล็อกอิน) · ล็อกอินอยู่แล้วเข้าแดชบอร์ดตามเดิม
+  if (!hasSession && pathname === "/") {
+    return NextResponse.redirect(new URL("/welcome", request.url))
   }
 
   if (!hasSession) {

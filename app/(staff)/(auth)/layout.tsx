@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { Copyright } from "@/components/copyright"
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -30,6 +31,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <span style={{ fontWeight: 600, fontSize: "1.05rem" }}>Mobile Order</span>
         </div>
         <div className="card-ui card-pad">{children}</div>
+        <p className="t-small" style={{ textAlign: "center", marginTop: 14 }}>
+          <Link href="/welcome">รู้จัก MJD Mobile Order</Link> · <Link href="/guide">คู่มือการใช้งาน</Link>
+        </p>
         <Copyright className="auth-copyright" />
       </div>
     </main>

@@ -6,7 +6,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
 import { authErrorMessage } from "@/lib/auth-errors"
-import { IconBell, IconLogout, IconSettings, IconUser, IconWarning } from "@/components/icons"
+import { IconBell, IconHelp, IconLogout, IconSettings, IconUser, IconWarning } from "@/components/icons"
 import { StoreSwitcher, type StoreOption } from "@/components/store-switcher"
 import { MobileNavToggle } from "@/components/mobile-nav"
 import {
@@ -109,6 +109,9 @@ export function Topbar({ user, lowStockCount, showStockStatus = true, pendingNot
           <DropdownMenuSeparator />
           <DropdownMenuItem render={<Link href="/settings" />}>
             <IconSettings size={16} aria-hidden /> ตั้งค่าโปรไฟล์
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<a href="/guide" target="_blank" rel="noopener" />}>
+            <IconHelp size={16} aria-hidden /> คู่มือการใช้งาน
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleSignOut} variant="destructive">

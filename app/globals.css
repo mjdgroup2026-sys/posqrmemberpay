@@ -933,3 +933,375 @@
   /* พื้นทึบ — ของเดิมโปร่ง 50% พอเลื่อนแล้วเนื้อหาจะโผล่ทะลุปุ่ม */
   background: var(--surface-2);
 }
+
+/* ───────────── หน้าสาธารณะ /welcome · /guide (2026-10-02) ─────────────
+   ใช้ token ของธีม staff ทั้งหมด ไม่มี hex ดิบ · มือถือ: ขอบ 16px ไม่มี scroll แนวนอน */
+@layer components {
+  .pub-shell {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--page);
+  }
+  .pub-shell > main {
+    flex: 1;
+  }
+  .pub-wrap {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 16px;
+  }
+  .pub-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+  .pub-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    height: 60px;
+  }
+  .pub-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .pub-logo-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: var(--brand);
+    color: var(--brand-ink);
+    display: grid;
+    place-items: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .pub-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pub-nav > a:not(.btn) {
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 0 6px;
+  }
+  .pub-footer {
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+    padding: 18px 0;
+  }
+  .pub-footer-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .pub-footer .copyright {
+    margin: 0;
+  }
+  .pub-contact {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-2);
+    font-size: 0.875rem;
+  }
+
+  /* landing */
+  .pub-hero {
+    padding: 56px 0 40px;
+    background: linear-gradient(180deg, var(--brand-soft), var(--page));
+  }
+  .pub-hero-grid {
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 40px;
+    align-items: center;
+  }
+  .pub-hero-title {
+    font-size: clamp(1.75rem, 3.4vw, 2.6rem);
+    line-height: 1.25;
+    font-weight: 700;
+    color: var(--ink);
+    margin-top: 8px;
+  }
+  .pub-hero-lead {
+    margin-top: 14px;
+    font-size: 1.05rem;
+  }
+  .pub-hero-shots {
+    position: relative;
+    padding-bottom: 40px;
+  }
+  .pub-hero-shots img {
+    display: block;
+    height: auto;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-md);
+    background: var(--surface);
+  }
+  .pub-hero-desktop {
+    width: 100%;
+  }
+  .pub-hero-phone {
+    position: absolute;
+    right: -8px;
+    bottom: 0;
+    width: 28%;
+    border-radius: 18px !important;
+  }
+  .pub-section {
+    padding: 56px 0;
+  }
+  .pub-section-alt {
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .pub-section-title {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .pub-section-lead {
+    text-align: center;
+    max-width: 680px;
+    margin: -10px auto 22px;
+  }
+  .pub-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 14px;
+  }
+  .pub-feature {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pub-feature-icon,
+  .pub-step-no {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--brand-soft);
+    color: var(--brand);
+    display: grid;
+    place-items: center;
+    margin-bottom: 4px;
+    font-weight: 700;
+  }
+  .pub-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+  }
+  .pub-steps li {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pub-tier-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+  }
+  .pub-tier {
+    text-align: center;
+  }
+  .pub-tier-name {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--brand);
+  }
+  .pub-cta {
+    text-align: center;
+  }
+  .pub-cta .t-body {
+    margin-top: 8px;
+  }
+
+  /* คู่มือ */
+  .guide-layout {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 28px;
+    padding-top: 28px;
+    padding-bottom: 56px;
+    align-items: start;
+  }
+  .guide-toc {
+    position: sticky;
+    top: 76px;
+    max-height: calc(100dvh - 92px);
+    overflow-y: auto;
+    font-size: 0.875rem;
+  }
+  .guide-toc-mobile {
+    display: none;
+  }
+  .guide-toc-mobile > summary {
+    font-weight: 600;
+  }
+  .guide-toc summary {
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 8px;
+  }
+  .guide-toc ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 12px;
+  }
+  .guide-toc li a {
+    display: block;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    color: var(--ink-2);
+    text-decoration: none;
+  }
+  .guide-toc li a:hover {
+    background: var(--brand-soft);
+    color: var(--ink);
+  }
+  .guide-toc-group {
+    font-weight: 600;
+    color: var(--ink);
+    margin: 10px 0 4px;
+  }
+  .guide-toc-group a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .guide-group {
+    margin-bottom: 36px;
+  }
+  .guide-group-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--brand);
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--brand-soft);
+  }
+  .guide-section {
+    margin-bottom: 16px;
+    scroll-margin-top: 76px;
+  }
+  .guide-steps {
+    list-style: decimal;
+    margin: 12px 0 0;
+    padding-left: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--ink-2);
+    line-height: 1.65;
+  }
+  .guide-shots {
+    display: grid;
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .guide-phones {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .guide-shot {
+    margin: 0;
+  }
+  .guide-shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-sm);
+  }
+  .guide-shot.phone img {
+    border-radius: 16px;
+  }
+  .guide-shot figcaption {
+    margin-top: 6px;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--ink-3);
+  }
+  /* ลิงก์ในเนื้อความ — preflight ของ Tailwind ล้างสี/ขีดเส้นใต้ทิ้ง */
+  .guide-body p a,
+  .pub-hero p a,
+  .guide-toc-group a:hover {
+    color: var(--brand);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .guide-faq {
+    padding: 14px 20px;
+    border-top: 1px solid var(--line);
+  }
+  .guide-faq:first-child {
+    border-top: 0;
+  }
+  .guide-faq summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .guide-faq p {
+    margin-top: 8px;
+  }
+
+  @media (max-width: 900px) {
+    .pub-hero {
+      padding: 32px 0 24px;
+    }
+    .pub-hero-grid {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+    .pub-hero-phone {
+      right: 0;
+    }
+    .pub-section {
+      padding: 36px 0;
+    }
+    .guide-layout {
+      grid-template-columns: 1fr;
+      gap: 16px;
+      padding-top: 16px;
+    }
+    .guide-toc {
+      position: static;
+      max-height: none;
+    }
+    .guide-toc-desktop {
+      display: none;
+    }
+    .guide-toc-mobile {
+      display: block;
+    }
+  }
+  @media (max-width: 520px) {
+    .pub-nav > .btn-ghost {
+      display: none;
+    }
+    .pub-logo > span:last-child {
+      display: none;
+    }
+  }
+}

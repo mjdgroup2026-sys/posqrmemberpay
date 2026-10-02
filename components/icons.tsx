@@ -73,4 +73,5 @@ export {
   Truck as IconTruck,
   Undo2 as IconUndo,
   CircleSlash as IconCancelRemaining,
+  CircleHelp as IconHelp,
 } from "lucide-react"
