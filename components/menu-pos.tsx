@@ -67,6 +67,7 @@ export function MenuPos({
   therapists = [],
   spaEnabled = false,
   initialSessionId,
+  storeName,
 }: {
   menu: { featured: MenuItemCard[]; all: MenuItemCard[] }
   /// สินค้าในสต็อกที่ขายได้ (Phase 21b) — ว่าง = ร้านยังไม่เปิดหมวดใดให้ขายที่หน้าขายอาหาร ไม่มีแท็บสินค้า
@@ -86,6 +87,8 @@ export function MenuPos({
   spaEnabled?: boolean
   /// บิลที่เลือกไว้ล่วงหน้า (?session= จากปุ่ม "สั่งเพิ่ม" ของบิลในห้องสปา · 2026-09-23)
   initialSessionId?: string
+  /// ชื่อร้านบนหัวใบเสร็จกลับบ้าน (2026-10-02 — เดิมขึ้นชื่อระบบแทนชื่อร้าน)
+  storeName?: string
 }) {
   const router = useRouter()
   const canSell = allowed.includes("ADD")
@@ -371,7 +374,7 @@ export function MenuPos({
         </div>
 
         <section className="card-ui card-pad" style={{ maxWidth: 420, margin: "0 auto", width: "100%" }}>
-          <Receipt data={receipt} />
+          <Receipt data={receipt} storeName={storeName} />
         </section>
       </>
     )

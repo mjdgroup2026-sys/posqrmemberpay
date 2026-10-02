@@ -45,6 +45,7 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
       therapists={therapists}
       spaEnabled={settings?.spaEnabled ?? false}
       initialSessionId={initialSessionId}
+      storeName={settings?.storeName}
     />
   )
 }

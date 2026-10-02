@@ -32,6 +32,7 @@ import {
   IconStockAdjust,
   IconDocument,
   IconReorder,
+  IconHelp,
 } from "@/components/icons"
 import type { ResourceKey } from "@/lib/permissions"
 
@@ -225,6 +226,12 @@ export function Sidebar({
           </div>
         ))}
       </nav>
+
+      {/* คู่มือเป็นหน้าสาธารณะ (/guide) — เปิดแท็บใหม่ จะได้ไม่ทิ้งงานที่ทำค้างอยู่ */}
+      <a href="/guide" target="_blank" rel="noopener" className="nav-item" style={{ marginTop: 14 }}>
+        <IconHelp size={18} aria-hidden />
+        <span>คู่มือการใช้งาน</span>
+      </a>
 
       <Copyright />
     </aside>
