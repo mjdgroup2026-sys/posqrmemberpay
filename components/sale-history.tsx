@@ -7,8 +7,9 @@ import { toast } from "sonner"
 import { voidSale } from "@/app/actions/sales"
 import { formatBaht, formatDateTime, formatNumber } from "@/lib/format"
 import type { SaleListItem } from "@/lib/queries"
-import { PAYMENT_METHOD_LABEL } from "@/lib/types"
-import { IconSearch, IconSpinner } from "@/components/icons"
+import { PAYMENT_METHOD_LABEL, type ReceiptData } from "@/lib/types"
+import { Receipt } from "@/components/receipt"
+import { IconBack, IconPrinter, IconSearch, IconSpinner } from "@/components/icons"
 import {
   Dialog,
   DialogContent,
@@ -26,9 +27,38 @@ type Props = {
   to: string
   status: string
   search: string
+  /// ชื่อร้านบนหัวใบเสร็จที่พิมพ์ซ้ำ
+  storeName?: string
 }
 
-export function SaleHistory({ sales, from, to, status, search, allowed = FULL_ACCESS }: Props) {
+/// บิลในประวัติ → ข้อมูลใบเสร็จ (ตัวเดียวกับที่หน้าขายพิมพ์ตอนปิดบิล)
+function toReceiptData(sale: SaleListItem): ReceiptData {
+  return {
+    id: sale.id,
+    saleNumber: sale.saleNumber,
+    createdAt: new Date(sale.createdAt).toISOString(),
+    cashierName: sale.cashierName,
+    items: sale.items.map((item) => ({
+      productId: item.id,
+      sku: item.sku || undefined,
+      name: item.name,
+      unit: item.unit || undefined,
+      therapistLabel: item.therapistLabel,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      subtotal: item.subtotal,
+    })),
+    subtotal: sale.subtotal,
+    discount: sale.discount,
+    total: sale.total,
+    paymentMethod: sale.paymentMethod,
+    amountReceived: sale.amountReceived,
+    changeDue: sale.changeDue,
+    note: sale.note ?? undefined,
+  }
+}
+
+export function SaleHistory({ sales, from, to, status, search, storeName, allowed = FULL_ACCESS }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [isNavigating, startNavigation] = useTransition()
@@ -37,6 +67,8 @@ export function SaleHistory({ sales, from, to, status, search, allowed = FULL_AC
   const [voiding, setVoiding] = useState<SaleListItem | null>(null)
   const [reason, setReason] = useState("")
   const [pending, setPending] = useState(false)
+  /// พิมพ์ใบเสร็จซ้ำ — เวลาที่กดจะพิมพ์ใต้ป้าย "สำเนา" (ไม่บันทึกลงฐาน)
+  const [reprint, setReprint] = useState<{ sale: SaleListItem; printedAt: string } | null>(null)
 
   function updateQuery(patch: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString())
@@ -76,6 +108,39 @@ export function SaleHistory({ sales, from, to, status, search, allowed = FULL_AC
   const completedTotal = sales
     .filter((s) => s.status === "COMPLETED")
     .reduce((sum, s) => sum + s.total, 0)
+
+  // ใบเสร็จสำเนา — กินพื้นที่ทั้งหน้าเหมือนจอหลังขาย เพื่อดูก่อนแล้วกดพิมพ์
+  if (reprint) {
+    return (
+      <>
+        <div className="page-head no-print">
+          <div>
+            <p className="t-eyebrow">ประวัติการขาย</p>
+            <h1 className="t-h1">พิมพ์ใบเสร็จซ้ำ · {reprint.sale.saleNumber}</h1>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn btn-ghost" onClick={() => setReprint(null)}>
+              <IconBack size={17} aria-hidden />
+              กลับ
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => window.print()}>
+              <IconPrinter size={17} aria-hidden />
+              พิมพ์
+            </button>
+          </div>
+        </div>
+
+        <section className="card-ui card-pad" style={{ maxWidth: 420, margin: "0 auto", width: "100%" }}>
+          <Receipt
+            data={toReceiptData(reprint.sale)}
+            storeName={storeName}
+            copyPrintedAt={reprint.printedAt}
+            voided={reprint.sale.status === "VOIDED"}
+          />
+        </section>
+      </>
+    )
+  }
 
   return (
     <>
@@ -332,6 +397,19 @@ export function SaleHistory({ sales, from, to, status, search, allowed = FULL_AC
             <button type="button" className="btn btn-ghost" onClick={() => setDetail(null)}>
               ปิด
             </button>
+            {detail ? (
+              <button
+                type="button"
+                className="btn btn-subtle"
+                onClick={() => {
+                  setReprint({ sale: detail, printedAt: new Date().toISOString() })
+                  setDetail(null)
+                }}
+              >
+                <IconPrinter size={17} aria-hidden />
+                พิมพ์ใบเสร็จซ้ำ
+              </button>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>
