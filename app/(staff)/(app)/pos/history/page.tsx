@@ -1,5 +1,5 @@
 import { Suspense } from "react"
-import { listSales } from "@/lib/queries"
+import { getStoreSettings, listSales } from "@/lib/queries"
 import { SaleHistory } from "@/components/sale-history"
 import { requirePageAccess } from "@/lib/permissions"
 
@@ -15,11 +15,11 @@ export default async function SaleHistoryPage({ searchParams }: PageProps<"/pos/
   const status = typeof params.status === "string" ? params.status : ""
   const search = typeof params.q === "string" ? params.q : ""
 
-  const sales = await listSales(storeId, { from, to, status, search })
+  const [sales, settings] = await Promise.all([listSales(storeId, { from, to, status, search }), getStoreSettings(storeId)])
 
   return (
     <Suspense fallback={<p className="t-body">กำลังโหลด…</p>}>
-      <SaleHistory sales={sales} from={from} to={to} status={status} search={search} allowed={granted.POS_HISTORY ?? []} />
+      <SaleHistory sales={sales} from={from} to={to} status={status} search={search} storeName={settings?.storeName} allowed={granted.POS_HISTORY ?? []} />
     </Suspense>
   )
 }

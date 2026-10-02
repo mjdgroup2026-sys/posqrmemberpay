@@ -5,12 +5,39 @@ import { PAYMENT_METHOD_LABEL, type ReceiptData } from "@/lib/types"
 
 /// ใบเสร็จบนหน้าจอ + เป็นตัวที่ถูกพิมพ์จริงตอนกด window.print()
 /// (กติกาการพิมพ์อยู่ใน @media print ของ app/globals.css — ซ่อนทุกอย่างยกเว้น .receipt-print)
-export function Receipt({ data, storeName = "MJD Mobile Order" }: { data: ReceiptData; storeName?: string }) {
+///
+/// พิมพ์ซ้ำจาก /pos/history ส่ง `copyPrintedAt` มา → ขึ้นป้าย "สำเนา" + เวลาที่พิมพ์ซ้ำ
+/// กันใบเสร็จสองใบหน้าตาเหมือนกันแล้วถูกเอาไปใช้ซ้ำ · `voided` = บิลถูกยกเลิกแล้ว
+export function Receipt({
+  data,
+  storeName = "MJD Mobile Order",
+  copyPrintedAt,
+  voided = false,
+}: {
+  data: ReceiptData
+  storeName?: string
+  copyPrintedAt?: string
+  voided?: boolean
+}) {
+  // บิล Mobile Order มีค่าบริการรวมอยู่ใน subtotal แต่ไม่มีบรรทัดของตัวเอง — แยกโชว์ให้ยอดบวกกันลงตัว
+  const itemsTotal = data.items.reduce((sum, item) => sum + item.subtotal, 0)
+  const serviceCharge = Math.round((data.subtotal - itemsTotal) * 100) / 100
+
   return (
     <div className="receipt-print">
       <div style={{ textAlign: "center", marginBottom: 12 }}>
         <p style={{ fontWeight: 700, fontSize: "1.05rem" }}>{storeName}</p>
         <p className="t-caption">ใบเสร็จรับเงิน / ใบกำกับอย่างย่อ</p>
+        {copyPrintedAt ? (
+          <p style={{ fontWeight: 700, marginTop: 6 }}>
+            *** สำเนา ***
+            <br />
+            <span className="t-caption num">พิมพ์ซ้ำเมื่อ {formatDateTime(copyPrintedAt)}</span>
+          </p>
+        ) : null}
+        {voided ? (
+          <p style={{ fontWeight: 700, fontSize: "1.1rem", marginTop: 6 }}>*** บิลนี้ยกเลิกแล้ว ***</p>
+        ) : null}
       </div>
 
       <div className="t-small" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -65,8 +92,14 @@ export function Receipt({ data, storeName = "MJD Mobile Order" }: { data: Receip
       <div className="t-small" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <span className="row" style={{ justifyContent: "space-between" }}>
           <span>ยอดรวม</span>
-          <span className="num">฿{formatBaht(data.subtotal)}</span>
+          <span className="num">฿{formatBaht(serviceCharge > 0 ? itemsTotal : data.subtotal)}</span>
         </span>
+        {serviceCharge > 0 ? (
+          <span className="row" style={{ justifyContent: "space-between" }}>
+            <span>ค่าบริการ</span>
+            <span className="num">฿{formatBaht(serviceCharge)}</span>
+          </span>
+        ) : null}
         {data.discount > 0 ? (
           <span className="row" style={{ justifyContent: "space-between" }}>
             <span>ส่วนลด</span>
