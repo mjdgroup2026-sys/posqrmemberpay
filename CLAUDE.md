@@ -24,6 +24,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 - ~~**Role-Based Permission** — นอกขอบเขต v1~~ → **ทำแล้ว**: matrix สิทธิ์ F1–F9 มาตั้งแต่ Phase 13 และ **Phase 16 (2026-09-16)
   ขยายครอบ MJD Mobile Order ครบ** (`MO_*`) — ดูกติกาข้อ 11 · บทบาทขั้นต่ำ `OWNER`/`STAFF` ต่อร้าน (`StoreMember.role`) เป็นคนละแกน
 - **Phase 15b–15c (ตรวจสลิป / SCB ต่อร้าน)** — รอเจ้าของระบบเลือก provider/credential ก่อน ห้ามเริ่มเอง
+- **ผูกโมดูลเข้ากับแพ็กเกจ** — ร่างไว้ใน `Docs/spec.md` §8 ใต้ "โมดูลต่อร้าน" (2026-10-02) · เจ้าของสั่งเก็บแผนไว้ ห้ามเริ่มเองจนกว่าจะสั่ง และต้องตอบคำถามที่ค้าง 4 ข้อก่อน
 - **Phase 14–16** — ร่างไว้ใน `Docs/spec.md` §8 แล้ว (2026-09-14)
   · **Phase 13 (multi-tenant) merge + migrate production แล้ว 2026-09-15** (PR #1) · **Phase 14 แบ่งเป็น 3 PR:
   14a Onboarding (production แล้ว 2026-09-15, PR #2) → 14b Subscription (production แล้ว 2026-09-15, PR #3) →
