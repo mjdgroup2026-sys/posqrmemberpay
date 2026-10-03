@@ -139,6 +139,8 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
 
     const sale = await db.sale.findFirst({ where: { tableSessionId: sessionId } })
     expect(Number(sale?.changeDue)).toBe(40)
+    // หน้าปิดบิลใช้ saleId/changeDue จาก server ไปโชว์แผงเงินทอน (?paid=) — 2026-10-03
+    if (paid.ok) expect(paid.data).toMatchObject({ saleId: sale?.id, total: 260, changeDue: 40 })
   })
 
   it("DYNAMIC QR ถูก invalidate ทันทีที่ปิดบิล แต่ STATIC QR ไม่ถูกแตะต้อง", async () => {

@@ -94,8 +94,12 @@ export function BillingForm({ bill }: { bill: BillingView }) {
         return
       }
       toast.success(result.message)
-      // หน้าเด้งไปผังโต๊ะทันที — ย้ำเงินทอนไว้ให้เห็นต่อ
-      if (changeDue > 0) toast.warning(`อย่าลืมทอนเงินลูกค้า ฿${formatBaht(changeDue)}`, { duration: 10000 })
+      // มีเงินทอน = อยู่หน้าปิดบิลต่อแล้วโชว์แผงเงินทอนจากบิลจริง (?paid=) จนพนักงานกด "ทอนเงินแล้ว"
+      // · ใช้ URL ไม่ใช่ state เพราะปิดบิลแล้วหน้านี้ re-render เป็น "ไม่มีบิล" ทำให้ state หาย · ไม่มีเงินทอน = กลับผังโต๊ะตามเดิม
+      if (result.data && result.data.changeDue > 0) {
+        router.replace(`/mobile-order/tables/${bill.tableId}/billing?paid=${result.data.saleId}`)
+        return
+      }
       router.push("/mobile-order/tables")
       router.refresh()
     } catch {

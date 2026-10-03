@@ -16,6 +16,7 @@ import {
   type ReceiptData,
 } from "@/lib/types"
 import { Receipt } from "@/components/receipt"
+import { ChangeDuePanel } from "@/components/change-due-panel"
 import { IconBoxes, IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTherapist, IconTrash, IconTable, IconWallet } from "@/components/icons"
 import { SegmentTabs } from "@/components/segment-tabs"
 import { billLabel } from "@/components/bill-switcher"
@@ -368,8 +369,6 @@ export function MenuPos({
       }
 
       toast.success(result.message ?? "รับเงินเรียบร้อยแล้ว")
-      const due = result.data?.receipt.changeDue ?? 0
-      if (due > 0) toast.warning(`อย่าลืมทอนเงินลูกค้า ฿${formatBaht(due)}`, { duration: 10000 })
       setReceipt(result.data?.receipt ?? null)
       setCart([])
       setCustomerLabel("")
@@ -403,6 +402,16 @@ export function MenuPos({
             </button>
           </div>
         </div>
+
+        {receipt.paymentMethod === "CASH" && receipt.changeDue > 0 ? (
+          <ChangeDuePanel
+            total={receipt.total}
+            received={receipt.amountReceived}
+            changeDue={receipt.changeDue}
+            actionLabel="ทอนเงินแล้ว · เริ่มบิลใหม่"
+            onDone={() => setReceipt(null)}
+          />
+        ) : null}
 
         <section className="card-ui card-pad" style={{ maxWidth: 420, margin: "0 auto", width: "100%" }}>
           <Receipt data={receipt} storeName={storeName} />

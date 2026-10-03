@@ -38,7 +38,7 @@ export type ClosePaymentInput = {
 }
 
 export type ClosePaymentResult =
-  | { ok: true; saleId: string; saleNumber: string; total: number; alreadyClosed: boolean }
+  | { ok: true; saleId: string; saleNumber: string; total: number; changeDue: number; alreadyClosed: boolean }
   | { ok: false; error: string }
 
 function round2(value: number): number {
@@ -97,6 +97,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
             saleId: existing.id,
             saleNumber: existing.saleNumber,
             total: toNumber(existing.total),
+            changeDue: 0,
             alreadyClosed: true,
           }
         }
@@ -228,7 +229,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
         data: { status: "DONE" },
       })
 
-      return { saleId: sale.id, saleNumber: sale.saleNumber, total, alreadyClosed: false }
+      return { saleId: sale.id, saleNumber: sale.saleNumber, total, changeDue, alreadyClosed: false }
     })
 
     // สัญญาณ SSE ให้ผังโต๊ะ/แจ้งเตือน/หน้าลูกค้า (จ่ายสำเร็จ) รู้ทันที — ทุกเส้นทางปิดบิล (พนักงาน/webhook/สลิป) ผ่านที่นี่
@@ -254,6 +255,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
           saleId: existing.id,
           saleNumber: existing.saleNumber,
           total: toNumber(existing.total),
+          changeDue: 0,
           alreadyClosed: true,
         }
       }

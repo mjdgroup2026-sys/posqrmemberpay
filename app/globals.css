@@ -285,6 +285,47 @@
     padding: var(--sp-3);
     resize: vertical;
   }
+  /* แผงเงินทอนหลังรับเงินสด (components/change-due-panel.tsx) */
+  .change-due-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-3);
+    max-width: 420px;
+    width: 100%;
+    margin: 0 auto var(--sp-4);
+    padding: var(--sp-5) var(--sp-4);
+    border: 2px solid var(--warning);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+    text-align: center;
+  }
+  .change-due-panel .t-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .change-due-amount {
+    font-size: clamp(2.5rem, 9vw, 3.5rem);
+    line-height: 1.1;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .change-due-breakdown {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-3);
+    width: 100%;
+    margin: 0;
+  }
+  .change-due-breakdown dt {
+    font-size: 0.8125rem;
+    color: var(--ink-3);
+  }
+  .change-due-breakdown dd {
+    margin: 0;
+    font-weight: 600;
+  }
   /* ช่องรหัสผ่าน + ปุ่มรูปตา (components/password-input.tsx) */
   .password-field {
     position: relative;
