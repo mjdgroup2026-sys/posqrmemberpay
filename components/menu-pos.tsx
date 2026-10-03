@@ -368,6 +368,8 @@ export function MenuPos({
       }
 
       toast.success(result.message ?? "รับเงินเรียบร้อยแล้ว")
+      const due = result.data?.receipt.changeDue ?? 0
+      if (due > 0) toast.warning(`อย่าลืมทอนเงินลูกค้า ฿${formatBaht(due)}`, { duration: 10000 })
       setReceipt(result.data?.receipt ?? null)
       setCart([])
       setCustomerLabel("")
@@ -864,10 +866,19 @@ export function MenuPos({
                 onChange={(e) => setReceivedText(e.target.value)}
                 placeholder={String(payable)}
               />
-              <span className="field-hint num">
-                เงินทอน ฿{formatBaht(changeDue > 0 ? changeDue : 0)}
-                {received > 0 && received < payable ? " · เงินที่รับยังไม่พอ" : ""}
-              </span>
+              {/* เงินทอนต้องเห็นชัด — เดิมเป็น hint ตัวเล็กสีเทา พนักงานมองข้าม (เจ้าของแจ้ง 2026-10-03) */}
+              {received > 0 && received < payable ? (
+                <div className="alert-banner danger num" role="alert">
+                  เงินที่รับยังไม่พอ — ขาดอีก ฿{formatBaht(round2(payable - received))}
+                </div>
+              ) : changeDue > 0 ? (
+                <div className="alert-banner warning" role="status" style={{ justifyContent: "space-between" }}>
+                  <span>ต้องทอนเงินลูกค้า</span>
+                  <strong className="t-h2 num">฿{formatBaht(changeDue)}</strong>
+                </div>
+              ) : received > 0 ? (
+                <span className="field-hint">รับพอดี ไม่มีเงินทอน</span>
+              ) : null}
             </div>
           ) : paymentMethod === "QR" ? (
             <div className="field" style={{ alignItems: "center", textAlign: "center" }}>
