@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { buildStorePromptPayQr, createStaffTableOrder, createTakeawaySale, type StorePromptPayQr } from "@/app/actions/staff-order"
-import { formatBaht } from "@/lib/format"
+import { formatBaht, formatNumber } from "@/lib/format"
 import { resolveDiscount, type DiscountMode } from "@/lib/discount"
 import type { MenuItemCard, PosProductCard, PosTableOption, TherapistOption } from "@/lib/queries"
 import {
@@ -801,6 +801,7 @@ export function MenuPos({
 
           <AmountDueHero
             amount={payable}
+            label={discount > 0 ? "ยอดสุทธิที่ต้องชำระ" : "ยอดที่ต้องชำระ"}
             lines={
               discount > 0
                 ? [
@@ -881,6 +882,19 @@ export function MenuPos({
                 onChange={(e) => setReceivedText(e.target.value)}
                 placeholder={String(payable)}
               />
+              {/* ปุ่มลัด: รับพอดี + ธนบัตรที่พอจ่ายยอดนี้ — กดแทนพิมพ์ */}
+              <div className="cash-quick">
+                {[payable, ...[50, 100, 500, 1000].filter((note) => note > payable)].map((value, index) => (
+                  <button
+                    key={index === 0 ? "exact" : value}
+                    type="button"
+                    className={`btn btn-sm ${received === value ? "btn-primary" : "btn-subtle"}`}
+                    onClick={() => setReceivedText(String(value))}
+                  >
+                    {index === 0 ? "พอดี" : <span className="num">฿{formatNumber(value)}</span>}
+                  </button>
+                ))}
+              </div>
               {/* เงินทอนต้องเห็นชัด — เดิมเป็น hint ตัวเล็กสีเทา พนักงานมองข้าม (เจ้าของแจ้ง 2026-10-03) */}
               {received > 0 && received < payable ? (
                 <div className="alert-banner danger num" role="alert">
@@ -922,7 +936,7 @@ export function MenuPos({
             </button>
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-primary btn-lg"
               disabled={
                 pending || !discountCalc.ok || !qrMatches || (paymentMethod === "CASH" && received < payable)
               }
