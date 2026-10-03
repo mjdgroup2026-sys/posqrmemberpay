@@ -17,6 +17,7 @@ import {
 } from "@/lib/types"
 import { Receipt } from "@/components/receipt"
 import { ChangeDuePanel } from "@/components/change-due-panel"
+import { AmountDueHero } from "@/components/amount-due-hero"
 import { IconBoxes, IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTherapist, IconTrash, IconTable, IconWallet } from "@/components/icons"
 import { SegmentTabs } from "@/components/segment-tabs"
 import { billLabel } from "@/components/bill-switcher"
@@ -794,10 +795,22 @@ export function MenuPos({
           <DialogHeader>
             <DialogTitle>{onlyProducts ? "รับเงิน — ขายสินค้า" : "รับเงิน — อาหารกลับบ้าน"}</DialogTitle>
             <DialogDescription>
-              ยอดที่ต้องชำระ ฿{formatBaht(payable)} ·{" "}
               {onlyProducts ? "ออกบิลและตัดสต็อกในขั้นตอนเดียว" : "ออกบิลและส่งเข้าครัวพร้อมกันในขั้นตอนเดียว"}
             </DialogDescription>
           </DialogHeader>
+
+          <AmountDueHero
+            amount={payable}
+            lines={
+              discount > 0
+                ? [
+                    { label: "ยอดรวม", amount: total },
+                    { label: discountMode === "PERCENT" ? `ส่วนลด ${discountValue}%` : "ส่วนลด", amount: discount, negative: true },
+                  ]
+                : []
+            }
+            caption={`${cart.reduce((n, line) => n + line.quantity, 0)} รายการ${customerLabel.trim() ? ` · ${customerLabel.trim()}` : ""}`}
+          />
 
           <div className="field">
             <label className="t-small" htmlFor="posDiscount">
@@ -825,15 +838,8 @@ export function MenuPos({
                 </button>
               ))}
             </div>
-            {discountCalc.ok ? (
-              discount > 0 ? (
-                <span className="field-hint num">
-                  ยอดรวม ฿{formatBaht(total)} − ส่วนลด ฿{formatBaht(discount)} = <strong>฿{formatBaht(payable)}</strong>
-                </span>
-              ) : null
-            ) : (
-              <span className="field-hint error">{discountCalc.error}</span>
-            )}
+            {/* ที่มาของยอด (ยอดรวม − ส่วนลด) อยู่ในกรอบยอดที่ต้องชำระด้านบนแล้ว — ที่นี่เหลือแค่ข้อผิดพลาด */}
+            {!discountCalc.ok ? <span className="field-hint error">{discountCalc.error}</span> : null}
             {discountValue > 0 ? (
               <input
                 className="input"

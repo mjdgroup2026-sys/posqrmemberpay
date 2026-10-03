@@ -13,6 +13,7 @@ vi.mock("@/app/actions/payments", () => ({
 
 const { BillingForm } = await import("@/components/billing-form")
 const { ChangeDuePanel } = await import("@/components/change-due-panel")
+const { AmountDueHero } = await import("@/components/amount-due-hero")
 
 afterEach(cleanup)
 
@@ -74,5 +75,25 @@ describe("หน้าปิดบิลโต๊ะ — เงินทอน",
     payCash("75")
     expect(screen.queryByRole("status")).toBeNull()
     expect(screen.getByText("รับพอดี ไม่มีเงินทอน")).toBeTruthy()
+  })
+})
+
+/// กรอบยอดที่ต้องชำระตัวใหญ่ (2026-10-03)
+describe("AmountDueHero", () => {
+  it("หน้าปิดบิลโต๊ะโชว์ยอดที่ต้องชำระตัวใหญ่", () => {
+    render(<BillingForm bill={bill} />)
+    expect(screen.getByLabelText("ยอดที่ต้องชำระ 75.00 บาท")).toBeTruthy()
+  })
+
+  it("โชว์ที่มาของยอด — ส่วนลดมีเครื่องหมายลบ", () => {
+    render(
+      <AmountDueHero
+        amount={75}
+        lines={[{ label: "ยอดรวม", amount: 80 }, { label: "ส่วนลด", amount: 5, negative: true }]}
+      />,
+    )
+    const hero = screen.getByLabelText("ยอดที่ต้องชำระ 75.00 บาท")
+    expect(hero.textContent).toContain("ยอดรวม฿80.00")
+    expect(hero.textContent).toContain("ส่วนลด−฿5.00")
   })
 })

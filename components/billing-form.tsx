@@ -11,6 +11,7 @@ import { formatBaht, formatClock, formatNumber } from "@/lib/format"
 import { PAYMENT_METHOD_LABEL, type FieldErrors, type PaymentMethodValue } from "@/lib/types"
 import type { BillingView } from "@/lib/queries"
 import { IconBack, IconReceipt, IconSpinner } from "@/components/icons"
+import { AmountDueHero } from "@/components/amount-due-hero"
 
 /// วิธีชำระเงินที่หน้าปิดบิลของ MJD Mobile Order รับได้ — PROMPTPAY/CARD คือหลัก
 /// ส่วน CASH/TRANSFER เผื่อลูกค้าเปลี่ยนใจมาจ่ายที่เคาน์เตอร์ (บิลยังเป็น channel = MOBILE_ORDER เหมือนกัน)
@@ -216,6 +217,21 @@ export function BillingForm({ bill }: { bill: BillingView }) {
           <h2 className="t-h2" style={{ marginBottom: 14 }}>
             รับชำระเงิน
           </h2>
+
+          <div style={{ marginBottom: 16 }}>
+            <AmountDueHero
+              amount={bill.total}
+              lines={
+                bill.serviceCharge > 0
+                  ? [
+                      { label: "ค่าอาหาร", amount: bill.itemsTotal },
+                      { label: `ค่าบริการ ${bill.servicePercent}%`, amount: bill.serviceCharge },
+                    ]
+                  : []
+              }
+              caption={`โต๊ะ ${bill.tableCode}${bill.customerLabel ? ` · ${bill.customerLabel}` : ""} · ${formatNumber(bill.lines.length)} รายการ`}
+            />
+          </div>
 
           <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div className="field">
