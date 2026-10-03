@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma"
 import { sendResetPasswordMail, sendVerificationMail } from "@/lib/mail"
 import { isSignupAllowed, readSignupPolicy } from "@/lib/signup-allowlist"
 import { resolveTrustedOrigins } from "@/lib/auth-origins"
+import { findSignupConflict, SIGNUP_CONFLICT_MESSAGE } from "@/lib/signup-existing"
 
 /// Better Auth ตั้ง callbackURL ปลายทางเป็น "/" มาให้ — เปลี่ยนเป็น /verify-email เพื่อให้ผู้ใช้
 /// เห็นผลลัพธ์การยืนยัน (สำเร็จ/ลิงก์หมดอายุ) แทนที่จะถูกโยนไปหน้าแรกแล้วเดาเอาเอง
@@ -74,13 +75,19 @@ export const auth = betterAuth({
       if (ctx.path !== "/sign-up/email") return
 
       const email = typeof ctx.body?.email === "string" ? ctx.body.email : ""
-      if (isSignupAllowed(email)) return
+      if (!isSignupAllowed(email)) {
+        // แยกข้อความตามสาเหตุ เพื่อให้ผู้ดูแลรู้ว่า "ลืมตั้ง env" ไม่ใช่ "ผู้ใช้กรอกผิด"
+        const message = readSignupPolicy().unconfigured
+          ? "ระบบยังไม่ได้เปิดรับสมัครสมาชิก กรุณาติดต่อผู้ดูแลระบบ"
+          : "อีเมลนี้ไม่อยู่ในรายชื่อที่สมัครได้ กรุณาใช้อีเมลขององค์กร หรือติดต่อผู้ดูแลระบบ"
+        throw new APIError("FORBIDDEN", { code: "EMAIL_NOT_ALLOWED", message })
+      }
 
-      // แยกข้อความตามสาเหตุ เพื่อให้ผู้ดูแลรู้ว่า "ลืมตั้ง env" ไม่ใช่ "ผู้ใช้กรอกผิด"
-      const message = readSignupPolicy().unconfigured
-        ? "ระบบยังไม่ได้เปิดรับสมัครสมาชิก กรุณาติดต่อผู้ดูแลระบบ"
-        : "อีเมลนี้ไม่อยู่ในรายชื่อที่สมัครได้ กรุณาใช้อีเมลขององค์กร หรือติดต่อผู้ดูแลระบบ"
-      throw new APIError("FORBIDDEN", { code: "EMAIL_NOT_ALLOWED", message })
+      // อีเมลซ้ำ — ต้องดักเองก่อนถึง Better Auth ที่ตอบสำเร็จหลอก ๆ (ดู lib/signup-existing.ts)
+      const conflict = await findSignupConflict(email)
+      if (conflict) {
+        throw new APIError("UNPROCESSABLE_ENTITY", { code: conflict, message: SIGNUP_CONFLICT_MESSAGE[conflict] })
+      }
     }),
   },
   // ต้องอยู่ท้ายสุดเสมอ — ทำให้ Server Action เซ็ต cookie ได้
