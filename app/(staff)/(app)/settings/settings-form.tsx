@@ -7,6 +7,7 @@ import { updateProfile } from "@/app/actions/profile"
 import { authClient } from "@/lib/auth-client"
 import type { FieldErrors } from "@/lib/types"
 import { IconSpinner } from "@/components/icons"
+import { PasswordInput } from "@/components/password-input"
 
 export function SettingsForm({ name, email }: { name: string; email: string }) {
   const router = useRouter()
@@ -112,11 +113,9 @@ export function SettingsForm({ name, email }: { name: string; email: string }) {
             <label className="t-small" htmlFor="currentPassword">
               รหัสผ่านปัจจุบัน
             </label>
-            <input
+            <PasswordInput
               id="currentPassword"
               name="currentPassword"
-              type="password"
-              className="input"
               required
               autoComplete="current-password"
             />
@@ -126,11 +125,9 @@ export function SettingsForm({ name, email }: { name: string; email: string }) {
             <label className="t-small" htmlFor="newPassword">
               รหัสผ่านใหม่
             </label>
-            <input
+            <PasswordInput
               id="newPassword"
               name="newPassword"
-              type="password"
-              className="input"
               required
               minLength={8}
               autoComplete="new-password"
@@ -142,11 +139,9 @@ export function SettingsForm({ name, email }: { name: string; email: string }) {
             <label className="t-small" htmlFor="confirmPassword">
               ยืนยันรหัสผ่านใหม่
             </label>
-            <input
+            <PasswordInput
               id="confirmPassword"
               name="confirmPassword"
-              type="password"
-              className="input"
               required
               autoComplete="new-password"
             />

@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
 import { IconSpinner } from "@/components/icons"
+import { PasswordInput } from "@/components/password-input"
 
 type ExistingCode = "EMAIL_ALREADY_REGISTERED" | "EMAIL_REGISTERED_UNVERIFIED"
 
@@ -202,11 +203,9 @@ export function RegisterForm() {
         <label className="t-small" htmlFor="password">
           รหัสผ่าน
         </label>
-        <input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
-          className="input"
           required
           minLength={8}
           autoComplete="new-password"
@@ -218,11 +217,9 @@ export function RegisterForm() {
         <label className="t-small" htmlFor="confirmPassword">
           ยืนยันรหัสผ่าน
         </label>
-        <input
+        <PasswordInput
           id="confirmPassword"
           name="confirmPassword"
-          type="password"
-          className="input"
           required
           autoComplete="new-password"
         />

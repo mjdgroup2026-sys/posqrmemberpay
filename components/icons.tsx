@@ -23,6 +23,8 @@ export {
   CircleUser as IconUser,
   Mail as IconMail,
   LockKeyhole as IconLock,
+  Eye as IconEye,
+  EyeOff as IconEyeOff,
   ArrowLeft as IconBack,
   CircleCheck as IconCheck,
   ShoppingCart as IconPos,
