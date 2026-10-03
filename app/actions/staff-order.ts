@@ -23,6 +23,7 @@ import {
   zodToFieldErrors,
 } from "@/lib/validation"
 import type { ActionResult, ReceiptData } from "@/lib/types"
+import { discountNoteText, resolveDiscount } from "@/lib/discount"
 
 /// จอขายอาหารฝั่งพนักงาน (Phase 17b) — พนักงานกดสั่งแทนลูกค้าที่โต๊ะ
 ///
@@ -305,6 +306,9 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
     paymentMethod: formData.get("paymentMethod") ?? "",
     amountReceived: formData.get("amountReceived") ?? 0,
     customerLabel: formData.get("customerLabel") ?? undefined,
+    discountMode: formData.get("discountMode") || undefined,
+    discountValue: formData.get("discountValue") || undefined,
+    discountNote: formData.get("discountNote") ?? undefined,
   })
   if (!parsed.success) {
     return {
@@ -314,7 +318,8 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
     }
   }
 
-  const { items, products, paymentMethod, amountReceived, customerLabel } = parsed.data
+  const { items, products, paymentMethod, amountReceived, customerLabel, discountMode, discountValue, discountNote } =
+    parsed.data
 
   // เลขบิลชนกันได้ถ้ามีคนกดรับเงินพร้อมกัน — เจอ P2002 แล้ว retry ทั้งทรานแซคชันใหม่ (เหมือน createSale)
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -322,10 +327,18 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
       const created = await db.$transaction(async (tx) => {
         const rows = items.length > 0 ? await buildOrderLines(tx, items) : []
         const productRows = await buildProductLines(tx, products)
-        const total = round2(
+        const subtotal = round2(
           rows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0) +
             productRows.reduce((sum, row) => sum + row.unitPrice * row.quantity, 0),
         )
+        // ส่วนลดคิดจากยอดสดในทรานแซคชันนี้ (ราคาเมนูอาจเปลี่ยนระหว่างที่ตะกร้าค้างบนจอ)
+        const discountResult = resolveDiscount(subtotal, discountMode, discountValue)
+        if (!discountResult.ok) throw new StaffOrderAbort(discountResult.error)
+        const discount = discountResult.amount
+        const total = round2(subtotal - discount)
+        const baseNote = customerLabel ? `กลับบ้าน · ${customerLabel}` : "กลับบ้าน"
+        const saleNote =
+          discount > 0 ? `${baseNote} · ${discountNoteText(discountMode, discountValue, discountNote)}` : baseNote
 
         if (paymentMethod === "CASH" && amountReceived < total) {
           throw new StaffOrderAbort(`เงินที่รับไม่พอ — ต้องชำระ ${total.toFixed(2)} บาท`)
@@ -341,13 +354,13 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
             storeId,
             saleNumber,
             channel: "TAKEAWAY",
-            subtotal: total.toFixed(2),
-            discount: "0.00",
+            subtotal: subtotal.toFixed(2),
+            discount: discount.toFixed(2),
             total: total.toFixed(2),
             paymentMethod,
             amountReceived: received.toFixed(2),
             changeDue: changeDue.toFixed(2),
-            note: customerLabel ? `กลับบ้าน · ${customerLabel}` : "กลับบ้าน",
+            note: saleNote,
             cashierId: ctx.user.id,
             items: {
               create: [
@@ -422,13 +435,13 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
               subtotal: round2(row.unitPrice * row.quantity),
             })),
           ],
-          subtotal: total,
-          discount: 0,
+          subtotal,
+          discount,
           total,
           paymentMethod,
           amountReceived: received,
           changeDue,
-          note: customerLabel ? `กลับบ้าน · ${customerLabel}` : "กลับบ้าน",
+          note: saleNote,
         }
 
         return { order, rows, productRows, receipt }
