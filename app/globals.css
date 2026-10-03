@@ -371,6 +371,24 @@
     font-size: 0.8125rem;
     opacity: 0.85;
   }
+  /* หน้าต่างรับเงินจอขาย — จอกว้าง 2 คอลัมน์ (ยอด+ส่วนลด | วิธีชำระ+รับเงิน) ไม่ต้องเลื่อน · จอแคบเรียงลง */
+  .pay-grid {
+    display: grid;
+    gap: 14px;
+  }
+  .pay-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+  @media (min-width: 640px) {
+    .pay-grid {
+      grid-template-columns: 1fr 1fr;
+      gap: var(--sp-5);
+      align-items: start;
+    }
+  }
   /* ปุ่มลัดจำนวนเงินที่รับมา (หน้าต่างรับเงินจอขาย) */
   .cash-quick {
     display: flex;
@@ -378,7 +396,8 @@
     gap: 6px;
   }
   .cash-quick .btn {
-    flex: 1 1 64px;
+    flex: 1 1 48px;
+    padding-inline: 6px;
   }
   /* แผงเงินทอนหลังรับเงินสด (components/change-due-panel.tsx) */
   .change-due-panel {
