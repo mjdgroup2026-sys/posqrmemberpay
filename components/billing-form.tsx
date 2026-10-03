@@ -94,6 +94,8 @@ export function BillingForm({ bill }: { bill: BillingView }) {
         return
       }
       toast.success(result.message)
+      // หน้าเด้งไปผังโต๊ะทันที — ย้ำเงินทอนไว้ให้เห็นต่อ
+      if (changeDue > 0) toast.warning(`อย่าลืมทอนเงินลูกค้า ฿${formatBaht(changeDue)}`, { duration: 10000 })
       router.push("/mobile-order/tables")
       router.refresh()
     } catch {
@@ -278,9 +280,19 @@ export function BillingForm({ bill }: { bill: BillingView }) {
                   onChange={(e) => setCashInput(e.target.value)}
                   placeholder={bill.total.toFixed(2)}
                 />
-                <span className="field-hint">
-                  เงินทอน ฿<span className="num">{formatBaht(changeDue > 0 ? changeDue : 0)}</span>
-                </span>
+                {/* เงินทอนต้องเห็นชัด — เดิมเป็น hint ตัวเล็กสีเทา พนักงานมองข้าม (เจ้าของแจ้ง 2026-10-03) */}
+                {cashInput !== "" && cashShort ? (
+                  <div className="alert-banner danger num" role="alert">
+                    เงินที่รับยังไม่พอ — ขาดอีก ฿{formatBaht(round2(bill.total - received))}
+                  </div>
+                ) : changeDue > 0 ? (
+                  <div className="alert-banner warning" role="status" style={{ justifyContent: "space-between" }}>
+                    <span>ต้องทอนเงินลูกค้า</span>
+                    <strong className="t-h2 num">฿{formatBaht(changeDue)}</strong>
+                  </div>
+                ) : cashInput !== "" ? (
+                  <span className="field-hint">รับพอดี ไม่มีเงินทอน</span>
+                ) : null}
                 {fieldErrors.amountReceived ? (
                   <span className="field-hint error">{fieldErrors.amountReceived}</span>
                 ) : null}
