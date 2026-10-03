@@ -7,6 +7,8 @@ import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
 import { IconSpinner } from "@/components/icons"
 
+type ExistingCode = "EMAIL_ALREADY_REGISTERED" | "EMAIL_REGISTERED_UNVERIFIED"
+
 /// สมัครสมาชิกเอง — นโยบายอยู่ฝั่ง server (lib/signup-allowlist.ts → hooks.before ใน lib/auth.ts):
 /// SIGNUP_OPEN=true ใครก็สมัครได้ (Phase 14a) หรือ allowlist เดิม
 ///
@@ -25,12 +27,16 @@ export function RegisterForm() {
   const loginHref = callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/login"
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // อีเมลซ้ำ — แยกจาก error ทั่วไปเพราะต้องโชว์ปุ่มทางไปต่อ (เข้าสู่ระบบ / ส่งอีเมลยืนยันซ้ำ)
+  const [conflict, setConflict] = useState<{ code: ExistingCode; email: string } | null>(null)
   const [registeredEmail, setRegisteredEmail] = useState<string | null>(null)
   const [resent, setResent] = useState(false)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError(null)
+    setConflict(null)
+    setResent(false)
 
     const form = new FormData(event.currentTarget)
     const email = String(form.get("email") ?? "")
@@ -58,6 +64,11 @@ export function RegisterForm() {
         setError(authError.message ?? "อีเมลนี้ยังสมัครไม่ได้ กรุณาติดต่อผู้ดูแลระบบ")
         return
       }
+      // 422 + code จาก hooks.before ใน lib/auth.ts (lib/signup-existing.ts)
+      if (authError.code === "EMAIL_ALREADY_REGISTERED" || authError.code === "EMAIL_REGISTERED_UNVERIFIED") {
+        setConflict({ code: authError.code, email })
+        return
+      }
       setError(
         authError.status === 422 ? "อีเมลนี้ถูกใช้สมัครไปแล้ว" : "สมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
       )
@@ -68,18 +79,18 @@ export function RegisterForm() {
     setRegisteredEmail(email)
   }
 
-  async function resend() {
-    if (!registeredEmail) return
+  async function resend(email: string | null) {
+    if (!email) return
     setPending(true)
-    try {
-      await authClient.sendVerificationEmail({ email: registeredEmail, callbackURL: "/verify-email" })
-      setResent(true)
-      toast.success("ส่งอีเมลยืนยันใหม่แล้ว")
-    } catch {
+    // Better Auth client ไม่ throw เมื่อเซิร์ฟเวอร์ตอบ error — ต้องเช็ค { error } เอง
+    const { error: sendError } = await authClient.sendVerificationEmail({ email, callbackURL: "/verify-email" })
+    setPending(false)
+    if (sendError) {
       toast.error("ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
-    } finally {
-      setPending(false)
+      return
     }
+    setResent(true)
+    toast.success("ส่งอีเมลยืนยันใหม่แล้ว")
   }
 
   if (registeredEmail) {
@@ -99,7 +110,12 @@ export function RegisterForm() {
 
         {resent ? <div className="alert-banner info">ส่งลิงก์ยืนยันใหม่ให้แล้ว</div> : null}
 
-        <button type="button" className="btn btn-subtle btn-block" disabled={pending || resent} onClick={resend}>
+        <button
+          type="button"
+          className="btn btn-subtle btn-block"
+          disabled={pending || resent}
+          onClick={() => resend(registeredEmail)}
+        >
           {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : null}
           ส่งอีเมลยืนยันอีกครั้ง
         </button>
@@ -121,6 +137,51 @@ export function RegisterForm() {
       </div>
 
       {error ? <div className="alert-banner danger">{error}</div> : null}
+
+      {conflict ? (
+        <div className="alert-banner warning" role="alert" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <span>
+            {conflict.code === "EMAIL_ALREADY_REGISTERED" ? (
+              <>
+                อีเมล <span className="num">{conflict.email}</span> มีบัญชีอยู่แล้ว ไม่ต้องสมัครใหม่ —
+                เข้าสู่ระบบได้เลย หรือกดลืมรหัสผ่านหากจำรหัสผ่านไม่ได้
+              </>
+            ) : (
+              <>
+                อีเมล <span className="num">{conflict.email}</span> สมัครไว้แล้วแต่ยังไม่ได้ยืนยัน ไม่ต้องสมัครใหม่ —
+                กดลิงก์ในอีเมลที่ส่งไปก่อนหน้า หรือขอส่งอีเมลยืนยันอีกครั้ง
+              </>
+            )}
+          </span>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            {conflict.code === "EMAIL_ALREADY_REGISTERED" ? (
+              <>
+                <Link href={loginHref} className="btn btn-primary btn-sm">
+                  เข้าสู่ระบบ
+                </Link>
+                <Link href="/forgot-password" className="btn btn-ghost btn-sm">
+                  ลืมรหัสผ่าน
+                </Link>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={pending || resent}
+                  onClick={() => resend(conflict.email)}
+                >
+                  {pending ? <IconSpinner size={15} className="animate-spin" aria-hidden /> : null}
+                  {resent ? "ส่งอีเมลยืนยันแล้ว" : "ส่งอีเมลยืนยันอีกครั้ง"}
+                </button>
+                <Link href={loginHref} className="btn btn-ghost btn-sm">
+                  ไปหน้าเข้าสู่ระบบ
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       <div className="field">
         <label className="t-small" htmlFor="name">
