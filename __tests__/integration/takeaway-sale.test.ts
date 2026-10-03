@@ -177,6 +177,68 @@ describe.skipIf(!dbReady)("ขายอาหารกลับบ้าน (Pha
     expect(Number(sale.changeDue)).toBe(0)
   })
 
+  describe("ส่วนลดท้ายบิล (2026-10-03)", () => {
+    function withDiscount(fd: FormData, mode: string, value: string, note?: string) {
+      fd.set("discountMode", mode)
+      fd.set("discountValue", value)
+      if (note !== undefined) fd.set("discountNote", note)
+      return fd
+    }
+
+    it("ลดเป็นบาท → subtotal/discount/total ถูก · เงินทอนคิดจากยอดสุทธิ · หมายเหตุโปรฯ ลงบิล", async () => {
+      const menuItem = await seedMenu()
+      const result = await createTakeawaySale(
+        withDiscount(saleForm(menuItem.id, { quantity: 2, amountReceived: "150" }), "AMOUNT", "20", "โปรเปิดร้าน"),
+      )
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const sale = await testPrisma().sale.findUniqueOrThrow({ where: { id: result.data!.receipt.id } })
+      expect(Number(sale.subtotal)).toBe(160)
+      expect(Number(sale.discount)).toBe(20)
+      expect(Number(sale.total)).toBe(140)
+      expect(Number(sale.changeDue)).toBe(10)
+      expect(sale.note).toContain("โปรเปิดร้าน")
+      expect(result.data!.receipt.discount).toBe(20)
+      expect(result.data!.receipt.total).toBe(140)
+    })
+
+    it("ลดเป็น % → server คิดจากยอดสดเอง · โอนเก็บเท่ายอดสุทธิ", async () => {
+      const menuItem = await seedMenu()
+      const result = await createTakeawaySale(
+        withDiscount(saleForm(menuItem.id, { quantity: 2, paymentMethod: "TRANSFER", amountReceived: "999" }), "PERCENT", "10"),
+      )
+      expect(result.ok).toBe(true)
+      const sale = await testPrisma().sale.findFirstOrThrow({ where: { channel: "TAKEAWAY" } })
+      expect(Number(sale.discount)).toBe(16)
+      expect(Number(sale.total)).toBe(144)
+      expect(Number(sale.amountReceived)).toBe(144)
+      expect(sale.note).toContain("ส่วนลด 10%")
+    })
+
+    it("ส่วนลดเกินยอด / เกิน 100% / ติดลบ → ปฏิเสธ ไม่มีบิลค้าง", async () => {
+      const menuItem = await seedMenu()
+      const over = await createTakeawaySale(withDiscount(saleForm(menuItem.id), "AMOUNT", "81"))
+      expect(over.ok).toBe(false)
+      if (!over.ok) expect(over.error).toContain("ไม่เกินยอดรวม")
+      const pct = await createTakeawaySale(withDiscount(saleForm(menuItem.id), "PERCENT", "101"))
+      expect(pct.ok).toBe(false)
+      const neg = await createTakeawaySale(withDiscount(saleForm(menuItem.id), "AMOUNT", "-5"))
+      expect(neg.ok).toBe(false)
+      expect(await testPrisma().sale.count()).toBe(0)
+      expect(await testPrisma().mobileOrder.count()).toBe(0)
+    })
+
+    it("เงินสดไม่พอเทียบกับยอดหลังหักส่วนลด", async () => {
+      const menuItem = await seedMenu()
+      // 160 − 50 = 110 · รับ 100 ไม่พอ
+      const result = await createTakeawaySale(
+        withDiscount(saleForm(menuItem.id, { quantity: 2, amountReceived: "100" }), "AMOUNT", "50"),
+      )
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error).toContain("110.00")
+    })
+  })
+
   it("บิลกลับบ้านโผล่ในประวัติการขาย ปิดยอด และรายงาน เหมือนบิลอื่น", async () => {
     const menuItem = await seedMenu()
     await createTakeawaySale(saleForm(menuItem.id, { quantity: 2, amountReceived: "200" }))

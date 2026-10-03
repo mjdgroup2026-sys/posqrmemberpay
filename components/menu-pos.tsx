@@ -1,10 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { buildStorePromptPayQr, createStaffTableOrder, createTakeawaySale, type StorePromptPayQr } from "@/app/actions/staff-order"
 import { formatBaht } from "@/lib/format"
+import { resolveDiscount, type DiscountMode } from "@/lib/discount"
 import type { MenuItemCard, PosProductCard, PosTableOption, TherapistOption } from "@/lib/queries"
 import {
   FULL_ACCESS,
@@ -112,6 +113,10 @@ export function MenuPos({
   /// QR พร้อมเพย์ของร้านตามยอดในตะกร้า — ขอจาก server ตอนเลือก "สแกน QR" (ยอดเปลี่ยน = QR เปลี่ยน)
   const [qr, setQr] = useState<StorePromptPayQr | null>(null)
   const [qrError, setQrError] = useState<string | null>(null)
+  /// ส่วนลดท้ายบิลตอนรับเงิน (2026-10-03) — บาทหรือ % · server คิดซ้ำด้วยสูตรเดียวกัน (lib/discount.ts)
+  const [discountMode, setDiscountMode] = useState<DiscountMode>("AMOUNT")
+  const [discountText, setDiscountText] = useState("")
+  const [discountNote, setDiscountNote] = useState("")
 
   // ชิปกรองตามประเภทครัว (Phase 19) — "" = ทุกครัว · ช่วยพนักงานหาเมนูเร็วขึ้นบนจอเล็ก
   const [stationFilter, setStationFilter] = useState("")
@@ -311,19 +316,36 @@ export function MenuPos({
     }
   }
 
-  const received = Number(receivedText === "" ? 0 : receivedText)
-  const changeDue = paymentMethod === "CASH" ? round2(received - total) : 0
+  const discountValue = Number(discountText === "" ? 0 : discountText)
+  const discountCalc = resolveDiscount(total, discountMode, discountValue)
+  const discount = discountCalc.ok ? discountCalc.amount : 0
+  const payable = round2(total - discount)
 
-  /// ขอ QR ตามยอดปัจจุบันตอนพนักงานเลือก "สแกน QR" — ยอดในกล่องรับเงินเปลี่ยนไม่ได้ระหว่างเปิด จึงไม่ต้องขอซ้ำ
-  async function loadQr() {
-    setQr(null)
-    setQrError(null)
-    const fd = new FormData()
-    fd.set("amount", String(total))
-    const result = await buildStorePromptPayQr(fd)
-    if (result.ok && result.data) setQr(result.data)
-    else setQrError(result.ok ? "สร้าง QR ไม่สำเร็จ" : result.error)
-  }
+  const received = Number(receivedText === "" ? 0 : receivedText)
+  const changeDue = paymentMethod === "CASH" ? round2(received - payable) : 0
+
+  /// ขอ QR ตามยอดสุทธิตอนเลือก "สแกน QR" และทุกครั้งที่ส่วนลดเปลี่ยน (หน่วงไว้ให้พิมพ์จบก่อน)
+  useEffect(() => {
+    if (!payOpen || paymentMethod !== "QR" || !discountCalc.ok) return
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      setQr(null)
+      setQrError(null)
+      const fd = new FormData()
+      fd.set("amount", String(payable))
+      const result = await buildStorePromptPayQr(fd)
+      if (cancelled) return
+      if (result.ok && result.data) setQr(result.data)
+      else setQrError(result.ok ? "สร้าง QR ไม่สำเร็จ" : result.error)
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [payOpen, paymentMethod, payable, discountCalc.ok])
+
+  // QR ที่ขึ้นอยู่ต้องตรงกับยอดสุทธิล่าสุด — กันกดยืนยันขณะ QR ยังเป็นยอดก่อนแก้ส่วนลด
+  const qrMatches = paymentMethod !== "QR" || (qr !== null && round2(qr.amount) === payable)
 
   async function submitTakeaway() {
     setPending(true)
@@ -331,8 +353,13 @@ export function MenuPos({
       const fd = new FormData()
       cartPayload(fd)
       fd.set("paymentMethod", paymentMethod)
-      fd.set("amountReceived", paymentMethod === "CASH" ? String(received) : String(total))
+      fd.set("amountReceived", paymentMethod === "CASH" ? String(received) : String(payable))
       fd.set("customerLabel", customerLabel.trim())
+      if (discount > 0) {
+        fd.set("discountMode", discountMode)
+        fd.set("discountValue", String(discountValue))
+        fd.set("discountNote", discountNote.trim())
+      }
 
       const result = await createTakeawaySale(fd)
       if (!result.ok) {
@@ -345,6 +372,8 @@ export function MenuPos({
       setCart([])
       setCustomerLabel("")
       setReceivedText("")
+      setDiscountText("")
+      setDiscountNote("")
       setPayOpen(false)
       router.refresh()
     } catch {
@@ -722,6 +751,9 @@ export function MenuPos({
               setPaymentMethod("CASH")
               setQr(null)
               setQrError(null)
+              setDiscountMode("AMOUNT")
+              setDiscountText("")
+              setDiscountNote("")
               setPayOpen(true)
             }}
           >
@@ -751,10 +783,57 @@ export function MenuPos({
           <DialogHeader>
             <DialogTitle>{onlyProducts ? "รับเงิน — ขายสินค้า" : "รับเงิน — อาหารกลับบ้าน"}</DialogTitle>
             <DialogDescription>
-              ยอดที่ต้องชำระ ฿{formatBaht(total)} ·{" "}
+              ยอดที่ต้องชำระ ฿{formatBaht(payable)} ·{" "}
               {onlyProducts ? "ออกบิลและตัดสต็อกในขั้นตอนเดียว" : "ออกบิลและส่งเข้าครัวพร้อมกันในขั้นตอนเดียว"}
             </DialogDescription>
           </DialogHeader>
+
+          <div className="field">
+            <label className="t-small" htmlFor="posDiscount">
+              ส่วนลด (ไม่บังคับ)
+            </label>
+            <div className="row" style={{ gap: 8 }}>
+              <input
+                id="posDiscount"
+                className="input num"
+                inputMode="decimal"
+                value={discountText}
+                onChange={(e) => setDiscountText(e.target.value)}
+                placeholder="0"
+                style={{ flex: 1 }}
+              />
+              {(["AMOUNT", "PERCENT"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`btn btn-sm ${discountMode === m ? "btn-primary" : "btn-subtle"}`}
+                  onClick={() => setDiscountMode(m)}
+                  aria-pressed={discountMode === m}
+                >
+                  {m === "AMOUNT" ? "บาท" : "%"}
+                </button>
+              ))}
+            </div>
+            {discountCalc.ok ? (
+              discount > 0 ? (
+                <span className="field-hint num">
+                  ยอดรวม ฿{formatBaht(total)} − ส่วนลด ฿{formatBaht(discount)} = <strong>฿{formatBaht(payable)}</strong>
+                </span>
+              ) : null
+            ) : (
+              <span className="field-hint error">{discountCalc.error}</span>
+            )}
+            {discountValue > 0 ? (
+              <input
+                className="input"
+                value={discountNote}
+                onChange={(e) => setDiscountNote(e.target.value)}
+                placeholder="โปรโมชั่น / เหตุผล เช่น ซื้อ 2 แถม 1"
+                maxLength={60}
+                aria-label="หมายเหตุส่วนลด"
+              />
+            ) : null}
+          </div>
 
           <div className="field">
             <span className="t-small">วิธีชำระเงิน</span>
@@ -764,10 +843,7 @@ export function MenuPos({
                   key={method}
                   type="button"
                   className={`btn btn-sm ${paymentMethod === method ? "btn-primary" : "btn-subtle"}`}
-                  onClick={() => {
-                    setPaymentMethod(method)
-                    if (method === "QR") void loadQr()
-                  }}
+                  onClick={() => setPaymentMethod(method)}
                 >
                   {PAYMENT_METHOD_LABEL[method]}
                 </button>
@@ -786,11 +862,11 @@ export function MenuPos({
                 inputMode="decimal"
                 value={receivedText}
                 onChange={(e) => setReceivedText(e.target.value)}
-                placeholder={String(total)}
+                placeholder={String(payable)}
               />
               <span className="field-hint num">
                 เงินทอน ฿{formatBaht(changeDue > 0 ? changeDue : 0)}
-                {received > 0 && received < total ? " · เงินที่รับยังไม่พอ" : ""}
+                {received > 0 && received < payable ? " · เงินที่รับยังไม่พอ" : ""}
               </span>
             </div>
           ) : paymentMethod === "QR" ? (
@@ -811,7 +887,7 @@ export function MenuPos({
               )}
             </div>
           ) : (
-            <p className="t-body">เก็บเงินเต็มจำนวน ฿{formatBaht(total)} — ไม่มีเงินทอน</p>
+            <p className="t-body">เก็บเงินเต็มจำนวน ฿{formatBaht(payable)} — ไม่มีเงินทอน</p>
           )}
 
           <DialogFooter>
@@ -821,11 +897,13 @@ export function MenuPos({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={pending || (paymentMethod === "CASH" && received < total)}
+              disabled={
+                pending || !discountCalc.ok || !qrMatches || (paymentMethod === "CASH" && received < payable)
+              }
               onClick={submitTakeaway}
             >
               {pending ? <IconSpinner size={17} className="animate-spin" aria-hidden /> : null}
-              ยืนยันรับเงิน ฿{formatBaht(total)}
+              ยืนยันรับเงิน ฿{formatBaht(payable)}
             </button>
           </DialogFooter>
         </DialogContent>

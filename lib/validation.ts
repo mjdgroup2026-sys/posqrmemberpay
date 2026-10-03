@@ -291,6 +291,15 @@ export const takeawaySaleSchema = z.object({
     .max(40, "ชื่อลูกค้ายาวเกินไป")
     .nullish()
     .transform((v) => (v === "" || v === null ? undefined : v)),
+  // ส่วนลดท้ายบิล (2026-10-03) — ยอดจริงคิดที่ server ด้วย resolveDiscount() ใน lib/discount.ts
+  discountMode: z.enum(["AMOUNT", "PERCENT"], { error: "ชนิดส่วนลดไม่ถูกต้อง" }).default("AMOUNT"),
+  discountValue: money("ส่วนลด").default(0),
+  discountNote: z
+    .string({ error: "หมายเหตุส่วนลดไม่ถูกต้อง" })
+    .trim()
+    .max(60, "หมายเหตุส่วนลดยาวเกินไป")
+    .nullish()
+    .transform((v) => (v === "" || v === null ? undefined : v)),
 }).superRefine((value, ctx) => requireSomething(value, ctx, "กรุณาเลือกเมนูก่อนรับเงิน"))
 
 export const callStaffSchema = z.object({
