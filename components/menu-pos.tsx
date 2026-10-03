@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { buildStorePromptPayQr, createStaffTableOrder, createTakeawaySale, type StorePromptPayQr } from "@/app/actions/staff-order"
-import { formatBaht } from "@/lib/format"
+import { formatBaht, formatNumber } from "@/lib/format"
 import { resolveDiscount, type DiscountMode } from "@/lib/discount"
 import type { MenuItemCard, PosProductCard, PosTableOption, TherapistOption } from "@/lib/queries"
 import {
@@ -17,6 +17,7 @@ import {
 } from "@/lib/types"
 import { Receipt } from "@/components/receipt"
 import { ChangeDuePanel } from "@/components/change-due-panel"
+import { AmountDueHero } from "@/components/amount-due-hero"
 import { IconBoxes, IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTherapist, IconTrash, IconTable, IconWallet } from "@/components/icons"
 import { SegmentTabs } from "@/components/segment-tabs"
 import { billLabel } from "@/components/bill-switcher"
@@ -794,10 +795,23 @@ export function MenuPos({
           <DialogHeader>
             <DialogTitle>{onlyProducts ? "รับเงิน — ขายสินค้า" : "รับเงิน — อาหารกลับบ้าน"}</DialogTitle>
             <DialogDescription>
-              ยอดที่ต้องชำระ ฿{formatBaht(payable)} ·{" "}
               {onlyProducts ? "ออกบิลและตัดสต็อกในขั้นตอนเดียว" : "ออกบิลและส่งเข้าครัวพร้อมกันในขั้นตอนเดียว"}
             </DialogDescription>
           </DialogHeader>
+
+          <AmountDueHero
+            amount={payable}
+            label={discount > 0 ? "ยอดสุทธิที่ต้องชำระ" : "ยอดที่ต้องชำระ"}
+            lines={
+              discount > 0
+                ? [
+                    { label: "ยอดรวม", amount: total },
+                    { label: discountMode === "PERCENT" ? `ส่วนลด ${discountValue}%` : "ส่วนลด", amount: discount, negative: true },
+                  ]
+                : []
+            }
+            caption={`${cart.reduce((n, line) => n + line.quantity, 0)} รายการ${customerLabel.trim() ? ` · ${customerLabel.trim()}` : ""}`}
+          />
 
           <div className="field">
             <label className="t-small" htmlFor="posDiscount">
@@ -825,15 +839,8 @@ export function MenuPos({
                 </button>
               ))}
             </div>
-            {discountCalc.ok ? (
-              discount > 0 ? (
-                <span className="field-hint num">
-                  ยอดรวม ฿{formatBaht(total)} − ส่วนลด ฿{formatBaht(discount)} = <strong>฿{formatBaht(payable)}</strong>
-                </span>
-              ) : null
-            ) : (
-              <span className="field-hint error">{discountCalc.error}</span>
-            )}
+            {/* ที่มาของยอด (ยอดรวม − ส่วนลด) อยู่ในกรอบยอดที่ต้องชำระด้านบนแล้ว — ที่นี่เหลือแค่ข้อผิดพลาด */}
+            {!discountCalc.ok ? <span className="field-hint error">{discountCalc.error}</span> : null}
             {discountValue > 0 ? (
               <input
                 className="input"
@@ -875,6 +882,19 @@ export function MenuPos({
                 onChange={(e) => setReceivedText(e.target.value)}
                 placeholder={String(payable)}
               />
+              {/* ปุ่มลัด: รับพอดี + ธนบัตรที่พอจ่ายยอดนี้ — กดแทนพิมพ์ */}
+              <div className="cash-quick">
+                {[payable, ...[50, 100, 500, 1000].filter((note) => note > payable)].map((value, index) => (
+                  <button
+                    key={index === 0 ? "exact" : value}
+                    type="button"
+                    className={`btn btn-sm ${received === value ? "btn-primary" : "btn-subtle"}`}
+                    onClick={() => setReceivedText(String(value))}
+                  >
+                    {index === 0 ? "พอดี" : <span className="num">฿{formatNumber(value)}</span>}
+                  </button>
+                ))}
+              </div>
               {/* เงินทอนต้องเห็นชัด — เดิมเป็น hint ตัวเล็กสีเทา พนักงานมองข้าม (เจ้าของแจ้ง 2026-10-03) */}
               {received > 0 && received < payable ? (
                 <div className="alert-banner danger num" role="alert">
@@ -916,7 +936,7 @@ export function MenuPos({
             </button>
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-primary btn-lg"
               disabled={
                 pending || !discountCalc.ok || !qrMatches || (paymentMethod === "CASH" && received < payable)
               }

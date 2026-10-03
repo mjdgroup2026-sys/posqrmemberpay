@@ -285,6 +285,101 @@
     padding: var(--sp-3);
     resize: vertical;
   }
+  /* กรอบยอดที่ต้องชำระตัวใหญ่ (components/amount-due-hero.tsx) — สีแบรนด์ = ต้องเก็บ */
+  .amount-due-hero {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-4) var(--sp-5) var(--sp-5);
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-strong) 100%);
+    color: var(--brand-ink);
+    box-shadow: var(--shadow-md);
+  }
+  /* วงแสงจาง ๆ มุมขวาบน ให้กรอบไม่แบน */
+  .amount-due-hero::after {
+    content: "";
+    position: absolute;
+    top: -45%;
+    right: -18%;
+    width: 60%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--brand-ink) 10%, transparent);
+    pointer-events: none;
+  }
+  /* ที่มาของยอด (ยอดรวม / ส่วนลด / ค่าบริการ) — แถวแบบใบเสร็จ ซ้ายชื่อ ขวาตัวเลข */
+  .amount-due-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding-bottom: var(--sp-3);
+    border-bottom: 1px dashed color-mix(in srgb, var(--brand-ink) 40%, transparent);
+    font-size: 1rem;
+  }
+  .amount-due-lines div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--sp-3);
+  }
+  .amount-due-lines dt {
+    opacity: 0.85;
+  }
+  .amount-due-lines dd {
+    margin: 0;
+    font-weight: 600;
+  }
+  .amount-due-lines .is-negative dd {
+    font-weight: 700;
+  }
+  .amount-due-lines .is-struck {
+    text-decoration: line-through;
+    opacity: 0.75;
+  }
+  /* ยอดสุทธิ — ใหญ่สุดในกรอบ อยู่ล่างสุดเสมอ */
+  .amount-due-total {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-align: center;
+  }
+  .amount-due-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    opacity: 0.9;
+  }
+  .amount-due-value {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: clamp(2.75rem, 12vw, 4.25rem);
+    line-height: 1.05;
+    font-weight: 800;
+  }
+  .amount-due-currency {
+    font-size: 0.5em;
+    font-weight: 600;
+    opacity: 0.85;
+  }
+  .amount-due-caption {
+    text-align: center;
+    font-size: 0.8125rem;
+    opacity: 0.85;
+  }
+  /* ปุ่มลัดจำนวนเงินที่รับมา (หน้าต่างรับเงินจอขาย) */
+  .cash-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .cash-quick .btn {
+    flex: 1 1 64px;
+  }
   /* แผงเงินทอนหลังรับเงินสด (components/change-due-panel.tsx) */
   .change-due-panel {
     display: flex;
