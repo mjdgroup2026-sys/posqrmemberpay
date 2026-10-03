@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { getBillingView } from "@/lib/queries"
+import { getBillingView, getSaleById } from "@/lib/queries"
+import { ChangeDuePanel } from "@/components/change-due-panel"
 import { requirePageAccess } from "@/lib/permissions"
 import { BillingForm } from "@/components/billing-form"
 import { billLabel } from "@/components/bill-switcher"
@@ -15,7 +16,41 @@ export default async function BillingPage({ params, searchParams }: PageProps<"/
   if (!granted.MO_TABLES?.includes("EDIT")) redirect("/access-denied?resource=MO_TABLES")
   const { tableId } = await params
   // ?session= = บิลของลูกค้าคนไหนในห้องสปาที่มีหลายบิล (2026-09-23)
-  const { session } = await searchParams
+  const { session, paid } = await searchParams
+
+  // ?paid=<saleId> = เพิ่งปิดบิลเงินสดที่มีเงินทอน (2026-10-03) — โชว์เงินทอนจากบิลจริงค้างไว้จนพนักงานกด "ทอนเงินแล้ว"
+  // ต้องมาก่อน getBillingView เพราะ session ปิดไปแล้ว · getSaleById กรองร้านให้เอง
+  if (typeof paid === "string" && paid) {
+    const sale = await getSaleById(storeId, paid)
+    if (sale) {
+      return (
+        <>
+          <div className="page-head">
+            <div>
+              <p className="t-eyebrow">ปิดบิลเรียบร้อย</p>
+              <h1 className="t-h1">
+                บิล <span className="num">{sale.saleNumber}</span>
+              </h1>
+            </div>
+          </div>
+          {sale.paymentMethod === "CASH" && sale.changeDue > 0 ? (
+            <ChangeDuePanel
+              total={sale.total}
+              received={sale.amountReceived}
+              changeDue={sale.changeDue}
+              actionLabel="ทอนเงินแล้ว · กลับผังโต๊ะ"
+              href="/mobile-order/tables"
+            />
+          ) : (
+            <Link href="/mobile-order/tables" className="btn btn-primary">
+              กลับไปผังโต๊ะ
+            </Link>
+          )}
+        </>
+      )
+    }
+  }
+
   const bill = await getBillingView(storeId, tableId, typeof session === "string" && session ? session : undefined)
 
   if (!bill) {

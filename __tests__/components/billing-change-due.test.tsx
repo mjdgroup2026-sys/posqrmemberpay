@@ -12,6 +12,7 @@ vi.mock("@/app/actions/payments", () => ({
 }))
 
 const { BillingForm } = await import("@/components/billing-form")
+const { ChangeDuePanel } = await import("@/components/change-due-panel")
 
 afterEach(cleanup)
 
@@ -50,6 +51,23 @@ describe("หน้าปิดบิลโต๊ะ — เงินทอน",
   it("รับไม่พอ → แถบแดงบอกยอดที่ขาด", () => {
     payCash("70")
     expect(screen.getByRole("alert").textContent).toContain("ขาดอีก ฿5.00")
+  })
+
+  it("แผงเงินทอนหลังปิดบิล: ยอดทอนตัวใหญ่ + ยอดชำระ/รับมา + ปุ่มทอนเงินแล้ว", () => {
+    render(<ChangeDuePanel total={75} received={80} changeDue={5} actionLabel="ทอนเงินแล้ว · กลับผังโต๊ะ" href="/mobile-order/tables" />)
+    const panel = screen.getByRole("status")
+    expect(panel.textContent).toContain("ต้องทอนเงินลูกค้า")
+    expect(panel.textContent).toContain("฿5.00")
+    expect(panel.textContent).toContain("฿75.00")
+    expect(panel.textContent).toContain("฿80.00")
+    expect(screen.getByRole("link", { name: "ทอนเงินแล้ว · กลับผังโต๊ะ" }).getAttribute("href")).toBe("/mobile-order/tables")
+  })
+
+  it("แผงเงินทอนแบบปุ่ม (จอขาย) เรียก onDone", () => {
+    const onDone = vi.fn()
+    render(<ChangeDuePanel total={75} received={100} changeDue={25} actionLabel="ทอนเงินแล้ว · เริ่มบิลใหม่" onDone={onDone} />)
+    fireEvent.click(screen.getByRole("button", { name: "ทอนเงินแล้ว · เริ่มบิลใหม่" }))
+    expect(onDone).toHaveBeenCalledOnce()
   })
 
   it("รับพอดี → ไม่มีเงินทอน", () => {

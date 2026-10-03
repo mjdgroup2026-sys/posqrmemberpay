@@ -51,7 +51,9 @@ function revalidatePaymentPages(storeId: string) {
 ///
 /// ทางนี้เป็น "เส้นทางมือ" ที่ต้องมีเสมอ ไม่ว่าจะต่อ payment provider หรือยัง — ร้านต้องปิดบิลได้
 /// แม้ webhook ไม่มา (เน็ตล่ม/provider ล่ม) ส่วนเส้นทางอัตโนมัติอยู่ที่ /api/payments/webhook
-export async function confirmMobilePayment(formData: FormData): Promise<ActionResult<{ saleNumber: string }>> {
+export async function confirmMobilePayment(
+  formData: FormData,
+): Promise<ActionResult<{ saleId: string; saleNumber: string; total: number; changeDue: number }>> {
   let ctx: StoreContext
   try {
     ctx = await requireStoreAccess(["MO_TABLES", "EDIT"])
@@ -92,7 +94,8 @@ export async function confirmMobilePayment(formData: FormData): Promise<ActionRe
     message: result.alreadyClosed
       ? `โต๊ะนี้ปิดบิลไปแล้วด้วยบิล ${result.saleNumber}`
       : `ปิดบิล ${result.saleNumber} เรียบร้อยแล้ว — ยอดสุทธิ ${result.total.toFixed(2)} บาท`,
-    data: { saleNumber: result.saleNumber },
+    // เงินทอนจากยอดที่ server คิดจริง — หน้าปิดบิลโชว์ค้างไว้ให้พนักงานทอนก่อนออกจากหน้า
+    data: { saleId: result.saleId, saleNumber: result.saleNumber, total: result.total, changeDue: result.changeDue },
   }
 }
 
