@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
 import { IconSpinner } from "@/components/icons"
+import { PasswordInput } from "@/components/password-input"
 
 export function ResetPasswordForm() {
   const router = useRouter()
@@ -74,11 +75,9 @@ export function ResetPasswordForm() {
         <label className="t-small" htmlFor="password">
           รหัสผ่านใหม่
         </label>
-        <input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
-          className="input"
           required
           minLength={8}
           autoComplete="new-password"
@@ -90,11 +89,9 @@ export function ResetPasswordForm() {
         <label className="t-small" htmlFor="confirmPassword">
           ยืนยันรหัสผ่านใหม่
         </label>
-        <input
+        <PasswordInput
           id="confirmPassword"
           name="confirmPassword"
-          type="password"
-          className="input"
           required
           autoComplete="new-password"
         />

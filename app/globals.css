@@ -285,6 +285,40 @@
     padding: var(--sp-3);
     resize: vertical;
   }
+  /* ช่องรหัสผ่าน + ปุ่มรูปตา (components/password-input.tsx) */
+  .password-field {
+    position: relative;
+  }
+  .password-field .input {
+    padding-right: 44px;
+  }
+  /* Edge มีปุ่มดูรหัสผ่านของตัวเอง — ซ่อนไว้ไม่ให้มีรูปตาสองอัน */
+  .password-field .input::-ms-reveal {
+    display: none;
+  }
+  .password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 32px;
+    border: 0;
+    border-radius: calc(var(--radius) * 0.5);
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+  }
+  .password-toggle:hover {
+    color: var(--ink);
+  }
+  .password-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent);
+  }
   .field-hint {
     font-size: 0.8125rem;
     color: var(--ink-3);

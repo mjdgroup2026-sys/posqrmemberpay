@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { authClient } from "@/lib/auth-client"
 import { authErrorMessage } from "@/lib/auth-errors"
 import { IconSpinner } from "@/components/icons"
+import { PasswordInput } from "@/components/password-input"
 
 export function LoginForm() {
   const router = useRouter()
@@ -94,11 +95,9 @@ export function LoginForm() {
             ลืมรหัสผ่าน?
           </Link>
         </div>
-        <input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
-          className="input"
           required
           autoComplete="current-password"
         />
