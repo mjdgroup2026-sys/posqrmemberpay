@@ -6,10 +6,10 @@ import {
   IconBrand,
   IconCalculator,
   IconKitchen,
-  IconMail,
   IconPos,
   IconQr,
   IconReports,
+  IconSupport,
   IconTable,
   IconTherapist,
   IconUsers,
@@ -144,10 +144,11 @@ export default function WelcomePage() {
             <Link href="/register" className="btn btn-primary btn-lg">
               เริ่มทดลองใช้ฟรี
             </Link>
-            <a href={`mailto:${CONTACT_EMAIL}`} className="btn btn-ghost btn-lg">
-              <IconMail size={17} aria-hidden />
+            {/* ไปหน้าติดต่อเรา (2026-10-05) — มีทั้งเบอร์โทรและอีเมล ไม่ใช่เปิดโปรแกรมอีเมลอย่างเดียว */}
+            <Link href="/contact" className="btn btn-ghost btn-lg">
+              <IconSupport size={17} aria-hidden />
               ติดต่อทีมงาน
-            </a>
+            </Link>
           </div>
         </div>
       </section>
