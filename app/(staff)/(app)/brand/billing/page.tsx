@@ -1,10 +1,9 @@
-import QRCode from "qrcode"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getSession } from "@/lib/session"
 import { getBrandOverview } from "@/lib/brand-queries"
 import { listActivePlans } from "@/lib/plan-queries"
-import { buildPromptPayPayload } from "@/lib/promptpay"
+import { getPlatformPromptPay, platformPromptPayLabel, platformPromptPayQr } from "@/lib/platform-settings"
 import { BrandBillingForm } from "@/components/brand-billing-form"
 import { IconBack, IconCard } from "@/components/icons"
 
@@ -19,12 +18,10 @@ export default async function BrandBillingPage() {
   const [overview, plans] = await Promise.all([getBrandOverview(session.user.id), listActivePlans()])
   if (!overview.brand) redirect("/brand")
 
-  let pendingQr: string | null = null
-  const platformPromptPay = process.env.PLATFORM_PROMPTPAY_ID?.trim() || null
-  if (overview.pendingBatch && platformPromptPay) {
-    const payload = buildPromptPayPayload(overview.pendingBatch.amount, platformPromptPay)
-    if (payload) pendingQr = await QRCode.toDataURL(payload, { margin: 1, width: 240 })
-  }
+  // พร้อมเพย์ของแพลตฟอร์ม: ค่าที่ผู้ดูแลตั้งที่ /admin/settings → env เดิม (2026-10-05)
+  const platform = await getPlatformPromptPay()
+  const pendingQr = overview.pendingBatch ? await platformPromptPayQr(overview.pendingBatch.amount, platform) : null
+  const platformPromptPay = platformPromptPayLabel(platform)
 
   return (
     <>

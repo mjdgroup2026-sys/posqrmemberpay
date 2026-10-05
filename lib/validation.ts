@@ -331,6 +331,12 @@ export const submitSlipSchema = z.object({
   payload: z.string({ error: "ไม่พบข้อมูลจากสลิป" }).trim().min(20, "อ่าน QR บนสลิปไม่ได้ กรุณาลองใหม่").max(1000, "ข้อมูลสลิปยาวผิดปกติ"),
 })
 
+/// พร้อมเพย์ของแพลตฟอร์ม (2026-10-05 · /admin/settings) — เลขว่าง = กลับไปใช้ env · ตรวจรูปแบบจริงที่ action ด้วยตัวสร้าง QR
+export const platformPromptPaySchema = z.object({
+  promptPayId: z.string({ error: "เลขพร้อมเพย์ไม่ถูกต้อง" }).trim().max(32, "เลขพร้อมเพย์ยาวเกินไป"),
+  promptPayName: z.string({ error: "ชื่อบัญชีไม่ถูกต้อง" }).trim().max(80, "ชื่อบัญชียาวเกินไป"),
+})
+
 /// ตั้ง/ล้างส่วนลดของบิลโต๊ะ (2026-10-05) — ค่า 0 = ล้างส่วนลด · ยอดบาทจริงคิดที่ computeBillTotals() ตอนปิดบิล
 export const sessionDiscountSchema = z.object({
   sessionId: requiredId("ไม่พบบิลที่ต้องการให้ส่วนลด"),

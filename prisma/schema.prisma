@@ -308,6 +308,7 @@ model User {
   updatedAt       DateTime @updatedAt
 
   storeMemberships          StoreMember[]
+  platformSettingUpdates    PlatformSetting[]
   ownedBrands               Brand[]             @relation("BrandOwner")
   sessions                  Session[]
   accounts                  Account[]
@@ -1374,6 +1375,22 @@ enum SubscriptionPaymentMethod {
   PROMPTPAY
   /// ทดลอง / ชดเชย / backfill ร้านเดิม
   FREE
+}
+
+/// ค่าตั้งของแพลตฟอร์ม (2026-10-05) — แถวเดียวทั้งระบบ (id = "platform") ไม่มี storeId โดยตั้งใจ (ข้อมูลอ้างอิงของแพลตฟอร์มเหมือน SubscriptionPlan)
+/// · `promptPayId` = บัญชีที่ร้านโอนค่าใช้งานเข้า (เดิมอยู่ใน env PLATFORM_PROMPTPAY_ID ซึ่งยังเป็น fallback) — **คนละเรื่องกับพร้อมเพย์ของร้าน** (StorePaymentConfig)
+/// · อ่านผ่าน `getPlatformPromptPay()` ใน lib/platform-settings.ts เท่านั้น · แก้ได้เฉพาะผู้ดูแลแพลตฟอร์ม
+model PlatformSetting {
+  id            String    @id @default("platform")
+  promptPayId   String?
+  /// ชื่อบัญชีผู้รับ — โชว์ใต้ QR ให้ร้านเทียบกับชื่อในแอปธนาคารก่อนโอน
+  promptPayName String?
+  updatedById   String?
+  updatedAt     DateTime  @updatedAt
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("platform_setting")
 }
 
 /// แพ็กเกจที่ขาย — **append-only เหมือน StockTransaction**: แก้ราคา/เพดานโต๊ะ = สร้างแถว version ใหม่

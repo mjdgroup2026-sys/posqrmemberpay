@@ -120,6 +120,7 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
       therapists: await import("@/app/actions/therapists"),
       bookings: await import("@/app/actions/bookings"),
       "therapist-shifts": await import("@/app/actions/therapist-shifts"),
+      "platform-settings": await import("@/app/actions/platform-settings"),
     }
     actions = Object.assign({}, ...Object.values(actionModules)) as typeof actions
   })
@@ -608,6 +609,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     "grantCustomDays",
     "setTableLimit",
     "publishPlanVersion",
+    // พร้อมเพย์ของแพลตฟอร์ม (2026-10-05) — ไม่มีข้อมูลร้าน (เทสสิทธิ์อยู่ที่ platform-settings.test.ts)
+    "updatePlatformPromptPay",
     "retirePlan",
     // ฝั่งลูกค้า: ร้านมาจาก qrToken เสมอ — ทดสอบแยกด้านล่าง
     "submitOrder",
