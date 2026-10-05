@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ActionResult } from "@/lib/types"
 import {
   createTestMenuItem,
@@ -15,6 +15,7 @@ import {
   TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
+import { setTestUser } from "../helpers/session-mock"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
 /// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
@@ -444,6 +445,57 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
       const cleared = await db.tableSession.findUniqueOrThrow({ where: { id: sessionId } })
       expect(cleared.discountMode).toBeNull()
       expect(cleared.discountValue).toBeNull()
+    })
+
+    /// ส่วนลด = พนักงานที่มีสิทธิ์ปิดบิลเท่านั้น (เจ้าของถาม 2026-10-05 กลัวลูกค้ากดใส่เอง) — ด่านจริงคือ server ไม่ใช่การซ่อนปุ่ม
+    describe("ใครตั้งส่วนลดได้", () => {
+      afterEach(() => setTestUser("test-user"))
+
+      async function staffWith(actions: string[]) {
+        const db = testPrisma()
+        await ensureTestUser("staff-discount", "พนักงานทดสอบ", { role: "STAFF" })
+        const role = await db.role.create({
+          data: {
+            storeId: TEST_STORE_ID,
+            name: `ทดสอบส่วนลด ${actions.join("-")}`,
+            permissions: { create: [{ resource: "MO_TABLES", actions: actions as never }] },
+          },
+          select: { id: true },
+        })
+        await db.storeMember.update({
+          where: { userId_storeId: { userId: "staff-discount", storeId: TEST_STORE_ID } },
+          data: { roleId: role.id },
+        })
+        setTestUser("staff-discount")
+      }
+
+      async function discountOf(sessionId: string) {
+        return (await testPrisma().tableSession.findUniqueOrThrow({ where: { id: sessionId } })).discountMode
+      }
+
+      it("ไม่ได้ล็อกอิน (ลูกค้า/คนนอกยิงคำสั่งตรง) → ถูกปฏิเสธ บิลไม่มีส่วนลด", async () => {
+        const { sessionId } = await seedTableWithOrder()
+        setTestUser(null)
+        const result = await setDiscount({ sessionId, discountMode: "PERCENT", discountValue: "100" })
+        expect(result.ok).toBe(false)
+        expect(await discountOf(sessionId)).toBeNull()
+      })
+
+      it("พนักงานที่ดูโต๊ะได้อย่างเดียว (MO_TABLES:VIEW) → ถูกปฏิเสธ", async () => {
+        const { sessionId } = await seedTableWithOrder()
+        await staffWith(["VIEW"])
+        const result = await setDiscount({ sessionId, discountMode: "AMOUNT", discountValue: "50" })
+        expect(result.ok).toBe(false)
+        expect(await discountOf(sessionId)).toBeNull()
+      })
+
+      it("พนักงานที่มีสิทธิ์ปิดบิล (MO_TABLES:EDIT) → ตั้งได้", async () => {
+        const { sessionId } = await seedTableWithOrder()
+        await staffWith(["VIEW", "EDIT"])
+        const result = await setDiscount({ sessionId, discountMode: "AMOUNT", discountValue: "50" })
+        expect(result.ok).toBe(true)
+        expect(await discountOf(sessionId)).toBe("AMOUNT")
+      })
     })
 
     it("ตั้งส่วนลดให้บิลที่ปิดแล้วไม่ได้", async () => {
