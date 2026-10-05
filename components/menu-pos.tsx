@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { buildStorePromptPayQr, createStaffTableOrder, createTakeawaySale, type StorePromptPayQr } from "@/app/actions/staff-order"
@@ -111,6 +111,8 @@ export function MenuPos({
   const [payOpen, setPayOpen] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodValue>("CASH")
   const [receivedText, setReceivedText] = useState("")
+  /// ช่อง "รับเงินมา" — เปิดหน้าต่างรับเงินแล้ว cursor อยู่ที่นี่เลย พิมพ์จำนวนเงินได้ทันที (เจ้าของขอ 2026-10-05)
+  const receivedRef = useRef<HTMLInputElement>(null)
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
   /// QR พร้อมเพย์ของร้านตามยอดในตะกร้า — ขอจาก server ตอนเลือก "สแกน QR" (ยอดเปลี่ยน = QR เปลี่ยน)
   const [qr, setQr] = useState<StorePromptPayQr | null>(null)
@@ -791,7 +793,8 @@ export function MenuPos({
       </section>
 
       <Dialog open={payOpen} onOpenChange={(open) => (pending ? null : setPayOpen(open))}>
-        <DialogContent className="sm:max-w-3xl">
+        {/* โฟกัสช่องรับเงินถ้าเป็นเงินสด (ค่าเริ่มต้น) · วิธีอื่นใช้พฤติกรรมเดิมของ dialog */}
+        <DialogContent className="sm:max-w-3xl" initialFocus={() => receivedRef.current ?? true}>
           <DialogHeader>
             <DialogTitle>{onlyProducts ? "รับเงิน — ขายสินค้า" : "รับเงิน — อาหารกลับบ้าน"}</DialogTitle>
             <DialogDescription>
@@ -881,6 +884,9 @@ export function MenuPos({
                   </label>
                   <input
                     id="posReceived"
+                    ref={receivedRef}
+                    // สลับกลับมาเงินสดระหว่างเปิดหน้าต่าง → ช่องนี้ mount ใหม่ ให้ cursor มาอยู่ที่นี่ด้วย
+                    autoFocus
                     className="input num"
                     inputMode="decimal"
                     value={receivedText}
