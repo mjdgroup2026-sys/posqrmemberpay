@@ -1,5 +1,4 @@
 import type { Metadata } from "next"
-import { CopyTextButton } from "@/components/copy-text-button"
 import { IconMail, IconPhoneCall, IconSupport } from "@/components/icons"
 import { CONTACT_EMAIL, CONTACT_PHONE, CONTACT_PHONE_TEL } from "@/lib/guide-content"
 
@@ -38,7 +37,6 @@ export default function ContactPage() {
               <a href={`tel:${CONTACT_PHONE_TEL}`} className="btn btn-primary">
                 <IconPhoneCall size={16} aria-hidden /> โทรเลย
               </a>
-              <CopyTextButton text={CONTACT_PHONE} label="เบอร์โทร" />
             </div>
           </article>
 
@@ -54,7 +52,6 @@ export default function ContactPage() {
               <a href={`mailto:${CONTACT_EMAIL}`} className="btn btn-primary">
                 <IconMail size={16} aria-hidden /> ส่งอีเมล
               </a>
-              <CopyTextButton text={CONTACT_EMAIL} label="อีเมล" />
             </div>
           </article>
         </div>

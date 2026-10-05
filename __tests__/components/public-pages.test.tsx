@@ -74,9 +74,12 @@ describe("หน้าติดต่อทีมงาน", () => {
     expect(container.textContent ?? "").not.toMatch(PRICE)
   })
 
-  it("หัวหน้าสาธารณะมีลิงก์ติดต่อเรา", () => {
+  it("หัวหน้าสาธารณะมีลิงก์ติดต่อเรา · footer มีแค่อีเมล ไม่มีเบอร์โทร", () => {
     const { container } = render(<PublicLayout>หน้า</PublicLayout>)
-    expect([...container.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/contact")).toBe(true)
+    const hrefs = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href"))
+    expect(hrefs).toContain("/contact")
+    expect(hrefs).toContain("mailto:mjdgroup2026@gmail.com")
+    expect(hrefs.some((h) => h?.startsWith("tel:"))).toBe(false)
   })
 })
 
@@ -92,5 +95,14 @@ describe("ปุ่มติดต่อทีมงานไปหน้า /co
     const { getAllByRole } = render(<GuidePage />)
     const links = getAllByRole("link").filter((a) => a.textContent === "ติดต่อทีมงาน")
     expect(links.map((a) => a.getAttribute("href"))).toContain("/contact")
+  })
+})
+
+/// เจ้าของสั่งเอาปุ่มคัดลอกออก (2026-10-05) — เหลือแค่โทรเลย / ส่งอีเมล
+describe("หน้าติดต่อทีมงานไม่มีปุ่มคัดลอก", () => {
+  it("มีแค่ปุ่มโทรเลยกับส่งอีเมล", () => {
+    const { container, queryByText } = render(<ContactPage />)
+    expect(queryByText("คัดลอก")).toBeNull()
+    expect(container.querySelectorAll("button")).toHaveLength(0)
   })
 })

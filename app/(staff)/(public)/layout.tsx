@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { Copyright } from "@/components/copyright"
-import { IconMail, IconPhoneCall } from "@/components/icons"
-import { CONTACT_EMAIL, CONTACT_PHONE, CONTACT_PHONE_TEL } from "@/lib/guide-content"
+import { IconMail } from "@/components/icons"
+import { CONTACT_EMAIL } from "@/lib/guide-content"
 
 /// หน้าสาธารณะ (2026-10-02) — /welcome (แนะนำระบบ) เปิดได้โดยไม่ต้องล็อกอิน
 /// · /guide (คู่มือ) ใช้ layout นี้ด้วยแต่ต้องล็อกอินก่อน (2026-10-05 · proxy.ts) — ห้ามใส่ลิงก์คู่มือในหัว/ท้ายของกลุ่มนี้
@@ -35,16 +35,11 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       <footer className="pub-footer">
         <div className="pub-wrap pub-footer-row">
           <Copyright />
-          <span className="row" style={{ gap: 14, flexWrap: "wrap" }}>
-            <a href={`tel:${CONTACT_PHONE_TEL}`} className="pub-contact">
-              <IconPhoneCall size={15} aria-hidden />
-              {CONTACT_PHONE}
-            </a>
-            <a href={`mailto:${CONTACT_EMAIL}`} className="pub-contact">
-              <IconMail size={15} aria-hidden />
-              {CONTACT_EMAIL}
-            </a>
-          </span>
+          {/* footer มีแค่อีเมล (เจ้าของสั่ง 2026-10-05) — เบอร์โทรอยู่ที่หน้า /contact */}
+          <a href={`mailto:${CONTACT_EMAIL}`} className="pub-contact">
+            <IconMail size={15} aria-hidden />
+            {CONTACT_EMAIL}
+          </a>
         </div>
       </footer>
     </div>
