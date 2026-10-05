@@ -67,9 +67,6 @@ export default function WelcomePage() {
               <Link href="/register" className="btn btn-primary btn-lg">
                 เริ่มทดลองใช้ฟรี 7 วัน
               </Link>
-              <Link href="/guide" className="btn btn-ghost btn-lg">
-                ดูคู่มือการใช้งาน
-              </Link>
             </div>
             <p className="t-small" style={{ marginTop: 12 }}>
               มีบัญชีแล้ว? <Link href="/login">เข้าสู่ระบบ</Link>

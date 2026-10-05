@@ -32,7 +32,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
         <div className="card-ui card-pad">{children}</div>
         <p className="t-small" style={{ textAlign: "center", marginTop: 14 }}>
-          <Link href="/welcome">รู้จัก MJD Mobile Order</Link> · <Link href="/guide">คู่มือการใช้งาน</Link>
+          <Link href="/welcome">รู้จัก MJD Mobile Order</Link>
         </p>
         <Copyright className="auth-copyright" />
       </div>
