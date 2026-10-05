@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest"
 import { render } from "@testing-library/react"
 import WelcomePage from "@/app/(staff)/(public)/welcome/page"
 import GuidePage from "@/app/(staff)/(public)/guide/page"
+import PublicLayout from "@/app/(staff)/(public)/layout"
+import AuthLayout from "@/app/(staff)/(auth)/layout"
 import { CONTACT_EMAIL, GUIDE_GROUPS } from "@/lib/guide-content"
 
 /// หน้าสาธารณะ /welcome และ /guide (2026-10-02) — เจ้าของสั่งว่า "เรื่องแพ็กเกจไม่ต้องแสดงราคา"
@@ -35,5 +37,26 @@ describe("หน้าสาธารณะไม่โชว์ราคาแ�
       expect(image.getAttribute("alt")).toBeTruthy()
       expect(image.getAttribute("src")).toMatch(/^\/guide-img\/[a-z-]+\.webp$/)
     }
+  })
+})
+
+/// คู่มือยังไม่เปิดให้คนนอกเห็น (เจ้าของสั่ง 2026-10-05) — หน้าที่คนไม่ล็อกอินเห็นต้องไม่มีลิงก์ไป /guide
+describe("หน้าที่คนนอกเห็นไม่มีลิงก์คู่มือ", () => {
+  function guideLinks(container: HTMLElement) {
+    return [...container.querySelectorAll("a")].filter((a) => (a.getAttribute("href") ?? "").startsWith("/guide"))
+  }
+
+  it("หน้าแนะนำระบบ + หัว/ท้ายของหน้าสาธารณะ", () => {
+    const { container } = render(
+      <PublicLayout>
+        <WelcomePage />
+      </PublicLayout>,
+    )
+    expect(guideLinks(container)).toHaveLength(0)
+  })
+
+  it("กรอบหน้าล็อกอิน/สมัคร", () => {
+    const { container } = render(<AuthLayout>หน้า</AuthLayout>)
+    expect(guideLinks(container)).toHaveLength(0)
   })
 })

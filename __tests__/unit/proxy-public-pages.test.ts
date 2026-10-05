@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import { NextRequest } from "next/server"
 import proxy from "@/proxy"
 
-/// หน้าแนะนำระบบ/คู่มือ (2026-10-02) — คนที่ยังไม่ล็อกอินต้องเปิดได้ และหน้าแรกของคนนอกคือ /welcome
+/// หน้าแนะนำระบบ (2026-10-02) — คนที่ยังไม่ล็อกอินต้องเปิดได้ และหน้าแรกของคนนอกคือ /welcome
+/// · คู่มือ /guide เปิดได้เฉพาะคนที่ล็อกอิน (2026-10-05 เจ้าของสั่ง "ยังไม่อยากให้เห็น")
 
 function call(path: string, withSession = false) {
   const headers = new Headers()
@@ -17,9 +18,14 @@ describe("proxy: หน้าสาธารณะ", () => {
     expect(new URL(res.headers.get("location") ?? "").pathname).toBe("/welcome")
   })
 
-  it("ยังไม่ล็อกอิน เปิด /welcome และ /guide ได้", () => {
+  it("ยังไม่ล็อกอิน เปิด /welcome ได้", () => {
     expect(call("/welcome").headers.get("location")).toBeNull()
-    expect(call("/guide").headers.get("location")).toBeNull()
+  })
+
+  it("ยังไม่ล็อกอิน เปิด /guide → เด้งไป /login แล้วกลับมาคู่มือหลังล็อกอิน", () => {
+    const location = new URL(call("/guide").headers.get("location") ?? "")
+    expect(location.pathname).toBe("/login")
+    expect(location.searchParams.get("callbackUrl")).toBe("/guide")
   })
 
   it("ล็อกอินอยู่ เข้า / ได้แดชบอร์ดตามเดิม และยังเปิดคู่มือได้", () => {

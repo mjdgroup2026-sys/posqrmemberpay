@@ -3,7 +3,8 @@ import { Copyright } from "@/components/copyright"
 import { IconMail } from "@/components/icons"
 import { CONTACT_EMAIL } from "@/lib/guide-content"
 
-/// หน้าสาธารณะ (2026-10-02) — /welcome (แนะนำระบบ) และ /guide (คู่มือ) เปิดได้โดยไม่ต้องล็อกอิน
+/// หน้าสาธารณะ (2026-10-02) — /welcome (แนะนำระบบ) เปิดได้โดยไม่ต้องล็อกอิน
+/// · /guide (คู่มือ) ใช้ layout นี้ด้วยแต่ต้องล็อกอินก่อน (2026-10-05 · proxy.ts) — ห้ามใส่ลิงก์คู่มือในหัว/ท้ายของกลุ่มนี้
 /// ใช้ root layout ของ (staff) ร่วมกัน (ฟอนต์/ธีมเดียวกับหลังร้าน) ไม่สร้าง root layout ที่สาม
 /// ⚠️ ห้ามโชว์ราคาแพ็กเกจในกลุ่มนี้ — ดู lib/guide-content.ts
 export default function PublicLayout({ children }: { children: React.ReactNode }) {
@@ -18,7 +19,6 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
             <span>Mobile Order</span>
           </Link>
           <nav className="pub-nav">
-            <Link href="/guide">คู่มือ</Link>
             <Link href="/login" className="btn btn-ghost btn-sm">
               เข้าสู่ระบบ
             </Link>

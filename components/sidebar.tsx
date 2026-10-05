@@ -227,7 +227,7 @@ export function Sidebar({
         ))}
       </nav>
 
-      {/* คู่มือเป็นหน้าสาธารณะ (/guide) — เปิดแท็บใหม่ จะได้ไม่ทิ้งงานที่ทำค้างอยู่ */}
+      {/* คู่มือ (/guide) เปิดได้เฉพาะคนที่ล็อกอิน (2026-10-05) — ลิงก์มีแค่ที่นี่กับเมนูผู้ใช้ · เปิดแท็บใหม่ จะได้ไม่ทิ้งงานที่ทำค้างอยู่ */}
       <a href="/guide" target="_blank" rel="noopener" className="nav-item" style={{ marginTop: 14 }}>
         <IconHelp size={18} aria-hidden />
         <span>คู่มือการใช้งาน</span>
