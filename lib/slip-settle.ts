@@ -1,6 +1,6 @@
 import "server-only"
 import { forStore } from "@/lib/db"
-import { closeSessionWithPayment, computeBillTotals } from "@/lib/close-session"
+import { closeSessionWithPayment, computeBillTotals, SESSION_DISCOUNT_SELECT } from "@/lib/close-session"
 import { toNumber } from "@/lib/format"
 import { getStorePaymentProfile } from "@/lib/payment-methods"
 import { slipMaxAgeMinutes, verifySlip, type VerifiedSlip } from "@/lib/slip-provider"
@@ -94,13 +94,14 @@ export async function verifySlipAndSettle(input: { storeId: string; sessionId: s
     where: { id: sessionId },
     select: {
       status: true,
+      ...SESSION_DISCOUNT_SELECT,
       orders: { select: { items: { where: { status: { not: "CANCELLED" } }, select: { quantity: true, unitPrice: true } } } },
     },
   })
   if (!session) return { ok: false, code: "CLOSE_FAILED", reason: "ไม่พบโต๊ะที่ต้องการชำระ กรุณาแจ้งพนักงาน" }
   const settings = await db.storeSettings.findUnique({ where: { storeId }, select: { serviceChargePercent: true } })
   const lines = session.orders.flatMap((o) => o.items.map((i) => ({ quantity: i.quantity, unitPrice: toNumber(i.unitPrice) })))
-  const totals = computeBillTotals(lines, toNumber(settings?.serviceChargePercent ?? 0))
+  const totals = computeBillTotals(lines, toNumber(settings?.serviceChargePercent ?? 0), session)
 
   if (slip.amount + 0.005 < totals.total) {
     log("ยอดในสลิปน้อยกว่าบิล — ส่งให้พนักงาน", { transRef: slip.transRef, slipAmount: slip.amount, billTotal: totals.total })

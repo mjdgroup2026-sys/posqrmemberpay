@@ -11,6 +11,8 @@ import { usePaymentPoll } from "@/components/customer/payment-poll"
 
 export type PayBill = {
   itemsTotal: number
+  /// ส่วนลดที่พนักงานให้ (2026-10-05) — ไม่ส่ง = 0
+  discount?: number
   servicePercent: number
   serviceCharge: number
   total: number
@@ -68,6 +70,12 @@ export function PayView({
           <span className="t-small">ค่าอาหาร</span>
           <span className="num">฿{formatBaht(bill.itemsTotal)}</span>
         </div>
+        {bill.discount && bill.discount > 0 ? (
+          <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
+            <span className="t-small">ส่วนลด</span>
+            <span className="num">−฿{formatBaht(bill.discount)}</span>
+          </div>
+        ) : null}
         {bill.serviceCharge > 0 ? (
           <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
             <span className="t-small">ค่าบริการ {bill.servicePercent}%</span>

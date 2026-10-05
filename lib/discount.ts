@@ -2,7 +2,7 @@
 ///
 /// ใช้ทั้งฝั่งจอ (โชว์ยอดสุทธิ/QR) และ server (`createTakeawaySale`) — สูตรเดียวกันตัวเลขบนจอกับในบิลจึงตรงกัน
 /// · server คิดใหม่จากยอดที่คำนวณสดเสมอ ไม่เชื่อยอดส่วนลดที่ client ส่งมา
-/// · ยังไม่มีส่วนลดของบิลโต๊ะ (ต้องเก็บกับ TableSession ให้ทุกเส้นทางปิดบิลเห็นตรงกัน — งานแยก)
+/// · บิลโต๊ะใช้ส่วนลดที่เก็บกับ TableSession แทน (2026-10-05 · `setSessionDiscount` + `computeBillTotals()`) — resolveDiscount ใช้ตรวจค่าตอนตั้ง
 export type DiscountMode = "AMOUNT" | "PERCENT"
 
 export type DiscountResult = { ok: true; amount: number } | { ok: false; error: string }

@@ -9,6 +9,7 @@ vi.mock("@/app/actions/payments", () => ({
   confirmMobilePayment: vi.fn(),
   getStaffBillStatus: vi.fn(),
   prepareStaffPromptPay: vi.fn(),
+  setSessionDiscount: vi.fn(),
 }))
 
 const { BillingForm } = await import("@/components/billing-form")
@@ -29,6 +30,10 @@ const bill: BillingView = {
   storeName: "ร้านทดสอบ",
   lines: [{ id: "l1", name: "ผัดไทย", quantity: 1, unitPrice: 75, subtotal: 75, options: [] }],
   itemsTotal: 75,
+  discount: 0,
+  discountMode: null,
+  discountValue: null,
+  discountNote: null,
   servicePercent: 0,
   serviceCharge: 0,
   total: 75,
@@ -75,6 +80,39 @@ describe("หน้าปิดบิลโต๊ะ — เงินทอน",
     payCash("75")
     expect(screen.queryByRole("status")).toBeNull()
     expect(screen.getByText("รับพอดี ไม่มีเงินทอน")).toBeTruthy()
+  })
+})
+
+/// ส่วนลดบิลโต๊ะ (2026-10-05) — ส่วนลดที่บันทึกแล้วต้องเห็นทั้งในใบเสร็จและกรอบยอด
+describe("หน้าปิดบิลโต๊ะ — ส่วนลด", () => {
+  const discounted: BillingView = {
+    ...bill,
+    lines: [{ id: "l1", name: "ผัดไทย", quantity: 2, unitPrice: 50, subtotal: 100, options: [] }],
+    itemsTotal: 100,
+    discount: 10,
+    discountMode: "PERCENT",
+    discountValue: 10,
+    discountNote: "ลูกค้าประจำ",
+    servicePercent: 10,
+    serviceCharge: 9,
+    total: 99,
+  }
+
+  it("กรอบยอดเป็นยอดสุทธิ พร้อมส่วนลดติดลบและค่าบริการหลังหัก", () => {
+    render(<BillingForm bill={discounted} />)
+    const hero = screen.getByLabelText("ยอดสุทธิที่ต้องชำระ 99.00 บาท")
+    expect(hero.textContent).toContain("ค่าอาหาร฿100.00")
+    expect(hero.textContent).toContain("ส่วนลด 10%−฿10.00")
+    expect(hero.textContent).toContain("ค่าบริการ 10%฿9.00")
+    expect(screen.getByRole("button", { name: "ล้างส่วนลด" })).toBeTruthy()
+  })
+
+  it("ไม่มีส่วนลด → ปุ่ม 'ให้ส่วนลด' เปิดช่องกรอก · บาทเกินค่าอาหารกดใช้ไม่ได้", () => {
+    render(<BillingForm bill={bill} />)
+    fireEvent.click(screen.getByRole("button", { name: "ให้ส่วนลด" }))
+    fireEvent.change(screen.getByLabelText("ส่วนลด (หักจากค่าอาหารก่อนคิดค่าบริการ)"), { target: { value: "80" } })
+    expect(screen.getByText("ส่วนลดต้องไม่เกินยอดรวม")).toBeTruthy()
+    expect((screen.getByRole("button", { name: "ใช้ส่วนลด" }) as HTMLButtonElement).disabled).toBe(true)
   })
 })
 

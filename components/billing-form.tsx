@@ -12,6 +12,7 @@ import { PAYMENT_METHOD_LABEL, type FieldErrors, type PaymentMethodValue } from 
 import type { BillingView } from "@/lib/queries"
 import { IconBack, IconReceipt, IconSpinner } from "@/components/icons"
 import { AmountDueHero } from "@/components/amount-due-hero"
+import { BillDiscountField, discountLabel } from "@/components/bill-discount-field"
 
 /// วิธีชำระเงินที่หน้าปิดบิลของ MJD Mobile Order รับได้ — PROMPTPAY/CARD คือหลัก
 /// ส่วน CASH/TRANSFER เผื่อลูกค้าเปลี่ยนใจมาจ่ายที่เคาน์เตอร์ (บิลยังเป็น channel = MOBILE_ORDER เหมือนกัน)
@@ -191,6 +192,15 @@ export function BillingForm({ bill }: { bill: BillingView }) {
               <span className="t-small">ค่าอาหาร</span>
               <span className="num">฿{formatBaht(bill.itemsTotal)}</span>
             </span>
+            {bill.discount > 0 ? (
+              <span className="row" style={{ justifyContent: "space-between" }}>
+                <span className="t-small">
+                  {discountLabel(bill.discountMode, bill.discountValue)}
+                  {bill.discountNote ? ` (${bill.discountNote})` : ""}
+                </span>
+                <span className="num">−฿{formatBaht(bill.discount)}</span>
+              </span>
+            ) : null}
             {bill.serviceCharge > 0 ? (
               <span className="row" style={{ justifyContent: "space-between" }}>
                 <span className="t-small">ค่าบริการ {bill.servicePercent}%</span>
@@ -221,15 +231,32 @@ export function BillingForm({ bill }: { bill: BillingView }) {
           <div style={{ marginBottom: 16 }}>
             <AmountDueHero
               amount={bill.total}
+              label={bill.discount > 0 ? "ยอดสุทธิที่ต้องชำระ" : undefined}
               lines={
-                bill.serviceCharge > 0
+                bill.serviceCharge > 0 || bill.discount > 0
                   ? [
                       { label: "ค่าอาหาร", amount: bill.itemsTotal },
-                      { label: `ค่าบริการ ${bill.servicePercent}%`, amount: bill.serviceCharge },
+                      ...(bill.discount > 0
+                        ? [{ label: discountLabel(bill.discountMode, bill.discountValue), amount: bill.discount, negative: true }]
+                        : []),
+                      ...(bill.serviceCharge > 0 ? [{ label: `ค่าบริการ ${bill.servicePercent}%`, amount: bill.serviceCharge }] : []),
                     ]
                   : []
               }
               caption={`โต๊ะ ${bill.tableCode}${bill.customerLabel ? ` · ${bill.customerLabel}` : ""} · ${formatNumber(bill.lines.length)} รายการ`}
+            />
+          </div>
+
+          {/* ส่วนลดบันทึกลงบิลก่อน (2026-10-05) — ยอดในกรอบด้านบน/QR/ปิดบิลคิดจากค่าที่บันทึกแล้วเท่านั้น */}
+          <div style={{ marginBottom: 16 }}>
+            <BillDiscountField
+              key={`${bill.discountMode}-${bill.discountValue}-${bill.discountNote}`}
+              sessionId={bill.sessionId}
+              itemsTotal={bill.itemsTotal}
+              discount={bill.discount}
+              discountMode={bill.discountMode}
+              discountValue={bill.discountValue}
+              discountNote={bill.discountNote}
             />
           </div>
 
