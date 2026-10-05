@@ -119,7 +119,7 @@ export function BrandBillingForm({ stores, plans, pendingBatch, batches, pending
               <img src={pendingQr} alt="QR พร้อมเพย์สำหรับชำระค่าใช้งานรวม" width={240} height={240} style={{ borderRadius: 12, border: "1px solid var(--line)" }} />
             ) : (
               <div className="alert-banner warning" style={{ maxWidth: 260 }}>
-                ยังไม่ได้ตั้งพร้อมเพย์ของแพลตฟอร์ม (PLATFORM_PROMPTPAY_ID) — ติดต่อผู้ดูแลเพื่อรับช่องทางโอน
+                ระบบยังไม่ได้ตั้งช่องทางโอนค่าใช้งาน — กรุณาติดต่อทีมงานเพื่อรับเลขบัญชี
               </div>
             )}
           </div>

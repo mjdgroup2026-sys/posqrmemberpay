@@ -116,6 +116,7 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
     items: [
       { href: "/admin/stores", label: "ร้านค้าทั้งหมด", Icon: IconShield, platformAdmin: true },
       { href: "/admin/plans", label: "แพ็กเกจค่าใช้งาน", Icon: IconCard, platformAdmin: true },
+      { href: "/admin/settings", label: "ตั้งค่าแพลตฟอร์ม", Icon: IconSettings, platformAdmin: true },
     ],
   },
 ]

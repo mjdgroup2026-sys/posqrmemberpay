@@ -43,7 +43,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
 | `MAIL_REPLY_TO` | ไม่บังคับ |
 | `SLIP_PROVIDER` / `SLIP_API_KEY` / `SLIP_API_BRANCH_ID` / `SLIP_MAX_AGE_MINUTES` | ตรวจสลิปอัตโนมัติ (Phase 15b โหมด ก+) — `mock` (dev/เทสเท่านั้น **ห้ามบน production**) · `easyslip` · `slipok` (+ branch id) · ไม่ตั้ง = ร้านเลือกโหมด `PROMPTPAY_SLIP` ไม่ได้ ระบบเหมือนเดิม · key เป็นของแพลตฟอร์ม โควตารวมทุกร้าน |
 | `PAYMENT_CONFIG_KEY` | (Phase 15c) กุญแจ AES-256-GCM เข้ารหัส credential SCB ที่ร้านกรอกเอง — 32 ไบต์ base64url · ไม่ตั้ง = ร้านผูก SCB เองไม่ได้ (fail closed) แต่ร้าน `default` ยังใช้ `SCB_*` env เป็น fallback · **เปลี่ยนกุญแจ = credential ทุกร้านถอดไม่ออก** ห้าม rotate โดยไม่มีแผน |
-| `PLATFORM_PROMPTPAY_ID` | พร้อมเพย์ของ "แพลตฟอร์ม" ที่ร้านโอนค่าใช้งานเข้า (Phase 14b) — **คนละเรื่องกับเลขพร้อมเพย์รับเงินลูกค้าของร้าน ซึ่งตั้งแต่ Phase 15a อยู่ในฐานข้อมูล (`StorePaymentConfig`) ไม่ใช่ env** (env `PROMPTPAY_ID` เดิมถอดออกแล้ว) · เว้นว่าง = หน้า `/billing` ไม่มี QR ให้สแกน |
+| `PLATFORM_PROMPTPAY_ID` | **(2026-10-05) เป็นแค่ fallback แล้ว — ผู้ดูแลตั้งเลข+ชื่อบัญชีที่ `/admin/settings` (ตาราง `platform_setting` · อ่านผ่าน `getPlatformPromptPay()` ใน `lib/platform-settings.ts` เท่านั้น · ค่าในฐานชนะ env)** · พร้อมเพย์ของ "แพลตฟอร์ม" ที่ร้านโอนค่าใช้งานเข้า (Phase 14b) — **คนละเรื่องกับเลขพร้อมเพย์รับเงินลูกค้าของร้าน ซึ่งตั้งแต่ Phase 15a อยู่ในฐานข้อมูล (`StorePaymentConfig`) ไม่ใช่ env** (env `PROMPTPAY_ID` เดิมถอดออกแล้ว) · เว้นว่าง = หน้า `/billing` ไม่มี QR ให้สแกน |
 | `CRON_SECRET` | secret ใน path `GET /api/cron/plan-expiry/<secret>` ที่ `ops/plan-expiry-cron.sh` ยิงวันละครั้ง (09:10) ส่งอีเมลเตือน 7/3/1 วัน · ≥ 16 ตัว · เว้นว่าง = 401 (แบนเนอร์ในแอปยังขึ้น) |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | origin เพิ่มเติมที่ยอมให้ล็อกอิน/ออกจากระบบ (คั่น comma · `lib/auth-origins.ts`) — production ไม่ตั้ง = เฉพาะ `BETTER_AUTH_URL` (ค่าที่ควรเป็น) · dev ยอม `localhost`/`127.0.0.1` พอร์ตเดียวกันให้เอง · IP ในวง LAN ต้องใส่เอง |
 | `SIGNUP_OPEN` | `true` = ใครก็สมัครได้ (Phase 14a) · ไม่ตั้ง = allowlist `SIGNUP_ALLOWED_*` เดิม / ปิดสมัคร (fail closed) — **production ต้องตั้งเป็น `true` ตอน deploy 14a** · 🔥 **env ใหม่ทุกตัวต้องประกาศใน `environment:` ของ `docker-compose.prod.yml` ด้วย** ตั้งใน `.env` บน VPS อย่างเดียวไม่ถึงคอนเทนเนอร์ (compose ไม่ใช้ `env_file`) |
@@ -83,7 +83,7 @@ POS หน้าร้าน (retail, `Sale.channel = RETAIL_POS`) กับ **M
    `/api/brand-assets/<id>` เหตุผลเดียวกัน — ตาราง `brand_asset` ผูก `ownerId` ไม่มี storeId · สาขาที่ไม่ตั้งโลโก้เองใช้โลโก้แบรนด์ผ่าน
    `getStoreSettings().displayLogoUrl`), `lib/admin-queries.ts` (ชั้นอ่านของผู้ดูแลแพลตฟอร์ม
    ต้องผ่าน `requirePlatformAdmin()` ก่อนเสมอ อ่านอย่างเดียว), `lib/plan-queries.ts` (แพ็กเกจ = ข้อมูลอ้างอิงของ
-   แพลตฟอร์ม ไม่มี storeId) และ `lib/brand-queries.ts` + `app/actions/brand.ts` (Phase 14c — ขอบเขต tenant คือ
+   แพลตฟอร์ม ไม่มี storeId · `lib/platform-settings.ts` + `app/actions/platform-settings.ts` ค่าตั้งของแพลตฟอร์มก็เหตุผลเดียวกัน 2026-10-05) และ `lib/brand-queries.ts` + `app/actions/brand.ts` (Phase 14c — ขอบเขต tenant คือ
    `brand.ownerId = userId` ทุกฟังก์ชันรับ userId แล้วกรองเงื่อนไขนี้ ไม่รับ brandId จากผู้ใช้) — ที่อื่นห้าม
    · `TrialClaim` ตั้งใจไม่ scoped (กันใช้สิทธิ์ทดลองซ้ำข้ามร้าน) — และ**ไม่ถูกลบตอนลบร้าน** (ไม่มี FK) จึงเอาเลขพร้อมเพย์เดิมไปรับสิทธิ์ทดลองซ้ำไม่ได้
    · **(2026-09-30) ปิด/เปิด/ลบร้านอยู่ที่ `lib/store-lifecycle.ts` ที่เดียว** — `status = CLOSED` = เจ้าของปิดเอง (เข้าไม่ได้เหมือน SUSPENDED แต่เปิดกลับเองได้ที่ `/no-store`) ·

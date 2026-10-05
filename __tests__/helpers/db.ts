@@ -111,6 +111,8 @@ export async function resetDb(): Promise<void> {
       '"subscription_batch", "brand", "brand_asset",',
       // บัญชีรับเงินของร้าน (Phase 15a) · รูปที่ร้านอัปโหลดเอง (Phase 17a)
       '"store_payment_config", "store_asset",',
+      // ค่าตั้งของแพลตฟอร์ม (2026-10-05) — แถวเดียว อ้าง user
+      '"platform_setting",',
       // ร้านและสมาชิก (Phase 13) — ล้างท้ายสุดเพราะทุกตารางข้างบนอ้างมาที่นี่
       '"store_member", "store"',
       "RESTART IDENTITY CASCADE",
