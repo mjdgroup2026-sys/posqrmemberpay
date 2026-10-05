@@ -660,7 +660,7 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 ขายอาหาร/QR (แกน) · ร้านนวด/สปา · คลังสินค้า+ขายสินค้า · สมาชิกสะสมแต้ม · รายงาน · ผู้ดูแลตั้งรายร้าน ไม่ผูกราคา (ตัดสินใจ 2026-09-30 — ต่อยอดผูกแพ็กเกจทีหลังได้โดยไม่แก้ด่าน) ·
 ดูกติกาข้อ 13 · เทส `store-modules.test.ts` 6
 
-**⏳ ส่วนลดบิลโต๊ะ (2026-10-05 · branch `feat/table-bill-discount` · migration `20261005090000_table_session_discount` additive + CHECK · ไม่มี env)**: `TableSession.discountMode/discountValue/discountNote`
+**✅ ส่วนลดบิลโต๊ะ — ขึ้น production แล้ว 2026-10-05 13:40 (PR #65 · CI run 37272904941 · backup `posmobileorderdb-20261005-112543.dump` ซ้อมบนสำเนาแล้ว · `_prisma_migrations` = 43 · สลับไป green · migration `20261005090000_table_session_discount` additive + CHECK · ไม่มี env)**: `TableSession.discountMode/discountValue/discountNote`
 (เก็บชนิด+ค่า ไม่ใช่ยอดบาท — ลด % แล้วสั่งเพิ่ม ส่วนลดโตตาม) · ตั้งด้วย `setSessionDiscount` (`MO_TABLES:EDIT` · conditional update เฉพาะบิลที่ยังเปิด) บนหน้าปิดบิล ·
 **ยอดบาทคิดที่ `computeBillTotals(lines, servicePercent, session)` ที่เดียว** — หักจากค่าอาหารก่อนแล้วคิดค่าบริการจากยอดหลังหัก · `Sale.subtotal` = ค่าอาหาร + ค่าบริการ, `Sale.discount` = ส่วนลด ·
 **จุดคิดยอดบิลโต๊ะใหม่ต้องดึง `SESSION_DISCOUNT_SELECT` แล้วส่ง session เข้าไปด้วย** ไม่งั้นลูกค้า/QR ธนาคารเห็นยอดก่อนหัก · QR ที่ออกก่อนแก้ส่วนลด: หน้าปิดบิลบังคับสร้างใหม่ และเงินโอนที่ไม่พอถูก `verifiedAmount` ปฏิเสธ
