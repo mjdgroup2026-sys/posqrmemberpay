@@ -791,7 +791,7 @@ export function MenuPos({
       </section>
 
       <Dialog open={payOpen} onOpenChange={(open) => (pending ? null : setPayOpen(open))}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{onlyProducts ? "รับเงิน — ขายสินค้า" : "รับเงิน — อาหารกลับบ้าน"}</DialogTitle>
             <DialogDescription>
@@ -799,136 +799,143 @@ export function MenuPos({
             </DialogDescription>
           </DialogHeader>
 
-          <AmountDueHero
-            amount={payable}
-            label={discount > 0 ? "ยอดสุทธิที่ต้องชำระ" : "ยอดที่ต้องชำระ"}
-            lines={
-              discount > 0
-                ? [
-                    { label: "ยอดรวม", amount: total },
-                    { label: discountMode === "PERCENT" ? `ส่วนลด ${discountValue}%` : "ส่วนลด", amount: discount, negative: true },
-                  ]
-                : []
-            }
-            caption={`${cart.reduce((n, line) => n + line.quantity, 0)} รายการ${customerLabel.trim() ? ` · ${customerLabel.trim()}` : ""}`}
-          />
-
-          <div className="field">
-            <label className="t-small" htmlFor="posDiscount">
-              ส่วนลด (ไม่บังคับ)
-            </label>
-            <div className="row" style={{ gap: 8 }}>
-              <input
-                id="posDiscount"
-                className="input num"
-                inputMode="decimal"
-                value={discountText}
-                onChange={(e) => setDiscountText(e.target.value)}
-                placeholder="0"
-                style={{ flex: 1 }}
+          {/* จอกว้าง = 2 คอลัมน์ (ยอด+ส่วนลด | วิธีชำระ+รับเงิน) ไม่ต้องเลื่อน · จอแคบเรียงลงตามเดิม */}
+          <div className="pay-grid">
+            <div className="pay-col">
+              <AmountDueHero
+                amount={payable}
+                label={discount > 0 ? "ยอดสุทธิที่ต้องชำระ" : "ยอดที่ต้องชำระ"}
+                lines={
+                  discount > 0
+                    ? [
+                        { label: "ยอดรวม", amount: total },
+                        { label: discountMode === "PERCENT" ? `ส่วนลด ${discountValue}%` : "ส่วนลด", amount: discount, negative: true },
+                      ]
+                    : []
+                }
+                caption={`${cart.reduce((n, line) => n + line.quantity, 0)} รายการ${customerLabel.trim() ? ` · ${customerLabel.trim()}` : ""}`}
               />
-              {(["AMOUNT", "PERCENT"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  className={`btn btn-sm ${discountMode === m ? "btn-primary" : "btn-subtle"}`}
-                  onClick={() => setDiscountMode(m)}
-                  aria-pressed={discountMode === m}
-                >
-                  {m === "AMOUNT" ? "บาท" : "%"}
-                </button>
-              ))}
-            </div>
-            {/* ที่มาของยอด (ยอดรวม − ส่วนลด) อยู่ในกรอบยอดที่ต้องชำระด้านบนแล้ว — ที่นี่เหลือแค่ข้อผิดพลาด */}
-            {!discountCalc.ok ? <span className="field-hint error">{discountCalc.error}</span> : null}
-            {discountValue > 0 ? (
-              <input
-                className="input"
-                value={discountNote}
-                onChange={(e) => setDiscountNote(e.target.value)}
-                placeholder="โปรโมชั่น / เหตุผล เช่น ซื้อ 2 แถม 1"
-                maxLength={60}
-                aria-label="หมายเหตุส่วนลด"
-              />
-            ) : null}
-          </div>
 
-          <div className="field">
-            <span className="t-small">วิธีชำระเงิน</span>
-            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              {RETAIL_PAYMENT_METHODS.map((method) => (
-                <button
-                  key={method}
-                  type="button"
-                  className={`btn btn-sm ${paymentMethod === method ? "btn-primary" : "btn-subtle"}`}
-                  onClick={() => setPaymentMethod(method)}
-                >
-                  {PAYMENT_METHOD_LABEL[method]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {paymentMethod === "CASH" ? (
-            <div className="field">
-              <label className="t-small" htmlFor="posReceived">
-                รับเงินมา (บาท)
-              </label>
-              <input
-                id="posReceived"
-                className="input num"
-                inputMode="decimal"
-                value={receivedText}
-                onChange={(e) => setReceivedText(e.target.value)}
-                placeholder={String(payable)}
-              />
-              {/* ปุ่มลัด: รับพอดี + ธนบัตรที่พอจ่ายยอดนี้ — กดแทนพิมพ์ */}
-              <div className="cash-quick">
-                {[payable, ...[50, 100, 500, 1000].filter((note) => note > payable)].map((value, index) => (
-                  <button
-                    key={index === 0 ? "exact" : value}
-                    type="button"
-                    className={`btn btn-sm ${received === value ? "btn-primary" : "btn-subtle"}`}
-                    onClick={() => setReceivedText(String(value))}
-                  >
-                    {index === 0 ? "พอดี" : <span className="num">฿{formatNumber(value)}</span>}
-                  </button>
-                ))}
+              <div className="field">
+                <label className="t-small" htmlFor="posDiscount">
+                  ส่วนลด (ไม่บังคับ)
+                </label>
+                <div className="row" style={{ gap: 8 }}>
+                  <input
+                    id="posDiscount"
+                    className="input num"
+                    inputMode="decimal"
+                    value={discountText}
+                    onChange={(e) => setDiscountText(e.target.value)}
+                    placeholder="0"
+                    style={{ flex: 1 }}
+                  />
+                  {(["AMOUNT", "PERCENT"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`btn btn-sm ${discountMode === m ? "btn-primary" : "btn-subtle"}`}
+                      onClick={() => setDiscountMode(m)}
+                      aria-pressed={discountMode === m}
+                    >
+                      {m === "AMOUNT" ? "บาท" : "%"}
+                    </button>
+                  ))}
+                </div>
+                {/* ที่มาของยอด (ยอดรวม − ส่วนลด) อยู่ในกรอบยอดที่ต้องชำระด้านบนแล้ว — ที่นี่เหลือแค่ข้อผิดพลาด */}
+                {!discountCalc.ok ? <span className="field-hint error">{discountCalc.error}</span> : null}
+                {discountValue > 0 ? (
+                  <input
+                    className="input"
+                    value={discountNote}
+                    onChange={(e) => setDiscountNote(e.target.value)}
+                    placeholder="โปรโมชั่น / เหตุผล เช่น ซื้อ 2 แถม 1"
+                    maxLength={60}
+                    aria-label="หมายเหตุส่วนลด"
+                  />
+                ) : null}
               </div>
-              {/* เงินทอนต้องเห็นชัด — เดิมเป็น hint ตัวเล็กสีเทา พนักงานมองข้าม (เจ้าของแจ้ง 2026-10-03) */}
-              {received > 0 && received < payable ? (
-                <div className="alert-banner danger num" role="alert">
-                  เงินที่รับยังไม่พอ — ขาดอีก ฿{formatBaht(round2(payable - received))}
-                </div>
-              ) : changeDue > 0 ? (
-                <div className="alert-banner warning" role="status" style={{ justifyContent: "space-between" }}>
-                  <span>ต้องทอนเงินลูกค้า</span>
-                  <strong className="t-h2 num">฿{formatBaht(changeDue)}</strong>
-                </div>
-              ) : received > 0 ? (
-                <span className="field-hint">รับพอดี ไม่มีเงินทอน</span>
-              ) : null}
             </div>
-          ) : paymentMethod === "QR" ? (
-            <div className="field" style={{ alignItems: "center", textAlign: "center" }}>
-              {qr ? (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element -- data URL ที่สร้างสด */}
-                  <img src={qr.dataUrl} alt="QR พร้อมเพย์สำหรับชำระเงิน" width={220} height={220} style={{ borderRadius: 12, border: "1px solid var(--line)" }} />
-                  <span className="t-body">ให้ลูกค้าสแกนจ่าย <strong className="num">฿{formatBaht(qr.amount)}</strong></span>
-                  <span className="t-caption num">พร้อมเพย์ร้าน {qr.maskedId} · เห็นเงินเข้าแล้วค่อยกดยืนยัน</span>
-                </>
-              ) : qrError ? (
-                <div className="alert-banner warning">{qrError}</div>
+
+            <div className="pay-col">
+              <div className="field">
+                <span className="t-small">วิธีชำระเงิน</span>
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  {RETAIL_PAYMENT_METHODS.map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      className={`btn btn-sm ${paymentMethod === method ? "btn-primary" : "btn-subtle"}`}
+                      onClick={() => setPaymentMethod(method)}
+                    >
+                      {PAYMENT_METHOD_LABEL[method]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {paymentMethod === "CASH" ? (
+                <div className="field">
+                  <label className="t-small" htmlFor="posReceived">
+                    รับเงินมา (บาท)
+                  </label>
+                  <input
+                    id="posReceived"
+                    className="input num"
+                    inputMode="decimal"
+                    value={receivedText}
+                    onChange={(e) => setReceivedText(e.target.value)}
+                    placeholder={String(payable)}
+                  />
+                  {/* ปุ่มลัด: รับพอดี + ธนบัตรที่พอจ่ายยอดนี้ — กดแทนพิมพ์ */}
+                  <div className="cash-quick">
+                    {[payable, ...[50, 100, 500, 1000].filter((note) => note > payable)].map((value, index) => (
+                      <button
+                        key={index === 0 ? "exact" : value}
+                        type="button"
+                        className={`btn btn-sm ${received === value ? "btn-primary" : "btn-subtle"}`}
+                        onClick={() => setReceivedText(String(value))}
+                      >
+                        {index === 0 ? "พอดี" : <span className="num">฿{formatNumber(value)}</span>}
+                      </button>
+                    ))}
+                  </div>
+                  {/* เงินทอนต้องเห็นชัด — เดิมเป็น hint ตัวเล็กสีเทา พนักงานมองข้าม (เจ้าของแจ้ง 2026-10-03) */}
+                  {received > 0 && received < payable ? (
+                    <div className="alert-banner danger num" role="alert">
+                      เงินที่รับยังไม่พอ — ขาดอีก ฿{formatBaht(round2(payable - received))}
+                    </div>
+                  ) : changeDue > 0 ? (
+                    <div className="alert-banner warning" role="status" style={{ justifyContent: "space-between" }}>
+                      <span>ต้องทอนเงินลูกค้า</span>
+                      <strong className="t-h2 num">฿{formatBaht(changeDue)}</strong>
+                    </div>
+                  ) : received > 0 ? (
+                    <span className="field-hint">รับพอดี ไม่มีเงินทอน</span>
+                  ) : null}
+                </div>
+              ) : paymentMethod === "QR" ? (
+                <div className="field" style={{ alignItems: "center", textAlign: "center" }}>
+                  {qr ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element -- data URL ที่สร้างสด */}
+                      <img src={qr.dataUrl} alt="QR พร้อมเพย์สำหรับชำระเงิน" width={220} height={220} style={{ borderRadius: 12, border: "1px solid var(--line)" }} />
+                      <span className="t-body">ให้ลูกค้าสแกนจ่าย <strong className="num">฿{formatBaht(qr.amount)}</strong></span>
+                      <span className="t-caption num">พร้อมเพย์ร้าน {qr.maskedId} · เห็นเงินเข้าแล้วค่อยกดยืนยัน</span>
+                    </>
+                  ) : qrError ? (
+                    <div className="alert-banner warning">{qrError}</div>
+                  ) : (
+                    <span className="t-caption">
+                      <IconSpinner size={16} className="animate-spin" aria-hidden /> กำลังสร้าง QR…
+                    </span>
+                  )}
+                </div>
               ) : (
-                <span className="t-caption">
-                  <IconSpinner size={16} className="animate-spin" aria-hidden /> กำลังสร้าง QR…
-                </span>
+                <p className="t-body">เก็บเงินเต็มจำนวน ฿{formatBaht(payable)} — ไม่มีเงินทอน</p>
               )}
             </div>
-          ) : (
-            <p className="t-body">เก็บเงินเต็มจำนวน ฿{formatBaht(payable)} — ไม่มีเงินทอน</p>
-          )}
+          </div>
 
           <DialogFooter>
             <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setPayOpen(false)}>
