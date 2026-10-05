@@ -117,7 +117,7 @@ export default function GuidePage() {
             ))}
           </div>
           <p className="t-body" style={{ marginTop: 16 }}>
-            ไม่พบคำตอบที่ต้องการ ส่งอีเมลมาที่ <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+            ไม่พบคำตอบที่ต้องการ <Link href="/contact">ติดต่อทีมงาน</Link> ทางโทรศัพท์หรืออีเมล
           </p>
         </section>
       </article>

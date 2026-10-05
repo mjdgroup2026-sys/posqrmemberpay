@@ -79,3 +79,18 @@ describe("หน้าติดต่อทีมงาน", () => {
     expect([...container.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/contact")).toBe(true)
   })
 })
+
+/// ปุ่ม "ติดต่อทีมงาน" ท้ายหน้าแนะนำระบบต้องพาไปหน้าติดต่อเรา ไม่ใช่เปิดโปรแกรมอีเมล (เจ้าของสั่ง 2026-10-05)
+describe("ปุ่มติดต่อทีมงานไปหน้า /contact", () => {
+  it("หน้าแนะนำระบบ", () => {
+    const { getAllByRole } = render(<WelcomePage />)
+    const button = getAllByRole("link").find((a) => a.textContent?.includes("ติดต่อทีมงาน"))
+    expect(button?.getAttribute("href")).toBe("/contact")
+  })
+
+  it("ท้ายคู่มือ", () => {
+    const { getAllByRole } = render(<GuidePage />)
+    const links = getAllByRole("link").filter((a) => a.textContent === "ติดต่อทีมงาน")
+    expect(links.map((a) => a.getAttribute("href"))).toContain("/contact")
+  })
+})
