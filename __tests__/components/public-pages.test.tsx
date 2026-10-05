@@ -4,6 +4,7 @@ import { render } from "@testing-library/react"
 import WelcomePage from "@/app/(staff)/(public)/welcome/page"
 import GuidePage from "@/app/(staff)/(public)/guide/page"
 import PublicLayout from "@/app/(staff)/(public)/layout"
+import ContactPage from "@/app/(staff)/(public)/contact/page"
 import AuthLayout from "@/app/(staff)/(auth)/layout"
 import { CONTACT_EMAIL, GUIDE_GROUPS } from "@/lib/guide-content"
 
@@ -58,5 +59,23 @@ describe("หน้าที่คนนอกเห็นไม่มีลิ�
   it("กรอบหน้าล็อกอิน/สมัคร", () => {
     const { container } = render(<AuthLayout>หน้า</AuthLayout>)
     expect(guideLinks(container)).toHaveLength(0)
+  })
+})
+
+/// หน้าติดต่อทีมงาน (2026-10-05) — เบอร์/อีเมลถูกต้อง และกดโทร/ส่งอีเมลได้จริง
+describe("หน้าติดต่อทีมงาน", () => {
+  it("มีเบอร์โทรกับอีเมล พร้อมลิงก์ tel:/mailto:", () => {
+    const { container, getByText } = render(<ContactPage />)
+    expect(getByText("089-452-9759")).toBeTruthy()
+    expect(getByText("mjdgroup2026@gmail.com")).toBeTruthy()
+    const hrefs = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href"))
+    expect(hrefs).toContain("tel:+66894529759")
+    expect(hrefs).toContain("mailto:mjdgroup2026@gmail.com")
+    expect(container.textContent ?? "").not.toMatch(PRICE)
+  })
+
+  it("หัวหน้าสาธารณะมีลิงก์ติดต่อเรา", () => {
+    const { container } = render(<PublicLayout>หน้า</PublicLayout>)
+    expect([...container.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/contact")).toBe(true)
   })
 })

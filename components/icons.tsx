@@ -76,4 +76,7 @@ export {
   Undo2 as IconUndo,
   CircleSlash as IconCancelRemaining,
   CircleHelp as IconHelp,
+  // หน้าติดต่อทีมงาน (2026-10-05)
+  PhoneCall as IconPhoneCall,
+  Headset as IconSupport,
 } from "lucide-react"

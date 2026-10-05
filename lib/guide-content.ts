@@ -7,6 +7,9 @@
 /// เปลี่ยน UI ครั้งใหญ่ให้ถ่ายใหม่แล้วแทนไฟล์ชื่อเดิม
 
 export const CONTACT_EMAIL = "mjdgroup2026@gmail.com"
+/// เบอร์ติดต่อทีมงาน (2026-10-05 · หน้า /contact) — แสดงแบบมีขีด · ลิงก์ tel: ใช้ CONTACT_PHONE_TEL
+export const CONTACT_PHONE = "089-452-9759"
+export const CONTACT_PHONE_TEL = "+66894529759"
 
 export type GuideImage = {
   src: string

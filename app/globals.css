@@ -1323,6 +1323,69 @@
     margin-top: 8px;
   }
 
+  /* ติดต่อทีมงาน (2026-10-05) */
+  .contact-hero {
+    text-align: center;
+    max-width: 720px;
+  }
+  .contact-hero .pub-hero-lead {
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .contact-hero-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 14px;
+    border-radius: 20px;
+    background: var(--brand);
+    color: var(--brand-ink);
+    display: grid;
+    place-items: center;
+    box-shadow: var(--shadow-md);
+  }
+  .contact-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 18px;
+    max-width: 860px;
+  }
+  .contact-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .contact-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  .contact-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--brand-soft);
+    color: var(--brand);
+    display: grid;
+    place-items: center;
+    margin-bottom: 6px;
+  }
+  .contact-value {
+    font-size: clamp(1.15rem, 2.6vw, 1.45rem);
+    font-weight: 700;
+    color: var(--ink);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+  .contact-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
   /* คู่มือ */
   .guide-layout {
     display: grid;
