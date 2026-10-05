@@ -331,6 +331,19 @@ export const submitSlipSchema = z.object({
   payload: z.string({ error: "ไม่พบข้อมูลจากสลิป" }).trim().min(20, "อ่าน QR บนสลิปไม่ได้ กรุณาลองใหม่").max(1000, "ข้อมูลสลิปยาวผิดปกติ"),
 })
 
+/// ตั้ง/ล้างส่วนลดของบิลโต๊ะ (2026-10-05) — ค่า 0 = ล้างส่วนลด · ยอดบาทจริงคิดที่ computeBillTotals() ตอนปิดบิล
+export const sessionDiscountSchema = z.object({
+  sessionId: requiredId("ไม่พบบิลที่ต้องการให้ส่วนลด"),
+  discountMode: z.enum(["AMOUNT", "PERCENT"], { error: "ชนิดส่วนลดไม่ถูกต้อง" }).default("AMOUNT"),
+  discountValue: money("ส่วนลด").default(0),
+  discountNote: z
+    .string({ error: "หมายเหตุส่วนลดไม่ถูกต้อง" })
+    .trim()
+    .max(60, "หมายเหตุส่วนลดยาวเกินไป")
+    .nullish()
+    .transform((v) => (v === "" || v === null ? undefined : v)),
+})
+
 export const confirmPaymentSchema = z.object({
   sessionId: requiredId("ไม่พบโต๊ะที่ต้องการปิดบิล"),
   paymentMethod: z.enum(["PROMPTPAY", "CARD", "CASH", "TRANSFER"], {

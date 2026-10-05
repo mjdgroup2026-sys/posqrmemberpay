@@ -894,6 +894,12 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
         expect(await testPrisma().sale.count({ where: { tableSessionId: b.sessionId } })).toBe(0)
       },
     ],
+    // ส่วนลดบิลโต๊ะ (2026-10-05) — ร้าน A ตั้งส่วนลดให้บิลของร้าน B ไม่ได้
+    [
+      "setSessionDiscount",
+      (b) => makeFormData({ sessionId: b.sessionId, discountMode: "AMOUNT", discountValue: "1" }),
+      async (b) => expect((await testPrisma().tableSession.findUniqueOrThrow({ where: { id: b.sessionId } })).discountMode).toBeNull(),
+    ],
     // 20f — ออก QR พร้อมเพย์ให้บิลของร้าน B ต้องไม่ได้ (มีแค่ intent ใบเดียวจาก fixture · ไม่มีใบใหม่/ไม่ถูกทำ EXPIRED)
     [
       "prepareStaffPromptPay",

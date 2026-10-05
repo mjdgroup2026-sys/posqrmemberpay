@@ -5,6 +5,7 @@ import { toNumber } from "@/lib/format"
 import type { PaymentMethodValue } from "@/lib/types"
 import { publishStoreEvent } from "@/lib/realtime"
 import { releaseTableIfIdle } from "@/lib/table-session"
+import { discountNoteText } from "@/lib/discount"
 
 /// ปิดบิลของโต๊ะ (MJD Mobile Order) — ใช้ร่วมกันระหว่างพนักงานกดยืนยันกับ webhook ของธนาคาร
 ///
@@ -46,16 +47,34 @@ function round2(value: number): number {
 }
 
 export type BillLine = { quantity: number; unitPrice: number }
-export type BillTotals = { itemsTotal: number; serviceCharge: number; subtotal: number; total: number }
+export type BillTotals = { itemsTotal: number; discount: number; serviceCharge: number; subtotal: number; total: number }
+/// ส่วนลดที่เก็บไว้กับ TableSession (2026-10-05) — ส่ง select ของ session มาตรง ๆ ได้เลย
+export type SessionDiscount = { discountMode: "AMOUNT" | "PERCENT" | null; discountValue: { toString(): string } | number | null }
+
+/// select ของ TableSession ที่ทุกจุดคิดยอดต้องดึงมาส่งให้ `computeBillTotals()`
+export const SESSION_DISCOUNT_SELECT = { discountMode: true, discountValue: true, discountNote: true } as const
 
 /// สูตรคิดยอดบิลของ MJD Mobile Order — ใช้ร่วมกันระหว่างหน้าปิดบิลฝั่งพนักงาน หน้าชำระเงินฝั่งลูกค้า
 /// และตอนสร้าง Sale จริง · ห้ามคำนวณซ้ำที่อื่น มิฉะนั้นตัวเลขบนจอกับตัวเลขในบิลจะเพี้ยนกันได้
-export function computeBillTotals(lines: BillLine[], servicePercent: number): BillTotals {
+///
+/// ส่วนลด (2026-10-05) หักจากค่าอาหารก่อน แล้วค่อยคิดค่าบริการจากยอดหลังหัก (ลูกค้าไม่ต้องจ่ายค่าบริการของส่วนที่ลด)
+/// · ส่วนลดบาทที่เกินค่าอาหาร (ยกเลิกรายการทีหลัง) ถูกตัดเหลือเท่าค่าอาหาร — บิลไม่ติดลบ
+/// · `subtotal` = ค่าอาหาร + ค่าบริการ และ `total` = subtotal − ส่วนลด — ความหมายเดียวกับ Sale ของ POS
+///   (รายงานคิดค่าบริการเป็น subtotal − ผลรวมบรรทัด และส่วนลดจาก Sale.discount)
+export function computeBillTotals(lines: BillLine[], servicePercent: number, discount?: SessionDiscount | null): BillTotals {
   const itemsTotal = round2(lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0))
-  const serviceCharge = round2((itemsTotal * servicePercent) / 100)
-  // ค่าบริการถูกบวกเข้า subtotal ก่อนคิด total ตาม §3 (v1 ไม่มีส่วนลดในช่องทางนี้)
+  const value = discount?.discountMode ? Number(discount.discountValue ?? 0) : 0
+  const raw = discount?.discountMode === "PERCENT" ? (itemsTotal * value) / 100 : value
+  const discountAmount = round2(Math.min(Math.max(raw, 0), itemsTotal))
+  const serviceCharge = round2(((itemsTotal - discountAmount) * servicePercent) / 100)
   const subtotal = round2(itemsTotal + serviceCharge)
-  return { itemsTotal, serviceCharge, subtotal, total: subtotal }
+  return { itemsTotal, discount: discountAmount, serviceCharge, subtotal, total: round2(subtotal - discountAmount) }
+}
+
+/// หมายเหตุบิล + เหตุผลส่วนลด (ถ้ามี) — ให้ดูย้อนหลังได้ว่าลดเพราะอะไร เหมือนบิลกลับบ้าน
+function billNote(base: string, session: SessionDiscount & { discountNote: string | null }, discount: number): string {
+  if (discount <= 0 || !session.discountMode) return base
+  return `${base} · ${discountNoteText(session.discountMode, Number(session.discountValue), session.discountNote ?? undefined)}`
 }
 
 class CloseAbort extends Error {
@@ -110,6 +129,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
           status: true,
           tableId: true,
           qrCodeId: true,
+          ...SESSION_DISCOUNT_SELECT,
           table: { select: { code: true } },
           orders: {
             select: {
@@ -142,9 +162,10 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
       })
       const servicePercent = toNumber(settings?.serviceChargePercent ?? 0)
 
-      const { subtotal, total } = computeBillTotals(
+      const { subtotal, discount, total } = computeBillTotals(
         lines.map((line) => ({ quantity: line.quantity, unitPrice: toNumber(line.unitPrice) })),
         servicePercent,
+        session,
       )
       const received = input.amountReceived === undefined ? total : round2(input.amountReceived)
       const changeDue = input.paymentMethod === "CASH" ? round2(Math.max(received - total, 0)) : 0
@@ -158,7 +179,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
       if (input.verifiedAmount !== undefined && round2(input.verifiedAmount) < total) {
         throw new CloseAbort(
           `เงินที่ได้รับ ${round2(input.verifiedAmount).toFixed(2)} บาท น้อยกว่ายอดบิลปัจจุบัน ` +
-            `${total.toFixed(2)} บาท (มีรายการสั่งเพิ่มหลังออก QR)`,
+            `${total.toFixed(2)} บาท (ยอดบิลเปลี่ยนหลังออก QR)`,
         )
       }
 
@@ -173,12 +194,12 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
           tableSessionId: session.id,
           paymentReference: input.paymentReference,
           subtotal: subtotal.toFixed(2),
-          discount: "0.00",
+          discount: discount.toFixed(2),
           total: total.toFixed(2),
           paymentMethod: input.paymentMethod,
           amountReceived: received.toFixed(2),
           changeDue: changeDue.toFixed(2),
-          note: input.note ?? `โต๊ะ ${session.table.code}`,
+          note: billNote(input.note ?? `โต๊ะ ${session.table.code}`, session, discount),
           cashierId,
           items: {
             create: lines.map((line) => ({

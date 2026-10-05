@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ActionResult } from "@/lib/types"
 import {
   createTestMenuItem,
@@ -15,6 +15,7 @@ import {
   TEST_STORE_ID,
 } from "../helpers/db"
 import { makeFormData } from "../helpers/form"
+import { setTestUser } from "../helpers/session-mock"
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
 /// session mock กลาง (Phase 13) — อ่าน StoreMember จากฐานเทสจริง จึงได้ requireStore()/requireOwner() ตามร้านที่ผู้ใช้อยู่
@@ -397,5 +398,126 @@ describe.skipIf(!dbReady)("ชำระเงินและปิดบิล M
     await confirmMobilePayment(makeFormData({ sessionId, paymentMethod: "PROMPTPAY" }))
     const sale = await db.sale.findFirst({ where: { tableSessionId: sessionId } })
     expect(Number(sale?.total)).toBe(view?.total)
+  })
+
+  /// ส่วนลดบิลโต๊ะ (2026-10-05) — เก็บที่ session แล้วทุกทางปิดบิลเห็นยอดเดียวกัน
+  describe("ส่วนลดบิลโต๊ะ", () => {
+    async function setDiscount(fields: Record<string, string>) {
+      const { setSessionDiscount } = await import("@/app/actions/payments")
+      return setSessionDiscount(makeFormData(fields))
+    }
+
+    it("ลด 10% → หน้าปิดบิล/หน้าลูกค้า/บิลจริงตรงกัน · ค่าบริการคิดหลังหัก · Sale.discount + หมายเหตุ", async () => {
+      const db = testPrisma()
+      const { getBillingView, getCustomerPaymentStatus } = await import("@/lib/queries")
+      await setStoreSettings({ serviceChargePercent: "10.00" })
+      const { table, qr, sessionId } = await seedTableWithOrder()
+
+      const set = await setDiscount({ sessionId, discountMode: "PERCENT", discountValue: "10", discountNote: "ลูกค้าประจำ" })
+      expect(set.ok).toBe(true)
+
+      // 260 − 26 = 234 · ค่าบริการ 23.40 · สุทธิ 257.40
+      const view = await getBillingView(TEST_STORE_ID, table.id)
+      expect(view).toMatchObject({ itemsTotal: 260, discount: 26, serviceCharge: 23.4, total: 257.4, discountNote: "ลูกค้าประจำ" })
+      const customer = await getCustomerPaymentStatus(qr.token)
+      expect(customer.state === "UNPAID" ? customer.total : null).toBe(257.4)
+
+      const paid = await confirmMobilePayment(makeFormData({ sessionId, paymentMethod: "CASH", amountReceived: "300" }))
+      expect(paid.ok).toBe(true)
+      const sale = await db.sale.findFirstOrThrow({ where: { tableSessionId: sessionId } })
+      expect(Number(sale.subtotal)).toBe(283.4)
+      expect(Number(sale.discount)).toBe(26)
+      expect(Number(sale.total)).toBe(257.4)
+      expect(Number(sale.changeDue)).toBe(42.6)
+      expect(sale.note).toContain("ส่วนลด 10% (ลูกค้าประจำ)")
+    })
+
+    it("ส่วนลดบาทเกินค่าอาหารถูกปฏิเสธ · ค่า 0 = ล้างส่วนลด", async () => {
+      const db = testPrisma()
+      const { sessionId } = await seedTableWithOrder()
+
+      const tooMuch = await setDiscount({ sessionId, discountMode: "AMOUNT", discountValue: "261" })
+      expect(tooMuch.ok).toBe(false)
+      expect((await db.tableSession.findUniqueOrThrow({ where: { id: sessionId } })).discountMode).toBeNull()
+
+      expect((await setDiscount({ sessionId, discountMode: "AMOUNT", discountValue: "60" })).ok).toBe(true)
+      expect((await setDiscount({ sessionId, discountValue: "0" })).ok).toBe(true)
+      const cleared = await db.tableSession.findUniqueOrThrow({ where: { id: sessionId } })
+      expect(cleared.discountMode).toBeNull()
+      expect(cleared.discountValue).toBeNull()
+    })
+
+    /// ส่วนลด = พนักงานที่มีสิทธิ์ปิดบิลเท่านั้น (เจ้าของถาม 2026-10-05 กลัวลูกค้ากดใส่เอง) — ด่านจริงคือ server ไม่ใช่การซ่อนปุ่ม
+    describe("ใครตั้งส่วนลดได้", () => {
+      afterEach(() => setTestUser("test-user"))
+
+      async function staffWith(actions: string[]) {
+        const db = testPrisma()
+        await ensureTestUser("staff-discount", "พนักงานทดสอบ", { role: "STAFF" })
+        const role = await db.role.create({
+          data: {
+            storeId: TEST_STORE_ID,
+            name: `ทดสอบส่วนลด ${actions.join("-")}`,
+            permissions: { create: [{ resource: "MO_TABLES", actions: actions as never }] },
+          },
+          select: { id: true },
+        })
+        await db.storeMember.update({
+          where: { userId_storeId: { userId: "staff-discount", storeId: TEST_STORE_ID } },
+          data: { roleId: role.id },
+        })
+        setTestUser("staff-discount")
+      }
+
+      async function discountOf(sessionId: string) {
+        return (await testPrisma().tableSession.findUniqueOrThrow({ where: { id: sessionId } })).discountMode
+      }
+
+      it("ไม่ได้ล็อกอิน (ลูกค้า/คนนอกยิงคำสั่งตรง) → ถูกปฏิเสธ บิลไม่มีส่วนลด", async () => {
+        const { sessionId } = await seedTableWithOrder()
+        setTestUser(null)
+        const result = await setDiscount({ sessionId, discountMode: "PERCENT", discountValue: "100" })
+        expect(result.ok).toBe(false)
+        expect(await discountOf(sessionId)).toBeNull()
+      })
+
+      it("พนักงานที่ดูโต๊ะได้อย่างเดียว (MO_TABLES:VIEW) → ถูกปฏิเสธ", async () => {
+        const { sessionId } = await seedTableWithOrder()
+        await staffWith(["VIEW"])
+        const result = await setDiscount({ sessionId, discountMode: "AMOUNT", discountValue: "50" })
+        expect(result.ok).toBe(false)
+        expect(await discountOf(sessionId)).toBeNull()
+      })
+
+      it("พนักงานที่มีสิทธิ์ปิดบิล (MO_TABLES:EDIT) → ตั้งได้", async () => {
+        const { sessionId } = await seedTableWithOrder()
+        await staffWith(["VIEW", "EDIT"])
+        const result = await setDiscount({ sessionId, discountMode: "AMOUNT", discountValue: "50" })
+        expect(result.ok).toBe(true)
+        expect(await discountOf(sessionId)).toBe("AMOUNT")
+      })
+    })
+
+    it("ตั้งส่วนลดให้บิลที่ปิดแล้วไม่ได้", async () => {
+      const { sessionId } = await seedTableWithOrder()
+      await confirmMobilePayment(makeFormData({ sessionId, paymentMethod: "CARD" }))
+      const result = await setDiscount({ sessionId, discountMode: "AMOUNT", discountValue: "10" })
+      expect(result.ok).toBe(false)
+    })
+
+    it("QR ธนาคารออกก่อนลดส่วนลดลง — เงินที่โอนมาไม่พอกับบิลใหม่ ต้องไม่ปิดบิลเอง", async () => {
+      const { sessionId } = await seedTableWithOrder()
+      expect((await setDiscount({ sessionId, discountMode: "AMOUNT", discountValue: "60" })).ok).toBe(true)
+      // ลูกค้าได้ QR ยอด 200 แล้วพนักงานถอดส่วนลดออก → บิลกลับเป็น 260
+      expect((await setDiscount({ sessionId, discountValue: "0" })).ok).toBe(true)
+      const result = await closeSessionWithPayment({
+        storeId: TEST_STORE_ID,
+        sessionId,
+        paymentMethod: "PROMPTPAY",
+        paymentReference: "SCB-DISCOUNT-1",
+        verifiedAmount: 200,
+      })
+      expect(result.ok).toBe(false)
+    })
   })
 })

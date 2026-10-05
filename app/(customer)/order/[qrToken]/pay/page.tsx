@@ -58,6 +58,7 @@ export default async function PayPage({ params }: PageProps<"/order/[qrToken]/pa
         qrToken={qrToken}
         bill={{
           itemsTotal: status.itemsTotal,
+          discount: status.discount,
           servicePercent: status.servicePercent,
           serviceCharge: status.serviceCharge,
           total: status.total,

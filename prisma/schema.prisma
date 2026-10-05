@@ -550,6 +550,12 @@ enum TableSessionStatus {
   CANCELLED
 }
 
+/// ชนิดส่วนลดของบิลโต๊ะ (2026-10-05) — บาทหรือ % ของค่าอาหาร · ชื่อไม่ชน type `DiscountMode` ใน lib/discount.ts
+enum BillDiscountMode {
+  AMOUNT
+  PERCENT
+}
+
 enum OrderItemStatus {
   AWAITING_KITCHEN
   COOKING
@@ -641,6 +647,12 @@ model TableSession {
   /// ชื่อลูกค้าของบิลนี้ (2026-09-23 · ร้านสปา) — ห้องนวดเดียวเปิดได้หลายบิลพร้อมกัน 1 บิลต่อลูกค้า
   /// ป้ายนี้ใช้แยกบิลบนผังห้อง/หน้าปิดบิล · null = บิลปกติของโต๊ะอาหาร หรือไม่ได้ระบุชื่อ
   customerLabel String?
+  /// ส่วนลดของบิลนี้ (2026-10-05) — เก็บที่ session ไม่ใช่ที่หน้าจอ เพราะบิลปิดได้หลายทาง (พนักงาน/callback ธนาคาร/สลิป)
+  /// ทุกทางต้องเห็นยอดเดียวกัน · เก็บ "ชนิด+ค่า" ไม่ใช่ยอดบาท — ลด % แล้วสั่งเพิ่ม ส่วนลดต้องโตตาม
+  /// คิดเป็นบาทที่ `computeBillTotals()` เท่านั้น · null = ไม่มีส่วนลด
+  discountMode  BillDiscountMode?
+  discountValue Decimal?           @db.Decimal(12, 2)
+  discountNote  String?
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 

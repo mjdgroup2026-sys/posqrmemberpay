@@ -8,7 +8,7 @@ import { publishStoreEvent } from "@/lib/realtime"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { slipPaymentReference, verifySlipAndSettle } from "@/lib/slip-settle"
 import { parseSlipQr } from "@/lib/slip-qr"
-import { closeSessionWithPayment, computeBillTotals } from "@/lib/close-session"
+import { closeSessionWithPayment, computeBillTotals, SESSION_DISCOUNT_SELECT } from "@/lib/close-session"
 import { toNumber } from "@/lib/format"
 import { hasMultipleOpenBills, SHARED_ROOM_PAYMENT_MESSAGE } from "@/lib/table-session"
 import QRCode from "qrcode"
@@ -19,12 +19,14 @@ import { createQrCode } from "@/lib/payment-provider/scb"
 import { buildPromptPayPayload } from "@/lib/promptpay"
 import {
   confirmPaymentSchema,
+  sessionDiscountSchema,
   startPaymentSchema,
   submitSlipSchema,
   firstIssueMessage,
   zodToFieldErrors,
 } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
+import { resolveDiscount } from "@/lib/discount"
 
 
 class PaymentAbort extends Error {
@@ -99,6 +101,73 @@ export async function confirmMobilePayment(
   }
 }
 
+/// พนักงานตั้งส่วนลดของบิลโต๊ะก่อนรับเงิน (2026-10-05) — สิทธิ์เดียวกับปิดบิล (MO_TABLES:EDIT)
+///
+/// เก็บ "ชนิด+ค่า" ไว้ที่ TableSession แล้วทุกทางที่ปิดบิล (พนักงาน/callback ธนาคาร/สลิป/หน้าลูกค้า) คิดยอดจาก
+/// computeBillTotals() ตัวเดียว · ตรวจค่ากับค่าอาหาร ณ ตอนนี้ (บาทห้ามเกินค่าอาหาร · % ห้ามเกิน 100)
+/// · QR ที่ออกไปก่อนแก้ส่วนลดมียอดเก่า — หน้าปิดบิลเห็นยอดเปลี่ยนแล้วบังคับสร้าง QR ใหม่ และถ้าเงินโอนเข้ามาน้อยกว่าบิล
+///   closeSessionWithPayment ปฏิเสธเองอยู่แล้ว (verifiedAmount) จึงไม่ต้องห้ามแก้ระหว่างมี QR ค้าง
+export async function setSessionDiscount(formData: FormData): Promise<ActionResult<{ discount: number; total: number }>> {
+  let ctx: StoreContext
+  try {
+    ctx = await requireStoreAccess(["MO_TABLES", "EDIT"])
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
+
+  const parsed = sessionDiscountSchema.safeParse({
+    sessionId: formData.get("sessionId") ?? "",
+    discountMode: formData.get("discountMode") || undefined,
+    discountValue: formData.get("discountValue") || undefined,
+    discountNote: formData.get("discountNote") ?? undefined,
+  })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error), fieldErrors: zodToFieldErrors(parsed.error) }
+  const { sessionId, discountMode, discountValue, discountNote } = parsed.data
+
+  const session = await db.tableSession.findUnique({
+    where: { id: sessionId },
+    select: {
+      status: true,
+      orders: { select: { items: { where: { status: { not: "CANCELLED" } }, select: { quantity: true, unitPrice: true } } } },
+    },
+  })
+  if (!session) return { ok: false, error: "ไม่พบบิลที่ต้องการให้ส่วนลด" }
+  if (session.status !== "OPEN" && session.status !== "AWAITING_BILL") return { ok: false, error: "บิลนี้ปิดหรือถูกยกเลิกไปแล้ว" }
+
+  const lines = session.orders.flatMap((o) => o.items).map((item) => ({ quantity: item.quantity, unitPrice: toNumber(item.unitPrice) }))
+  const clearing = Math.round(discountValue * 100) === 0
+  if (!clearing) {
+    // ตรวจกับค่าอาหาร (ก่อนค่าบริการ) — ฐานเดียวกับที่ computeBillTotals หักส่วนลด
+    const check = resolveDiscount(computeBillTotals(lines, 0).itemsTotal, discountMode, discountValue)
+    if (!check.ok) return { ok: false, error: check.error, fieldErrors: { discountValue: check.error } }
+  }
+
+  // conditional update — บิลที่เพิ่งถูกปิดจากอีกหน้าจอต้องไม่ถูกแก้ส่วนลดย้อนหลัง
+  const updated = await db.tableSession.updateMany({
+    where: { id: sessionId, status: { in: ["OPEN", "AWAITING_BILL"] } },
+    data: clearing
+      ? { discountMode: null, discountValue: null, discountNote: null }
+      : { discountMode, discountValue: discountValue.toFixed(2), discountNote: discountNote ?? null },
+  })
+  if (updated.count === 0) return { ok: false, error: "บิลนี้เพิ่งถูกปิดจากอีกหน้าจอ" }
+
+  const settings = await db.storeSettings.findUnique({ where: { storeId }, select: { serviceChargePercent: true } })
+  const totals = computeBillTotals(
+    lines,
+    toNumber(settings?.serviceChargePercent ?? 0),
+    clearing ? null : { discountMode, discountValue },
+  )
+
+  revalidatePaymentPages(storeId)
+  return {
+    ok: true,
+    message: clearing ? "ล้างส่วนลดแล้ว" : `ให้ส่วนลด ${totals.discount.toFixed(2)} บาทแล้ว`,
+    data: { discount: totals.discount, total: totals.total },
+  }
+}
+
 export type StaffPromptPayQr = {
   /// AUTO = QR ของธนาคาร (โหมด SCB) — ธนาคารยืนยันแล้วบิลปิดเอง · MANUAL = QR พร้อมเพย์ของร้าน พนักงานกดยืนยันเอง
   mode: "AUTO" | "MANUAL"
@@ -132,6 +201,7 @@ export async function prepareStaffPromptPay(formData: FormData): Promise<ActionR
     where: { id: sessionId },
     select: {
       status: true,
+      ...SESSION_DISCOUNT_SELECT,
       orders: { select: { items: { where: { status: { not: "CANCELLED" } }, select: { quantity: true, unitPrice: true } } } },
     },
   })
@@ -142,6 +212,7 @@ export async function prepareStaffPromptPay(formData: FormData): Promise<ActionR
   const { total } = computeBillTotals(
     session.orders.flatMap((o) => o.items).map((item) => ({ quantity: item.quantity, unitPrice: toNumber(item.unitPrice) })),
     toNumber(settings?.serviceChargePercent ?? 0),
+    session,
   )
   if (total <= 0) return { ok: false, error: "บิลนี้ยังไม่มียอดที่ต้องชำระ" }
 
@@ -238,7 +309,7 @@ export async function startCustomerPayment(
       const session = await tx.tableSession.findFirst({
         where: { tableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
         orderBy: { openedAt: "desc" },
-        select: { id: true, tableId: true },
+        select: { id: true, tableId: true, ...SESSION_DISCOUNT_SELECT },
       })
       if (!session) throw new PaymentAbort("โต๊ะนี้ปิดบิลไปแล้ว หรือยังไม่ได้เปิดใช้งาน")
 
@@ -255,6 +326,7 @@ export async function startCustomerPayment(
       const totals = computeBillTotals(
         items.map((item) => ({ quantity: item.quantity, unitPrice: toNumber(item.unitPrice) })),
         toNumber(settings?.serviceChargePercent ?? 0),
+        session,
       )
 
       await tx.tableSession.updateMany({

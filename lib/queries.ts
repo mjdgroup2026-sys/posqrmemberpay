@@ -10,7 +10,7 @@ import { decodeStoreScb, getStoreScb } from "@/lib/scb-store"
 import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFromKey, minuteOfBusinessDay } from "@/lib/day"
 import type { StockDocStatusValue } from "@/lib/stock-doc-kinds"
-import { computeBillTotals, SYSTEM_USER_ID } from "@/lib/close-session"
+import { computeBillTotals, SESSION_DISCOUNT_SELECT, SYSTEM_USER_ID } from "@/lib/close-session"
 import { bucketByChannel, CLOSING_CHANNELS, type ClosingChannel } from "@/lib/closing-channels"
 import type { PaymentMethodValue } from "@/lib/types"
 import { daysOfStockLeft, REORDER_LOOKBACK_DAYS, suggestReorderQty } from "@/lib/reorder"
@@ -1600,6 +1600,11 @@ export type BillingView = {
   storeName: string
   lines: BillingLine[]
   itemsTotal: number
+  /// ส่วนลดของบิล (2026-10-05) — `discount` เป็นบาทที่คิดแล้ว · mode/value คือค่าที่พนักงานตั้งไว้ (null = ไม่มี)
+  discount: number
+  discountMode: "AMOUNT" | "PERCENT" | null
+  discountValue: number | null
+  discountNote: string | null
   servicePercent: number
   serviceCharge: number
   total: number
@@ -1628,6 +1633,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
         status: true,
         openedAt: true,
         customerLabel: true,
+        ...SESSION_DISCOUNT_SELECT,
         table: { select: { id: true, code: true } },
         orders: {
           orderBy: { orderNumber: "asc" },
@@ -1685,7 +1691,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
 
   const lines = [...grouped.values()]
   const servicePercent = toNumber(settings?.serviceChargePercent ?? 0)
-  const totals = computeBillTotals(lines, servicePercent)
+  const totals = computeBillTotals(lines, servicePercent, session)
 
   return {
     tableId: session.table.id,
@@ -1699,6 +1705,10 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
     storeName: settings?.storeName ?? "MJD Mobile Order",
     lines,
     itemsTotal: totals.itemsTotal,
+    discount: totals.discount,
+    discountMode: session.discountMode,
+    discountValue: session.discountValue === null ? null : toNumber(session.discountValue),
+    discountNote: session.discountNote,
     servicePercent,
     serviceCharge: totals.serviceCharge,
     total: totals.total,
@@ -1712,6 +1722,7 @@ export type CustomerPaymentStatus =
       sessionId: string
       tableCode: string
       itemsTotal: number
+      discount: number
       servicePercent: number
       serviceCharge: number
       total: number
@@ -1745,6 +1756,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
     select: {
       id: true,
       status: true,
+      ...SESSION_DISCOUNT_SELECT,
       table: { select: { code: true } },
       sale: { select: { saleNumber: true, total: true, createdAt: true } },
       orders: {
@@ -1781,6 +1793,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
       .flatMap((order) => order.items)
       .map((item) => ({ quantity: item.quantity, unitPrice: toNumber(item.unitPrice) })),
     servicePercent,
+    session,
   )
 
   return {
@@ -1789,6 +1802,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
     sessionId: session.id,
     tableCode: session.table.code,
     itemsTotal: totals.itemsTotal,
+    discount: totals.discount,
     servicePercent,
     serviceCharge: totals.serviceCharge,
     total: totals.total,
