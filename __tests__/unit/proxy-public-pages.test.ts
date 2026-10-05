@@ -33,6 +33,10 @@ describe("proxy: หน้าสาธารณะ", () => {
     expect(call("/guide", true).headers.get("location")).toBeNull()
   })
 
+  it("ยังไม่ล็อกอิน เปิดหน้าติดต่อทีมงานได้", () => {
+    expect(call("/contact").headers.get("location")).toBeNull()
+  })
+
   it("หน้าอื่นที่ยังไม่ล็อกอินยังเด้งไป /login เหมือนเดิม", () => {
     const res = call("/pos/history")
     expect(new URL(res.headers.get("location") ?? "").pathname).toBe("/login")
