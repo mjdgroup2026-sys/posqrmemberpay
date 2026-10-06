@@ -18,7 +18,7 @@ import {
 import { Receipt } from "@/components/receipt"
 import { ChangeDuePanel } from "@/components/change-due-panel"
 import { AmountDueHero } from "@/components/amount-due-hero"
-import { IconBoxes, IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTherapist, IconTrash, IconTable, IconWallet } from "@/components/icons"
+import { IconBoxes, IconCalendar, IconMenu, IconPlus, IconSearch, IconSpinner, IconTrash, IconTable, IconWallet } from "@/components/icons"
 import { SegmentTabs } from "@/components/segment-tabs"
 import { billLabel } from "@/components/bill-switcher"
 import {
@@ -86,7 +86,7 @@ export function MenuPos({
   dateLabel?: string
   /// พนักงานนวดที่เปิดใช้งาน (Phase 20) — โปรแกรมนวดต้องเลือกคนก่อนใส่ตะกร้า · ว่าง = ร้านไม่ได้เปิดตัวเลือกร้านนวด
   therapists?: TherapistOption[]
-  /// ร้านเปิดตัวเลือกร้านนวด — แยกแท็บ อาหาร / นวดสปา (2026-09-23) · ตะกร้าใช้ร่วมกัน บิลเดียวมีทั้งสองอย่างได้
+  /// ร้านเปิดตัวเลือกร้านนวด — ป้ายโต๊ะ/ห้อง · จอนี้ไม่ขายโปรแกรมนวดแล้ว (2026-10-06 · เดิมมีแท็บ นวดสปา)
   spaEnabled?: boolean
   /// บิลที่เลือกไว้ล่วงหน้า (?session= จากปุ่ม "สั่งเพิ่ม" ของบิลในห้องสปา · 2026-09-23)
   initialSessionId?: string
@@ -124,34 +124,35 @@ export function MenuPos({
 
   // ชิปกรองตามประเภทครัว (Phase 19) — "" = ทุกครัว · ช่วยพนักงานหาเมนูเร็วขึ้นบนจอเล็ก
   const [stationFilter, setStationFilter] = useState("")
-  const [kindTab, setKindTab] = useState<"FOOD" | "SERVICE" | "PRODUCT">("FOOD")
+  const [kindTab, setKindTab] = useState<"FOOD" | "PRODUCT">("FOOD")
   const hasProducts = products.length > 0
-  const showTabs = spaEnabled || hasProducts
+  const showTabs = hasProducts
   const visibleProducts = useMemo(() => {
     const keyword = search.trim().toLowerCase()
     return products.filter(
       (p) => !keyword || p.name.toLowerCase().includes(keyword) || p.sku.toLowerCase().includes(keyword),
     )
   }, [products, search])
-  const ofKind = (item: MenuItemCard) => !spaEnabled || item.itemType === kindTab
+  // จอนี้ขายเฉพาะอาหาร/สินค้า — โปรแกรมนวดไปขายทางเมนูร้านนวด (เจ้าของสั่ง 2026-10-06)
+  const ofKind = (item: MenuItemCard) => item.itemType === "FOOD"
   const stationChips = useMemo(() => {
     const seen = new Map<string, string>()
     for (const item of menu.all) {
-      if (spaEnabled && item.itemType !== kindTab) continue
+      if (item.itemType !== "FOOD") continue
       if (item.stationId && item.stationName) seen.set(item.stationId, item.stationName)
     }
     return [...seen.entries()].map(([id, name]) => ({ id, name }))
-  }, [menu.all, spaEnabled, kindTab])
+  }, [menu.all])
   const featured = menu.featured.filter(ofKind)
 
   const visibleMenu = useMemo(() => {
     const keyword = search.trim().toLowerCase()
     return menu.all.filter((item) => {
-      if (spaEnabled && item.itemType !== kindTab) return false
+      if (item.itemType !== "FOOD") return false
       if (stationFilter && item.stationId !== stationFilter) return false
       return !keyword || item.name.toLowerCase().includes(keyword)
     })
-  }, [menu.all, search, stationFilter, spaEnabled, kindTab])
+  }, [menu.all, search, stationFilter])
 
   // โต๊ะที่ถูกรวมเข้าโต๊ะอื่นไม่ต้องโชว์ — ทุกอย่างวิ่งไปที่โต๊ะหลักอยู่แล้ว
   const selectableTables = useMemo(() => tables.filter((t) => t.mergedIntoCode === null), [tables])
@@ -431,7 +432,7 @@ export function MenuPos({
             <h1 className="t-h2">{spaEnabled ? "ขายอาหาร/ร้านสปา" : "ขายอาหาร"}</h1>
             <span className="t-caption">
               {spaEnabled
-                ? "เลือกเมนูหรือโปรแกรมนวดใส่ตะกร้า แล้วเลือกโต๊ะ/ห้อง — ตะกร้าเดียวใส่ได้ทั้งอาหารและนวด"
+                ? "เลือกเมนูอาหารหรือสินค้าใส่ตะกร้า แล้วเลือกโต๊ะ/ห้อง — ขายโปรแกรมนวดที่เมนูร้านนวด"
                 : "เลือกเมนูใส่ตะกร้า แล้วเลือกโต๊ะเพื่อส่งเข้าครัว"}
             </span>
           </div>
@@ -454,9 +455,6 @@ export function MenuPos({
               }}
               tabs={[
                 { key: "FOOD" as const, label: "อาหาร", Icon: IconMenu, count: menu.all.filter((i) => i.itemType === "FOOD").length },
-                ...(spaEnabled
-                  ? [{ key: "SERVICE" as const, label: "นวดสปา", Icon: IconTherapist, count: menu.all.filter((i) => i.itemType === "SERVICE").length }]
-                  : []),
                 ...(hasProducts ? [{ key: "PRODUCT" as const, label: "สินค้า", Icon: IconBoxes, count: products.length }] : []),
               ]}
             />
@@ -469,7 +467,7 @@ export function MenuPos({
             <input
               className="input"
               placeholder={
-                kindTab === "PRODUCT" ? "ค้นหาสินค้า / สแกนบาร์โค้ด (SKU) แล้วกด Enter…" : spaEnabled && kindTab === "SERVICE" ? "ค้นหาโปรแกรมนวด…" : "ค้นหาเมนู…"
+                kindTab === "PRODUCT" ? "ค้นหาสินค้า / สแกนบาร์โค้ด (SKU) แล้วกด Enter…" : "ค้นหาเมนู…"
               }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -533,7 +531,7 @@ export function MenuPos({
         {kindTab !== "PRODUCT" ? (
           <>
             <h2 className="t-h3" style={{ marginTop: 16 }}>
-              {spaEnabled && kindTab === "SERVICE" ? "โปรแกรมนวดทั้งหมด" : "เมนูทั้งหมด"}
+              เมนูทั้งหมด
             </h2>
             {visibleMenu.length === 0 ? (
               <p className="t-body" style={{ marginTop: 8 }}>
