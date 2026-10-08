@@ -31,6 +31,7 @@ function sale(patch: Partial<SaleListItem> = {}): SaleListItem {
     cashierName: "แคชเชียร์",
     channel: "MOBILE_ORDER",
     tableCode: "A1",
+    tableKind: "TABLE",
     voidedAt: null,
     voidReason: null,
     voidedByName: null,
@@ -72,5 +73,14 @@ describe("พิมพ์ใบเสร็จซ้ำ", () => {
     fireEvent.click(screen.getByRole("button", { name: /กลับ/ }))
     expect(screen.getByText("ประวัติการขาย")).toBeTruthy()
     expect(screen.queryByText(/\*\*\* สำเนา \*\*\*/)).toBeNull()
+  })
+})
+
+/// ห้องนวดขึ้น "ห้อง" ทั้งในตารางประวัติการขายและรายละเอียดบิล (2026-10-08 เจ้าของสั่ง)
+describe("ประวัติการขาย — บิลของห้องนวด", () => {
+  it("ตารางขึ้น \"ห้อง 3/1\" ไม่ใช่ \"โต๊ะ 3/1\"", () => {
+    render(<SaleHistory sales={[sale({ tableCode: "3/1", tableKind: "ROOM" })]} from="" to="" status="" search="" storeName="ร้านทดสอบ" />)
+    expect(screen.getAllByText(/ห้อง 3\/1/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/โต๊ะ 3\/1/)).toBeNull()
   })
 })

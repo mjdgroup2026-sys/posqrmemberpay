@@ -259,6 +259,14 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     expect(first.ok).toBe(true)
     const today = await closeCashierDay(makeFormData({ countedCash: 0, note: "" }))
     expect(today.ok).toBe(true)
+
+    // ประวัติบนหน้าปิดยอดขึ้นตามวันที่ที่เลือก (2026-10-08) — ไม่ปนรอบของวันอื่น
+    const { listClosings } = await import("@/lib/queries")
+    const store = await testPrisma().cashierClosing.findFirstOrThrow({ select: { storeId: true } })
+    const onYesterday = await listClosings(store.storeId, { date: parseBusinessDayKey(yesterdayKey()) ?? undefined })
+    const onToday = await listClosings(store.storeId, { date: new Date() })
+    expect(onYesterday.map((c) => c.closingDate.toISOString().slice(0, 10))).toEqual([yesterdayKey()])
+    expect(onToday.map((c) => c.closingDate.toISOString().slice(0, 10))).toEqual([businessDayKey()])
     const again = await closeCashierDay(makeFormData({ closingDate: yesterdayKey(), countedCash: 0, note: "" }))
     expect(again.ok).toBe(false)
     expect(await testPrisma().cashierClosing.count()).toBe(2)

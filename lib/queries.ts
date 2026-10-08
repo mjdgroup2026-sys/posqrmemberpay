@@ -5,7 +5,7 @@ import { hashInviteToken } from "@/lib/invite-token"
 import { isPlanActive } from "@/lib/subscription"
 import { inviteTokenSchema } from "@/lib/validation"
 import { toNumber } from "@/lib/format"
-import { orderTicketLabel, type PlaceKind } from "@/lib/order-label"
+import { orderTicketLabel, placeLabel, type PlaceKind } from "@/lib/order-label"
 import { decodeStoreScb, getStoreScb } from "@/lib/scb-store"
 import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFromKey, minuteOfBusinessDay } from "@/lib/day"
@@ -310,6 +310,8 @@ export type SaleListItem = {
   channel: "RETAIL_POS" | "MOBILE_ORDER" | "TAKEAWAY"
   /// รหัสโต๊ะของบิล Mobile Order — บิลหน้าร้านเป็น null
   tableCode: string | null
+  /// โต๊ะ/ห้อง (2026-10-08) — ประวัติการขาย/ใบเสร็จขึ้น "ห้อง" สำหรับห้องนวด · null = ไม่มีโต๊ะ (POS/กลับบ้าน)
+  tableKind: PlaceKind | null
   voidedAt: Date | null
   voidReason: string | null
   voidedByName: string | null
@@ -325,6 +327,14 @@ export type SaleListItem = {
     unitPrice: number
     subtotal: number
   }[]
+}
+
+/// หมายเหตุบิลเก่าของห้องนวดถูกบันทึกเป็น "โต๊ะ 3/1" (ก่อน 2026-10-08) — แสดงเป็น "ห้อง 3/1" ตอนอ่าน ไม่แก้ข้อมูลในฐาน
+/// บิลใหม่ close-session บันทึกด้วย placeLabel() อยู่แล้ว ฟังก์ชันนี้จึงแตะเฉพาะข้อความขึ้นต้นแบบเก่า
+function roomAwareNote(note: string | null, table: { code: string; kind: PlaceKind } | null): string | null {
+  if (!note || !table || table.kind !== "ROOM") return note
+  const legacy = `โต๊ะ ${table.code}`
+  return note.startsWith(legacy) ? placeLabel(table.kind, table.code) + note.slice(legacy.length) : note
 }
 
 /// บิลขายพร้อมรายการสินค้า — หน้า /pos/history ใช้ทั้งตารางและ dialog รายละเอียด
@@ -347,7 +357,7 @@ export async function listSales(storeId: string, params: { from?: string; to?: s
     include: {
       cashier: { select: { name: true } },
       voidedBy: { select: { name: true } },
-      session: { select: { table: { select: { code: true } } } },
+      session: { select: { table: { select: { code: true, kind: true } } } },
       items: { include: { product: { select: { sku: true, unit: true } }, therapist: { select: { code: true, name: true, nickname: true } } } },
     },
   })
@@ -364,11 +374,12 @@ export async function listSales(storeId: string, params: { from?: string; to?: s
     paymentMethod: sale.paymentMethod,
     amountReceived: toNumber(sale.amountReceived),
     changeDue: toNumber(sale.changeDue),
-    note: sale.note,
+    note: roomAwareNote(sale.note, sale.session?.table ?? null),
     createdAt: sale.createdAt,
     cashierName: sale.cashier.name,
     channel: sale.channel,
     tableCode: sale.session?.table.code ?? null,
+    tableKind: sale.session?.table.kind ?? null,
     voidedAt: sale.voidedAt,
     voidReason: sale.voidReason,
     voidedByName: sale.voidedBy?.name ?? null,
@@ -617,10 +628,14 @@ export async function getDayClosings(storeId: string, cashierId: string, date: D
   return rows.map(closingView)
 }
 
-export async function listClosings(storeId: string, params: { cashierId?: string; limit?: number } = {}) {
+/// `date` = เฉพาะรอบของวันนั้น (2026-10-08 เจ้าของสั่ง — ประวัติบนหน้าปิดยอดขึ้นตามวันที่ที่เลือก ค่าเริ่มต้นวันนี้)
+export async function listClosings(storeId: string, params: { cashierId?: string; limit?: number; date?: Date } = {}) {
   const db = forStore(storeId)
   const rows = await db.cashierClosing.findMany({
-    where: params.cashierId ? { cashierId: params.cashierId } : {},
+    where: {
+      ...(params.cashierId ? { cashierId: params.cashierId } : {}),
+      ...(params.date ? { closingDate: businessDateOnly(params.date) } : {}),
+    },
     orderBy: [{ closingDate: "desc" }, { roundNo: "desc" }],
     take: params.limit ?? 60,
     include: { cashier: { select: { name: true } }, reopenedBy: { select: { name: true } } },

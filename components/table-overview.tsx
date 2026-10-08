@@ -19,7 +19,6 @@ import type { CustomerPaidBill, PaymentAwaitingCallback, ServiceAwaitingStart, T
 import { LiveElapsed } from "@/components/live-elapsed"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { IconBell, IconMerge, IconReceipt, IconRoom, IconSpinner, IconTable } from "@/components/icons"
-import { SegmentTabs } from "@/components/segment-tabs"
 import { billLabel } from "@/components/bill-switcher"
 import { AwaitingCallbackBadge, CustomerPaidBadge } from "@/components/payment-alerts"
 import {
@@ -104,9 +103,8 @@ export function TableOverview({
   const [cancelling, setCancelling] = useState<TableCard | null>(null)
   const [cancelReason, setCancelReason] = useState("")
 
-  // ร้านสปา: แท็บ โต๊ะอาหาร / ห้องสปา — ชิปกรองสถานะและตัวเลขนับเฉพาะของแท็บที่เลือก
-  const [kindTab, setKindTab] = useState<"TABLE" | "ROOM">("TABLE")
-  const inTab = spaEnabled ? tables.filter((t) => (kindTab === "ROOM" ? t.kind === "ROOM" : t.kind !== "ROOM")) : tables
+  // ร้านสปา: ผังนี้เหลือแค่โต๊ะอาหาร (2026-10-08 เจ้าของสั่ง) — ห้องนวดจัดการที่หน้า "คิวนวด" ทั้งหมด ไม่ซ้ำสองที่
+  const inTab = spaEnabled ? tables.filter((t) => t.kind !== "ROOM") : tables
 
   const counts = {
       all: inTab.length,
@@ -152,9 +150,8 @@ export function TableOverview({
     return map
   }, [awaitingStart])
 
-  /// กดห้องในแถบ "รอเริ่มนวด" — สลับไปแท็บห้องสปา ล้างตัวกรอง แล้วเลื่อนไปที่การ์ดห้องนั้น
+  /// กดห้องในแถบ "รอเริ่มนวด" (ร้านที่ไม่ได้เปิดสปาแต่มีห้องค้าง) — ล้างตัวกรอง แล้วเลื่อนไปที่การ์ดห้องนั้น
   function jumpToRoom(tableId: string) {
-    setKindTab("ROOM")
     setFilter("all")
     requestAnimationFrame(() => {
       document.getElementById(`table-card-${tableId}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
@@ -237,7 +234,7 @@ export function TableOverview({
       <div className="page-head">
         <div>
           <p className="t-eyebrow">MJD Mobile Order</p>
-          <h1 className="t-h1">{spaEnabled ? "ผังโต๊ะอาหาร/ห้องสปา" : "ผังโต๊ะ"}</h1>
+          <h1 className="t-h1">{spaEnabled ? "ผังโต๊ะอาหาร" : "ผังโต๊ะ"}</h1>
           <p className="t-body" style={{ marginTop: 4 }}>
             เวลาเปิดโต๊ะและระยะเวลาที่เปิดคำนวณสดทุกนาทีจากเวลาที่ลูกค้าเริ่มใช้โต๊ะ
           </p>
@@ -257,7 +254,13 @@ export function TableOverview({
 
       {/* ห้องที่เช็กอินแล้วยังไม่เริ่มนวด (20e — เจ้าของสั่ง 2026-09-24) — อยู่บนสุดทุกแท็บ กดแล้วพาไปการ์ดห้อง
           คำนวณสด หายเองเมื่อกดเริ่มนวด · นับรวมใน badge ของ sidebar ด้วย */}
-      {awaitingStart.length > 0 ? (
+      {spaEnabled ? (
+        <div className="alert-banner info">
+          ห้องนวดจัดการที่หน้า <Link href="/spa/bookings?tab=now">คิวนวด</Link> — เช็กอิน · เริ่มนวด · เสร็จแล้ว · ปิดบิล
+        </div>
+      ) : null}
+
+      {!spaEnabled && awaitingStart.length > 0 ? (
         <div className="alert-banner warning" role="status">
           <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
             <IconRoom size={16} aria-hidden />
@@ -273,18 +276,6 @@ export function TableOverview({
             ))}
           </span>
         </div>
-      ) : null}
-
-      {spaEnabled ? (
-        <SegmentTabs
-          label="โต๊ะหรือห้อง"
-          value={kindTab}
-          onChange={setKindTab}
-          tabs={[
-            { key: "TABLE", label: "โต๊ะอาหาร", Icon: IconTable, count: tables.filter((t) => t.kind !== "ROOM").length },
-            { key: "ROOM", label: "ห้องสปา", Icon: IconRoom, count: tables.filter((t) => t.kind === "ROOM").length },
-          ]}
-        />
       ) : null}
 
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -303,11 +294,7 @@ export function TableOverview({
       {visible.length === 0 ? (
         <section className="card-ui card-pad">
           <p className="t-body">
-            {spaEnabled && kindTab === "ROOM"
-              ? inTab.length === 0
-                ? "ยังไม่มีห้องสปา — เพิ่มที่ “จัดการโต๊ะ” แล้วเลือกชนิดเป็นห้องนวด"
-                : "ไม่มีห้องตามเงื่อนไขที่เลือก"
-              : "ไม่มีโต๊ะตามเงื่อนไขที่เลือก"}
+            {"ไม่มีโต๊ะตามเงื่อนไขที่เลือก"}
           </p>
         </section>
       ) : (
