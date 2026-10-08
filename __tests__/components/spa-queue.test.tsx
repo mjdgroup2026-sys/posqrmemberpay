@@ -52,6 +52,7 @@ function booking(id: string, name: string, start: string, status: BookingRow["st
 }
 
 const bookings = [
+  booking("b4", "คุณเช็กอิน", "14:00", "CHECKED_IN", true),
   booking("b1", "คุณจอง", "15:00", "BOOKED"),
   booking("b2", "คุณนวด", "13:00", "IN_SERVICE", true),
   booking("b3", "คุณเสร็จ", "10:00", "DONE", true),
@@ -96,6 +97,11 @@ describe("หน้า คิวนวด — แท็บรายการแ�
     for (const name of ["คุณจอง", "คุณนวด", "คุณเสร็จ"]) {
       expect(rowOf(name).getByRole("button", { name: `คำสั่งอื่นของ ${name}` })).toBeInTheDocument()
     }
+    // ★ ทีละขั้น: เช็กอินแล้วมีแค่ เริ่มนวด — ยังกดเสร็จ/จ่ายไม่ได้ (2026-10-08)
+    expect(rowOf("คุณเช็กอิน").getByRole("button", { name: "เริ่มนวด" })).toBeInTheDocument()
+    expect(rowOf("คุณเช็กอิน").queryByRole("button", { name: "เสร็จแล้ว" })).toBeNull()
+    expect(rowOf("คุณเช็กอิน").queryByRole("link", { name: /ปิดบิล/ })).toBeNull()
+    expect(rowOf("คุณนวด").queryByRole("link", { name: /ปิดบิล/ })).toBeNull()
     // ปุ่มที่ใช้ไม่บ่อยไม่วางเรียงในแถวแล้ว
     expect(rowOf("คุณจอง").queryByRole("button", { name: "ยกเลิกคิว" })).toBeNull()
   })
