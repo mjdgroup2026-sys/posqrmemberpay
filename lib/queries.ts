@@ -2806,8 +2806,26 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
         sessions: {
           where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
           orderBy: { openedAt: "asc" },
-          take: live ? 1 : 0,
-          select: { id: true, customerLabel: true, openedAt: true },
+          take: live ? undefined : 0,
+          select: {
+            id: true,
+            customerLabel: true,
+            openedAt: true,
+            // งานนวดที่กำลังทำในบิลนี้ — แหล่งเดียวกับสถานะ "กำลังนวด" ของพนักงาน ห้องกับพนักงานจึงขึ้นตรงกันเสมอ
+            // (คิวที่เริ่มนวดจากหน้าห้อง · walk-in ที่ไม่มีคิวจอง · คิวที่เปลี่ยนพนักงานหลังเช็กอิน)
+            orders: {
+              select: {
+                items: {
+                  where: { status: "COOKING", menuItem: { itemType: "SERVICE" } },
+                  take: 1,
+                  select: {
+                    menuItem: { select: { name: true } },
+                    therapist: { select: { code: true, name: true, nickname: true } },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     }),
@@ -2868,6 +2886,10 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
     const inService = live ? (mine.find((row) => row.status === "IN_SERVICE") ?? null) : null
     const waiting = live ? (mine.find((row) => row.status === "CHECKED_IN") ?? null) : null
     const openBill = room.sessions[0] ?? null
+    // บิลเปิดวันนี้ที่มีงานนวดกำลังทำอยู่ — บิลค้างจากวันก่อนไม่นับ (ตรงกับกติกาของพนักงานด้านบน)
+    const working = room.sessions
+      .filter((session) => session.openedAt >= start)
+      .flatMap((session) => session.orders.flatMap((order) => order.items.map((item) => ({ session, item }))))[0] ?? null
     const guestDue = live && next !== null && next.startAt <= now ? next : null
 
     const base = {
@@ -2880,7 +2902,8 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
       nextBookingCustomer: next?.customerName ?? null,
       bookings: mine,
     }
-    const job = inService ?? waiting
+    // มีงานนวดกำลังทำในห้อง (เช่น เริ่มจากหน้าห้อง/เปลี่ยนพนักงาน) ชนะ "รอเริ่มนวด" — ไม่งั้นห้องขึ้นรอทั้งที่พนักงานกำลังนวด
+    const job = inService ?? (working ? null : waiting)
     if (job) {
       return {
         ...base,
@@ -2889,6 +2912,18 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
         therapistLabel: job.therapistLabel,
         until: job.endAt,
         overrun: inService !== null && inService.endAt <= now,
+      }
+    }
+    if (working) {
+      const linked = dayBookings.find((row) => row.tableSessionId === working.session.id) ?? null
+      const therapist = working.item.therapist
+      return {
+        ...base,
+        state: "IN_SERVICE",
+        customerName: working.session.customerLabel ?? linked?.customerName ?? null,
+        therapistLabel: therapist ? `${therapist.code} ${therapist.nickname ?? therapist.name}` : null,
+        until: linked?.endAt ?? null,
+        overrun: linked !== null && linked.endAt <= now,
       }
     }
     if (openBill) {

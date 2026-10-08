@@ -273,7 +273,25 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
 
       const board = await queries.getSpaBoard(TEST_STORE_ID)
       expect(board.therapists.find((t) => t.id === t2.id)).toMatchObject({ state: "BUSY", walkIn: true, roomCode: "3/2" })
-      expect(board.rooms.find((r) => r.id === room2.id)).toMatchObject({ state: "OCCUPIED", staleSince: null })
+      // ★ ห้องต้องขึ้น "กำลังนวด" ตรงกับพนักงาน (เจ้าของเจอ 2026-10-08: พนักงานขึ้นกำลังนวด แต่ห้องไม่ขึ้น)
+      expect(board.rooms.find((r) => r.id === room2.id)).toMatchObject({
+        state: "IN_SERVICE",
+        customerName: "walk-in",
+        therapistLabel: "002 หน่อย",
+        staleSince: null,
+      })
+    })
+
+    it("★ เริ่มนวดจากหน้าห้อง (ไม่ผ่านตารางจอง) → ห้องและพนักงานขึ้นกำลังนวดตรงกัน", async () => {
+      const { program, t1, room1 } = await seedSpa()
+      const { startServiceItem } = await import("@/app/actions/orders")
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, tableId: room1.id, startTime: "13:00" })
+      await checkInBooking(makeFormData({ id, tableId: room1.id }))
+      expect((await startServiceItem(makeFormData({ id: (await serviceItemOf(id)).id }))).ok).toBe(true)
+
+      const board = await queries.getSpaBoard(TEST_STORE_ID, { now: at(13 * 60 + 20) })
+      expect(board.therapists.find((t) => t.id === t1.id)?.state).toBe("BUSY")
+      expect(board.rooms.find((r) => r.id === room1.id)).toMatchObject({ state: "IN_SERVICE", therapistLabel: "001 นิด" })
     })
   })
 })
