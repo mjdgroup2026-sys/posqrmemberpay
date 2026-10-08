@@ -391,11 +391,11 @@ describe.skipIf(!dbReady)("ร้านนวด — จองล่วงหน
       expect(day.bufferMinutes).toBe(10)
       expect(day.shifts).toHaveLength(1)
 
-      // "ตอนนี้" อยู่กลางคิว → พนักงานยังไม่ถือว่า BUSY เพราะยังไม่ได้เริ่มนวดจริง แต่ห้องถูกจับจองไว้แล้ว
-      const board = await queries.getSpaBoard(TEST_STORE_ID, businessDayTime(today, 13 * 60 + 15))
+      // "ตอนนี้" อยู่กลางคิวแต่ยังไม่เช็กอิน → พนักงานยังไม่ BUSY และห้องขึ้น "รอลูกค้า" ไม่ใช่ "ใช้งานอยู่" (2026-10-08)
+      const board = await queries.getSpaBoard(TEST_STORE_ID, { now: businessDayTime(today, 13 * 60 + 15) })
       const row = board.therapists.find((t) => t.id === t1.id)
       expect(row?.state).toBe("FREE")
-      expect(board.rooms.find((r) => r.code === "3/1")?.currentCustomer).toBe("คุณเอ")
+      expect(board.rooms.find((r) => r.code === "3/1")).toMatchObject({ state: "AWAITING_GUEST", customerName: "คุณเอ" })
 
       // เตือนล่วงหน้า 15 นาที — 12:50 เห็น, 12:30 ยังไม่เห็น
       expect(await queries.countUpcomingBookings(TEST_STORE_ID, businessDayTime(today, 12 * 60 + 50))).toBe(1)
