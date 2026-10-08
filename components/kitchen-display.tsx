@@ -1,5 +1,6 @@
 "use client"
 
+import { ticketHeading } from "@/lib/order-label"
 import { useCallback, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
@@ -126,7 +127,7 @@ export function KitchenDisplay({
     (orderId: string) => {
       const t = tickets.find((x) => x.orderId === orderId)
       if (!t) return orderId
-      return t.orderType === "TAKEAWAY" ? t.tableCode : `โต๊ะ ${t.tableCode}`
+      return ticketHeading(t)
     },
     [tickets],
   )
@@ -335,7 +336,7 @@ export function KitchenDisplay({
                 </div>
               ) : (
                 columnTickets.map((ticket) => {
-                  const label = ticket.orderType === "TAKEAWAY" ? ticket.tableCode : `โต๊ะ ${ticket.tableCode}`
+                  const label = ticketHeading(ticket)
                   return (
                     <article
                       key={`${ticket.orderId}-${column.key}`}

@@ -1,5 +1,6 @@
 "use client"
 
+import { placeLabel, placeNoun } from "@/lib/order-label"
 import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
 import { useState } from "react"
 import Link from "next/link"
@@ -169,11 +170,11 @@ export function TableDetail({
             </Link>
           </p>
           <h1 className="t-h1">
-            โต๊ะ {detail.tableCode}
+            {placeLabel(detail.tableKind, detail.tableCode)}
             {detail.customerLabel ? <> · {detail.customerLabel}</> : null}
           </h1>
           <p className="t-body" style={{ marginTop: 4 }}>
-            เปิดโต๊ะ <span className="num">{formatClock(detail.openedAt)}</span> ·{" "}
+            เปิด{placeNoun(detail.tableKind)} <span className="num">{formatClock(detail.openedAt)}</span> ·{" "}
             <LiveElapsed since={detail.openedAt} prefix="เปิดมาแล้ว " />
             {detail.qrType ? ` · QR ${detail.qrType === "STATIC" ? "ถาวร" : "ชั่วคราว"}` : ""}
             {detail.mergedTableCodes.length > 0
@@ -513,7 +514,7 @@ export function TableDetail({
       <Dialog open={cancellingTable} onOpenChange={(open) => !open && setCancellingTable(false)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>ยกเลิกโต๊ะ {detail.tableCode}</DialogTitle>
+            <DialogTitle>ยกเลิก{placeLabel(detail.tableKind, detail.tableCode)}</DialogTitle>
             <DialogDescription>
               รายการที่ยังไม่เสิร์ฟจะถูกยกเลิกทั้งหมด และไม่มีการออกบิลเพราะยังไม่ได้ชำระเงิน
             </DialogDescription>

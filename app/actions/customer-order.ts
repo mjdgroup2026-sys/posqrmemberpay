@@ -8,6 +8,7 @@ import { buildOrderLines, OrderLineError } from "@/lib/order-lines"
 import { isPlanActive } from "@/lib/subscription"
 import { toNumber } from "@/lib/format"
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
+import { placeLabel } from "@/lib/order-label"
 import {
   submitOrderSchema,
   callStaffSchema,
@@ -141,10 +142,10 @@ export async function submitOrder(formData: FormData): Promise<ActionResult<Subm
     if (isPrinterConfigured() && foodRows.length > 0) {
       const table = await db.table.findUnique({
         where: { id: created.tableId },
-        select: { code: true },
+        select: { code: true, kind: true },
       })
       printed = await printKitchenTicket({
-        tableCode: table?.code ?? "-",
+        heading: placeLabel(table?.kind, table?.code ?? "-"),
         orderNumber: created.order.orderNumber,
         submittedAt: created.order.submittedAt,
         items: foodRows.map((row) => ({

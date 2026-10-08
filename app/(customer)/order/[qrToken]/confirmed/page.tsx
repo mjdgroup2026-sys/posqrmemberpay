@@ -27,7 +27,7 @@ export default async function CustomerConfirmedPage({
   return (
     <CustomerShell
       storeName={settings?.storeName ?? "MJD Mobile Order"}
-      tableCode={session.tableCode}
+      tableCode={session.tableCode} tableKind={session.tableKind}
       title="ส่งออร์เดอร์แล้ว"
     >
       <section className="card-ui card-pad" style={{ textAlign: "center" }}>

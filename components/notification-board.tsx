@@ -1,5 +1,6 @@
 "use client"
 
+import { placeLabel } from "@/lib/order-label"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -88,7 +89,7 @@ export function NotificationBoard({
           <span className="row" style={{ gap: 8 }}>
             {isCall ? <IconBell size={17} aria-hidden /> : <IconReceipt size={17} aria-hidden />}
             <span style={{ fontWeight: 700 }}>
-              โต๊ะ {item.tableCode} · {isCall ? "เรียกพนักงาน" : "ขอเช็กบิล"}
+              {placeLabel(item.tableKind, item.tableCode)} · {isCall ? "เรียกพนักงาน" : "ขอเช็กบิล"}
             </span>
           </span>
           <span className={`chip ${urgent ? (isCall ? "chip-danger" : "chip-warning") : "chip-success"}`}>
@@ -191,7 +192,7 @@ export function NotificationBoard({
                 <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
                   <span className="row" style={{ gap: 8 }}>
                     <IconWarning size={17} aria-hidden />
-                    <span style={{ fontWeight: 700 }}>โต๊ะ {item.tableCode}</span>
+                    <span style={{ fontWeight: 700 }}>{placeLabel(item.tableKind, item.tableCode)}</span>
                   </span>
                   <span className="chip chip-warning">
                     <span className="dot" />

@@ -23,6 +23,7 @@ import {
 } from "@/lib/validation"
 import type { ActionResult, FieldErrors } from "@/lib/types"
 import { putStock } from "@/lib/stock-moves"
+import { placeLabel } from "@/lib/order-label"
 
 /// ประเภทห้อง (Phase 20) — ใส่ได้เฉพาะห้องนวด (ROOM) และต้องเป็นประเภทบริการของร้านนี้ (FK จากฟอร์ม กติกาข้อ 5)
 /// คืน stationId = null เมื่อเป็นโต๊ะอาหาร/ไม่ระบุ · คืน ok:false เมื่อ id แปลกปลอม (forStore() หาไม่เจอ)
@@ -287,10 +288,10 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
   const { sessionId, reason } = parsed.data
 
   try {
-    const tableCode = await db.$transaction(async (tx) => {
+    const place = await db.$transaction(async (tx) => {
       const session = await tx.tableSession.findUnique({
         where: { id: sessionId },
-        select: { id: true, status: true, tableId: true, table: { select: { code: true } } },
+        select: { id: true, status: true, tableId: true, table: { select: { code: true, kind: true } } },
       })
       if (!session) throw new TableAbort({ error: "ไม่พบโต๊ะที่ต้องการยกเลิก" })
 
@@ -305,7 +306,7 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
         },
       })
       if (cancelled.count === 0) {
-        throw new TableAbort({ error: `โต๊ะ ${session.table.code} ถูกปิดหรือยกเลิกไปแล้ว` })
+        throw new TableAbort({ error: `${placeLabel(session.table.kind, session.table.code)} ถูกปิดหรือยกเลิกไปแล้ว` })
       }
 
       // ยกเลิกรายการอาหารที่ยังไม่เสิร์ฟทั้งหมด (SERVED/CANCELLED ไปแล้วไม่แตะ)
@@ -336,7 +337,7 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
         if (released.count === 1 && line.productId) {
           await putStock(tx, storeId, line.productId, line.quantity, {
             orderItemId: line.id,
-            note: `ยกเลิกโต๊ะ ${session.table.code} — ${reason}`,
+            note: `ยกเลิก${placeLabel(session.table.kind, session.table.code)} — ${reason}`,
           })
         }
       }
@@ -344,11 +345,11 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
       // คืนโต๊ะหลักและโต๊ะที่รวมอยู่เป็นว่าง — ห้องสปาที่ยังมีบิลของลูกค้าคนอื่นเปิดอยู่ไม่ถูกคืน (2026-09-23)
       await releaseTableIfIdle(tx, storeId, session.tableId)
 
-      return session.table.code
+      return placeLabel(session.table.kind, session.table.code)
     })
 
     revalidateTablePages(storeId)
-    return { ok: true, message: `ยกเลิกโต๊ะ ${tableCode} เรียบร้อยแล้ว (ไม่มีการออกบิล)` }
+    return { ok: true, message: `ยกเลิก${place} เรียบร้อยแล้ว (ไม่มีการออกบิล)` }
   } catch (error) {
     if (error instanceof TableAbort) return { ok: false, ...error.failure }
     return { ok: false, error: "ยกเลิกโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
@@ -367,14 +368,14 @@ async function assertTableIdle(
 ) {
   const table = await tx.table.findUnique({
     where: { id: tableId },
-    select: { code: true, status: true, primaryTableId: true, _count: { select: { mergedTables: true } } },
+    select: { code: true, kind: true, status: true, primaryTableId: true, _count: { select: { mergedTables: true } } },
   })
   if (!table) throw new TableAbort({ error: "ไม่พบโต๊ะที่ต้องการแก้ไข" })
 
   const live = await tx.tableSession.count({
     where: { tableId, status: { in: LIVE_SESSION_STATUS } },
   })
-  if (live > 0) throw new TableAbort({ error: `โต๊ะ ${table.code} กำลังเปิดอยู่ กรุณาปิดบิลก่อน` })
+  if (live > 0) throw new TableAbort({ error: `${placeLabel(table.kind, table.code)} กำลังเปิดอยู่ กรุณาปิดบิลก่อน` })
   if (table.primaryTableId !== null) {
     throw new TableAbort({ error: `โต๊ะ ${table.code} ถูกรวมกับโต๊ะอื่นอยู่ กรุณายกเลิกการรวมก่อน` })
   }

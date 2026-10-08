@@ -63,7 +63,7 @@ export default async function PromptPayPage({ params }: PageProps<"/order/[qrTok
   return (
     <CustomerShell
       storeName={settings?.storeName ?? "MJD Mobile Order"}
-      tableCode={status.tableCode}
+      tableCode={status.tableCode} tableKind={status.tableKind}
       backHref={`/order/${qrToken}/pay`}
       title="ชำระด้วยพร้อมเพย์"
     >

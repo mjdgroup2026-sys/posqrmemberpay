@@ -37,7 +37,7 @@ export default async function CustomerMenuPage({ params }: PageProps<"/order/[qr
   const [menu, settings] = await Promise.all([listMenu(session.storeId), getStoreSettings(session.storeId)])
 
   return (
-    <CustomerShell storeName={settings?.storeName ?? "MJD Mobile Order"} tableCode={session.tableCode}>
+    <CustomerShell storeName={settings?.storeName ?? "MJD Mobile Order"} tableCode={session.tableCode} tableKind={session.tableKind}>
       {/* ปก/โลโก้ที่ร้านตั้งเองได้จากหน้า /mobile-order/settings (F21)
           ใช้ <img> ธรรมดาเพราะเป็น URL ภายนอกที่ร้านกรอกเอง — next/image ต้องประกาศ
           remotePatterns ล่วงหน้า ซึ่งทำไม่ได้กับโดเมนที่ยังไม่รู้ตอน build */}

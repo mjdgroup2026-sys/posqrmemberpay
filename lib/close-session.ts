@@ -6,6 +6,7 @@ import type { PaymentMethodValue } from "@/lib/types"
 import { publishStoreEvent } from "@/lib/realtime"
 import { releaseTableIfIdle } from "@/lib/table-session"
 import { discountNoteText } from "@/lib/discount"
+import { placeLabel } from "@/lib/order-label"
 
 /// ปิดบิลของโต๊ะ (MJD Mobile Order) — ใช้ร่วมกันระหว่างพนักงานกดยืนยันกับ webhook ของธนาคาร
 ///
@@ -130,7 +131,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
           tableId: true,
           qrCodeId: true,
           ...SESSION_DISCOUNT_SELECT,
-          table: { select: { code: true } },
+          table: { select: { code: true, kind: true } },
           orders: {
             select: {
               items: {
@@ -199,7 +200,7 @@ export async function closeSessionWithPayment(input: ClosePaymentInput): Promise
           paymentMethod: input.paymentMethod,
           amountReceived: received.toFixed(2),
           changeDue: changeDue.toFixed(2),
-          note: billNote(input.note ?? `โต๊ะ ${session.table.code}`, session, discount),
+          note: billNote(input.note ?? placeLabel(session.table.kind, session.table.code), session, discount),
           cashierId,
           items: {
             create: lines.map((line) => ({

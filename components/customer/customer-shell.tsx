@@ -1,11 +1,13 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
 import { Copyright } from "@/components/copyright"
+import { placeLabel, type PlaceKind } from "@/lib/order-label"
 
 /// โครงหน้าฝั่งลูกค้า — หัวเรื่องร้าน/โต๊ะ + พื้นที่เนื้อหา (มือถือเป็นหลัก กว้างสุด 480px)
 export function CustomerShell({
   storeName,
   tableCode,
+  tableKind = null,
   backHref,
   title,
   children,
@@ -13,6 +15,8 @@ export function CustomerShell({
 }: {
   storeName: string
   tableCode: string
+  /// ห้องนวดขึ้น "ห้อง" แทน "โต๊ะ" (2026-10-08) — ลูกค้าสแกน QR ในห้องนวด
+  tableKind?: PlaceKind | null
   backHref?: string
   title?: string
   children: ReactNode
@@ -38,7 +42,7 @@ export function CustomerShell({
           ) : null}
           <div style={{ minWidth: 0 }}>
             <p style={{ fontWeight: 700 }}>{title ?? storeName}</p>
-            <p className="t-caption">โต๊ะ {tableCode}</p>
+            <p className="t-caption">{placeLabel(tableKind, tableCode)}</p>
           </div>
         </div>
       </header>

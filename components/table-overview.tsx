@@ -1,5 +1,6 @@
 "use client"
 
+import { placeLabel } from "@/lib/order-label"
 import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
 import { useMemo, useState } from "react"
 import Link from "next/link"
@@ -593,7 +594,7 @@ export function TableOverview({
       <Dialog open={cancelling !== null} onOpenChange={(open) => !open && setCancelling(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>ยกเลิกโต๊ะ {cancelling?.code}</DialogTitle>
+            <DialogTitle>ยกเลิก{placeLabel(cancelling?.kind, cancelling?.code ?? "")}</DialogTitle>
             <DialogDescription>
               รายการอาหารที่ยังไม่เสิร์ฟจะถูกยกเลิกทั้งหมด และโต๊ะที่รวมอยู่จะกลับเป็นว่าง —
               ไม่มีการออกบิลเพราะยังไม่มีการชำระเงิน

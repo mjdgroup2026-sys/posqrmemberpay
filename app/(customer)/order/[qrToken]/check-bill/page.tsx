@@ -29,7 +29,7 @@ export default async function CheckBillPage({ params }: PageProps<"/order/[qrTok
   return (
     <CustomerShell
       storeName={settings?.storeName ?? "MJD Mobile Order"}
-      tableCode={session.tableCode}
+      tableCode={session.tableCode} tableKind={session.tableKind}
       backHref={`/order/${qrToken}/status`}
       title="เช็กบิล"
     >
