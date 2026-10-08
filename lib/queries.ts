@@ -2645,6 +2645,9 @@ export type BookingRow = {
   tableSessionId: string | null
   /// บิลห้องของคิวนี้ยังเปิดอยู่ (เช็กอินแล้วและยังไม่ปิดบิล) — ปุ่มปิดบิลบนตารางจอง
   billOpen: boolean
+  /// เวลาที่ทำรายการจอง / เช็กอิน (2026-10-08) — แท็บรายการเรียงตาม createdAt ล่าสุดก่อนและโชว์เวลาทำรายการ
+  createdAt: Date
+  checkedInAt: Date | null
 }
 
 type BookingWithRelations = {
@@ -2660,6 +2663,8 @@ type BookingWithRelations = {
   status: string
   note: string | null
   tableSessionId: string | null
+  createdAt: Date
+  checkedInAt: Date | null
   menuItem: { name: string }
   therapist: { code: string; name: string; nickname: string | null }
   table: { code: string } | null
@@ -2688,6 +2693,8 @@ function toBookingRow(row: BookingWithRelations): BookingRow {
     note: row.note,
     tableSessionId: row.tableSessionId,
     billOpen: row.session !== null && (row.session.status === "OPEN" || row.session.status === "AWAITING_BILL"),
+    createdAt: row.createdAt,
+    checkedInAt: row.checkedInAt,
   }
 }
 

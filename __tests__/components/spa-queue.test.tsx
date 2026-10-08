@@ -27,7 +27,7 @@ const DAY = "2026-10-08"
 const at = (hhmm: string) => new Date(`${DAY}T${hhmm}:00+07:00`)
 const minute = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3))
 
-function booking(id: string, name: string, start: string, status: BookingRow["status"], billOpen = false): BookingRow {
+function booking(id: string, name: string, start: string, status: BookingRow["status"], billOpen = false, createdAt = at("09:00")): BookingRow {
   const end = `${String(Number(start.slice(0, 2)) + 1).padStart(2, "0")}${start.slice(2)}`
   return {
     id,
@@ -48,6 +48,8 @@ function booking(id: string, name: string, start: string, status: BookingRow["st
     note: null,
     tableSessionId: status === "BOOKED" ? null : "s1",
     billOpen,
+    createdAt,
+    checkedInAt: status === "BOOKED" ? null : at("13:55"),
   }
 }
 
@@ -154,5 +156,23 @@ describe("หน้า คิวนวด — แท็บรายการแ�
     renderQueue({ tab: "timeline" })
     fireEvent.click(screen.getByRole("tab", { name: "ตามห้อง" }))
     expect(screen.getByText("ห้อง 3/1")).toBeInTheDocument()
+  })
+})
+
+/// แท็บรายการเรียงตามเวลาที่ทำรายการจอง ล่าสุดก่อน + โชว์เวลาทำรายการ (เจ้าของสั่ง 2026-10-08)
+describe("หน้า คิวนวด — เรียงตามเวลาทำรายการ", () => {
+  it("จองทีหลังขึ้นก่อน (ไม่ใช่ตามเวลานัด) และแต่ละแถวบอกว่าจอง/เช็กอินเมื่อไร", () => {
+    renderQueue({
+      bookings: [
+        booking("old", "คุณจองก่อน", "18:00", "BOOKED", false, at("08:00")),
+        booking("new", "คุณจองทีหลัง", "10:00", "CHECKED_IN", false, at("12:30")),
+      ],
+    })
+    const rows = screen.getAllByRole("row").slice(1)
+    expect(rows[0].textContent).toContain("คุณจองทีหลัง")
+    expect(rows[1].textContent).toContain("คุณจองก่อน")
+    expect(rows[0].textContent).toMatch(/จองเมื่อ .*12:30.*เช็กอิน .*13:55/)
+    expect(rows[1].textContent).toMatch(/จองเมื่อ .*08:00/)
+    expect(rows[1].textContent).not.toContain("เช็กอิน 1")
   })
 })

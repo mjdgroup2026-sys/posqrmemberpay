@@ -40,6 +40,8 @@ function booking(id: string, name: string, start: string, end: string, status: B
     note: null,
     tableSessionId: status === "BOOKED" ? null : "s1",
     billOpen: status !== "BOOKED",
+    createdAt: at("09:00"),
+    checkedInAt: null,
   }
 }
 
