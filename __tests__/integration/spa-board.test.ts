@@ -29,6 +29,8 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
   let checkInBooking: (formData: FormData) => Promise<ActionResult<CheckInResult>>
   let startBookingService: (formData: FormData) => Promise<ActionResult>
   let finishBookingService: (formData: FormData) => Promise<ActionResult>
+  let cancelBooking: (formData: FormData) => Promise<ActionResult>
+  let markBookingNoShow: (formData: FormData) => Promise<ActionResult>
   let queries: typeof import("@/lib/queries")
 
   const today = businessDayKey()
@@ -40,6 +42,8 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
     checkInBooking = bookings.checkInBooking
     startBookingService = bookings.startBookingService
     finishBookingService = bookings.finishBookingService
+    cancelBooking = bookings.cancelBooking
+    markBookingNoShow = bookings.markBookingNoShow
     queries = await import("@/lib/queries")
   })
 
@@ -160,6 +164,48 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
         status: "CHECKED_IN",
       })
       expect(ticket?.checkedInAt).not.toBeNull()
+    })
+  })
+
+  describe("ไม่มาตามนัด / ยกเลิกคิว ตามสถานะ (2026-10-08)", () => {
+    it("เช็กอินแล้ว = ลูกค้ามาแล้ว บันทึกไม่มาตามนัดไม่ได้", async () => {
+      const { program, t1, room1 } = await seedSpa()
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      await checkInBooking(makeFormData({ id, tableId: room1.id }))
+
+      const result = await markBookingNoShow(makeFormData({ id }))
+      expect(result.ok).toBe(false)
+      expect(result.ok === false && result.error).toContain("เช็กอินแล้ว")
+      expect((await testPrisma().booking.findUniqueOrThrow({ where: { id } })).status).toBe("CHECKED_IN")
+    })
+
+    it("เริ่มนวดแล้ว ยกเลิกคิวและบันทึกไม่มาไม่ได้ทั้งคู่", async () => {
+      const { program, t1, room1 } = await seedSpa()
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      await checkInBooking(makeFormData({ id, tableId: room1.id }))
+      await startBookingService(makeFormData({ id }))
+
+      expect((await cancelBooking(makeFormData({ id }))).ok).toBe(false)
+      expect((await markBookingNoShow(makeFormData({ id }))).ok).toBe(false)
+      expect((await testPrisma().booking.findUniqueOrThrow({ where: { id } })).status).toBe("IN_SERVICE")
+      expect((await serviceItemOf(id)).status).toBe("COOKING")
+    })
+
+    it("★ ยกเลิกคิวที่เช็กอินแล้ว → รายการนวดในบิลห้องถูกยกเลิกด้วย (บิลไม่คิดเงินโปรแกรมที่ไม่ได้นวด)", async () => {
+      const { program, t1, room1 } = await seedSpa()
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      await checkInBooking(makeFormData({ id, tableId: room1.id }))
+
+      expect((await cancelBooking(makeFormData({ id, reason: "ลูกค้าเปลี่ยนใจ" }))).ok).toBe(true)
+      expect((await testPrisma().booking.findUniqueOrThrow({ where: { id } })).status).toBe("CANCELLED")
+      expect((await serviceItemOf(id)).status).toBe("CANCELLED")
+    })
+
+    it("คิวที่ยังไม่มา บันทึกไม่มาตามนัดได้ตามเดิม", async () => {
+      const { program, t1 } = await seedSpa()
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      expect((await markBookingNoShow(makeFormData({ id }))).ok).toBe(true)
+      expect((await testPrisma().booking.findUniqueOrThrow({ where: { id } })).status).toBe("NO_SHOW")
     })
   })
 
