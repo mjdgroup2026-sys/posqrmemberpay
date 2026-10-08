@@ -1,7 +1,8 @@
 import { placeLabel } from "@/lib/order-label"
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { getBillingView, getSaleById } from "@/lib/queries"
+import { getBillingView, getSaleById, getSalesLock } from "@/lib/queries"
+import { SalesLockBanner } from "@/components/sales-lock-banner"
 import { ChangeDuePanel } from "@/components/change-due-panel"
 import { requirePageAccess } from "@/lib/permissions"
 import { BillingForm } from "@/components/billing-form"
@@ -12,7 +13,7 @@ export const metadata = { title: "ปิดบิล" }
 
 export default async function BillingPage({ params, searchParams }: PageProps<"/mobile-order/tables/[tableId]/billing">) {
   // ด่านชั้นที่ 1 ของ §4 (Phase 16) — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId, granted } = await requirePageAccess("MO_TABLES")
+  const { storeId, granted, id: userId } = await requirePageAccess("MO_TABLES")
   // ปิดบิล = MO_TABLES:EDIT — มีแค่ VIEW ให้ดูยอดได้แต่กดยืนยันไม่ได้ (action ก็ปฏิเสธซ้ำ)
   if (!granted.MO_TABLES?.includes("EDIT")) redirect("/access-denied?resource=MO_TABLES")
   const { tableId } = await params
@@ -121,5 +122,12 @@ export default async function BillingPage({ params, searchParams }: PageProps<"/
     )
   }
 
-  return <BillingForm bill={bill} returnTo={returnTo} />
+  // ปิดยอดแล้ว = รับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08) — ด่านจริงอยู่ที่ action
+  const salesLock = await getSalesLock(storeId, userId)
+  return (
+    <>
+      {salesLock.locked ? <SalesLockBanner roundNo={salesLock.roundNo} /> : null}
+      <BillingForm bill={bill} returnTo={returnTo} />
+    </>
+  )
 }

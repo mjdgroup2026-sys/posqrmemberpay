@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
+import { salesLockError } from "@/lib/sales-lock"
 import { publishStoreEvent } from "@/lib/realtime"
 import { findStoreByQrToken } from "@/lib/store-resolve"
 import { slipPaymentReference, verifySlipAndSettle } from "@/lib/slip-settle"
@@ -64,6 +65,9 @@ export async function confirmMobilePayment(
   }
   const user = ctx.user
   const storeId = ctx.storeId
+  // ปิดยอดรอบล่าสุดแล้ว = รับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08)
+  const locked = await salesLockError(storeId, user.id)
+  if (locked) return { ok: false, error: locked }
 
   const parsed = confirmPaymentSchema.safeParse({
     sessionId: formData.get("sessionId") ?? "",
@@ -193,6 +197,9 @@ export async function prepareStaffPromptPay(formData: FormData): Promise<ActionR
   }
   const storeId = ctx.storeId
   const db = forStore(storeId)
+  // ออก QR = เริ่มรับเงิน — ปิดยอดแล้วต้องเปิดรอบขายใหม่ก่อน (2026-10-08)
+  const locked = await salesLockError(storeId, ctx.user.id)
+  if (locked) return { ok: false, error: locked }
 
   const sessionId = String(formData.get("sessionId") ?? "")
   if (!sessionId) return { ok: false, error: "ไม่พบบิลที่ต้องการชำระ" }

@@ -1,13 +1,14 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getSession } from "@/lib/session"
-import { getDayClosings, getOpenSalesSummary, getStoreDaySummary, listClosings, type ClosingChannelLine, type ClosingView } from "@/lib/queries"
+import { getDayClosings, getOpenSalesSummary, getSalesLock, getStoreDaySummary, listClosings, type ClosingChannelLine, type ClosingView } from "@/lib/queries"
 import { CLOSING_CHANNELS, CLOSING_CHANNEL_LABEL } from "@/lib/closing-channels"
 import { formatBaht, formatBusinessDate, formatDate, formatDateTime, formatNumber } from "@/lib/format"
 import { businessDayKey, parseBusinessDayKey } from "@/lib/day"
 import { ClosingDatePicker } from "@/components/closing-date-picker"
 import { ClosingForm } from "@/components/closing-form"
 import { ReopenClosingButton } from "@/components/reopen-closing-button"
+import { ResumeSalesButton } from "@/components/resume-sales-button"
 import { requirePageAccess } from "@/lib/permissions"
 
 export const metadata = { title: "ปิดยอดประจำวัน" }
@@ -35,12 +36,14 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
   // สรุปทั้งร้าน (20g) — เฉพาะคนที่ดูรายงานได้ (เจ้าของได้เสมอ) เพราะเห็นยอดของแคชเชียร์ทุกคน
   const canSeeStore = granted.REPORTS?.includes("VIEW") ?? false
   // ปิดหลายรอบต่อวัน (2026-09-29): summary = บิลที่ยังไม่ถูกปิดรอบ · rounds = รอบที่ปิดแล้วของวันนั้น
-  const [summary, rounds, history, storeDay] = await Promise.all([
+  const [summary, rounds, history, storeDay, salesLock] = await Promise.all([
     getOpenSalesSummary(storeId, cashierId, closingDay),
     getDayClosings(storeId, cashierId, closingDay),
     // ประวัติขึ้นตามวันที่ที่เลือก (ค่าเริ่มต้นวันนี้ · 2026-10-08 เจ้าของสั่ง)
     listClosings(storeId, { cashierId, date: closingDay, limit: 60 }),
     canSeeStore ? getStoreDaySummary(storeId, closingDay) : Promise.resolve(null),
+    // ปิดยอดแล้วรับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08) — ล็อกเฉพาะวันนี้
+    getSalesLock(storeId, cashierId),
   ])
 
   // รอบที่ถูกเปิดใหม่ (2026-09-30) ยังแสดงเป็นประวัติ แต่ไม่นับยอด — บิลของมันกลับไปอยู่ใน summary แล้ว
@@ -119,6 +122,20 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
           {active.length > 0 ? <span className="t-caption num">ทั้งวัน {formatNumber(dayVoided)} บิล</span> : null}
         </article>
       </section>
+
+      {/* ปิดยอดรอบล่าสุดแล้ว = รับเงินไม่ได้ (2026-10-08 เจ้าของสั่ง) — ต้องกดเปิดรอบขายใหม่ก่อน */}
+      {isToday && salesLock.locked ? (
+        <div className="alert-banner warning" role="status">
+          <div className="row" style={{ justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span>
+              <strong>ปิดยอดรอบที่ {salesLock.roundNo} แล้ว — ตอนนี้รับเงินไม่ได้</strong>
+              <br />
+              ปิดบิล · ขายกลับบ้าน · ขายสินค้า ต้องกด “เปิดรอบขายใหม่” ก่อน (ยอดของรอบที่ปิดแล้วไม่ถูกแตะ)
+            </span>
+            {canClose ? <ResumeSalesButton /> : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="form-split">
         <section className="card-ui card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>

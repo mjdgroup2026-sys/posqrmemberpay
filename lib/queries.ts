@@ -628,6 +628,23 @@ export async function getDayClosings(storeId: string, cashierId: string, date: D
   return rows.map(closingView)
 }
 
+/// ล็อกการรับเงินหลังปิดยอด (2026-10-08 เจ้าของสั่ง) — ตัดสินที่นี่ที่เดียว
+///
+/// ล็อก = แคชเชียร์คนนี้มีรอบปิดยอดของ **วันนี้** ที่ยังใช้อยู่ (ไม่ถูกเปิดใหม่) และรอบล่าสุดนั้นยังไม่ได้กด "เปิดรอบขายใหม่"
+/// · ล็อกรายคน (ปิดยอดนับรายคน) — คนอื่นในร้านขายต่อได้ · ขึ้นวันใหม่ = ยังไม่มีรอบของวันนั้น = ไม่ล็อก
+/// · ปิดรอบย้อนหลังไม่ล็อกวันนี้ · เปิดรอบเดิมกลับ (reopen) แล้วรอบล่าสุดที่เหลือถูกเปิดขายไปแล้ว = ไม่ล็อก
+export type SalesLock = { locked: boolean; roundNo: number | null; closedAt: Date | null }
+
+export async function getSalesLock(storeId: string, cashierId: string, now: Date = new Date()): Promise<SalesLock> {
+  const latest = await forStore(storeId).cashierClosing.findFirst({
+    where: { cashierId, closingDate: businessDateOnly(now), reopenedAt: null },
+    orderBy: { roundNo: "desc" },
+    select: { roundNo: true, closedAt: true, salesResumedAt: true },
+  })
+  if (!latest || latest.salesResumedAt !== null) return { locked: false, roundNo: latest?.roundNo ?? null, closedAt: latest?.closedAt ?? null }
+  return { locked: true, roundNo: latest.roundNo, closedAt: latest.closedAt }
+}
+
 /// `date` = เฉพาะรอบของวันนั้น (2026-10-08 เจ้าของสั่ง — ประวัติบนหน้าปิดยอดขึ้นตามวันที่ที่เลือก ค่าเริ่มต้นวันนี้)
 export async function listClosings(storeId: string, params: { cashierId?: string; limit?: number; date?: Date } = {}) {
   const db = forStore(storeId)

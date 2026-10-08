@@ -120,6 +120,8 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     expect(first.ok).toBe(true)
     expect(first.ok && first.message).toContain("รอบที่ 1")
 
+    // 2026-10-08: ปิดรอบแล้วต้องเปิดรอบขายใหม่ก่อนถึงรับเงินต่อได้
+    expect((await (await import("@/app/actions/closing")).resumeSales()).ok).toBe(true)
     const b = await sell(product.id, 1, "CASH") // 50
     const c = await sell(product.id, 3, "TRANSFER") // 150
     const queries = await import("@/lib/queries")
@@ -148,6 +150,7 @@ describe.skipIf(!dbReady)("ปิดยอดประจำวัน — ยิ
     const product = await createTestProduct({ quantity: 100, price: "50.00" })
     const inRound = await sell(product.id, 1, "CASH")
     await closeCashierDay(makeFormData({ countedCash: 50, note: "" }))
+    await (await import("@/app/actions/closing")).resumeSales()
     const after = await sell(product.id, 1, "CASH")
     if (!inRound.ok || !after.ok) throw new Error("ขายไม่สำเร็จ")
 

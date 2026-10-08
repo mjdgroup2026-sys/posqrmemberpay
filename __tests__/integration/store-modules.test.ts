@@ -95,6 +95,8 @@ describe.skipIf(!dbReady)("โมดูลต่อร้าน", () => {
     expect((await testPrisma().product.findUniqueOrThrow({ where: { id: product.id } })).quantity).toBe(10)
     // แกนหลักไม่โดน
     expect((await closeCashierDay(makeFormData({ countedCash: "0" }))).ok).toBe(true)
+    // 2026-10-08: ปิดยอดแล้วต้องเปิดรอบขายใหม่ก่อนขายต่อ
+    expect((await (await import("@/app/actions/closing")).resumeSales()).ok).toBe(true)
 
     await disable()
     expect((await createCategory(makeFormData({ name: "หมวดใหม่" }))).ok).toBe(true)

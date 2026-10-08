@@ -522,6 +522,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["countServicesAwaitingStart", (q, a) => q.countServicesAwaitingStart(a.storeId)],
     // 2026-10-08 — badge ของเมนู "คิวนวด"
     ["countSpaQueueActions", (q, a) => q.countSpaQueueActions(a.storeId)],
+    // 2026-10-08 — ล็อกการรับเงินหลังปิดยอด
+    ["getSalesLock", (q, a) => q.getSalesLock(a.storeId, a.ownerId)],
     ["getTherapistSalesReport", (q, a) => q.getTherapistSalesReport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getTherapistHistory", (q, a, b) => q.getTherapistHistory(a.storeId, b.therapistId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getTherapistById", (q, a, b) => q.getTherapistById(a.storeId, b.therapistId)],
@@ -585,6 +587,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
   /// action ที่ไม่รับ id ของข้อมูลร้าน หรือเป็นของ "ตัวผู้ใช้"/ลูกค้า (ร้านมาจาก qrToken) — ไม่อยู่ในตาราง
   const ACTIONS_WITHOUT_FOREIGN_ID = [
     "closeCashierDay",
+    // 2026-10-08: เปิดรอบขายใหม่ของตัวเอง (รอบล่าสุดของวันนี้) — ไม่รับ id จากผู้ใช้
+    "resumeSales",
     "acknowledgeAllNotifications",
     "generateMissingQRCodes",
     "createTable",

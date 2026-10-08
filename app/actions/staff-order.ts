@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
 import { requireSellingStore, storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
+import { salesLockError } from "@/lib/sales-lock"
 import { publishStoreEvent } from "@/lib/realtime"
 import { buildOrderLines, buildProductLines, OrderLineError, type OrderLine, type ProductLine } from "@/lib/order-lines"
 import { StockMissing, StockShortage, takeStock } from "@/lib/stock-moves"
@@ -303,6 +304,9 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
     return { ok: false, error: storeErrorMessage(error) }
   }
   const storeId = ctx.storeId
+  // ปิดยอดรอบล่าสุดแล้ว = รับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08)
+  const locked = await salesLockError(storeId, ctx.user.id)
+  if (locked) return { ok: false, error: locked }
   const db = forStore(storeId)
 
   const parsed = takeawaySaleSchema.safeParse({
