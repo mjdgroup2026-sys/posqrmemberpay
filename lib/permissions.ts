@@ -77,7 +77,7 @@ export const RESOURCE_LABEL: Record<ResourceKey, string> = {
   MO_SETUP: "จัดการโต๊ะและ QR Code",
   MO_POS: "ขายอาหารหน้าร้าน",
   SPA_THERAPISTS: "พนักงานนวด (ร้านนวด)",
-  SPA_BOOKINGS: "ตารางจองและกระดานห้องนวด (ร้านนวด)",
+  SPA_BOOKINGS: "คิวนวด — จองคิวและสถานะห้อง (ร้านนวด)",
   STOCK_ADJUST: "ปรับยอดสต็อก",
 }
 

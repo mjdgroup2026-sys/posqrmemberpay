@@ -894,16 +894,15 @@ export async function listNotifications(storeId: string, limit = 60): Promise<No
 
 export async function getPendingNotificationCount(storeId: string) {
   const db = forStore(storeId)
-  const [notifications, awaitingCallback, upcomingBookings, servicesAwaitingStart] = await Promise.all([
+  const [notifications, awaitingCallback, servicesAwaitingStart] = await Promise.all([
     db.notification.count({ where: { status: "PENDING" } }),
     countPaymentsAwaitingCallback(storeId),
-    // คิวนวดที่ใกล้ถึงเวลา (Phase 20b) — ร้านที่ไม่ได้เปิดตัวเลือกร้านนวดจะไม่มีแถว booking เลย ค่าจึงเป็น 0 เสมอ
-    countUpcomingBookings(storeId),
-    // ห้องที่รอกดเริ่มนวด (20e) — ร้านอาหารล้วนไม่มีเมนู SERVICE ค่าจึงเป็น 0 เสมอ
-    countServicesAwaitingStart(storeId),
+    // ห้อง walk-in ที่รอกดเริ่มนวด (20e) — ร้านอาหารล้วนไม่มีเมนู SERVICE ค่าจึงเป็น 0 เสมอ
+    // คิวจองย้ายไป badge ของเมนู "คิวนวด" แล้ว (2026-10-08 เจ้าของสั่ง) — `countSpaQueueActions()`
+    countServicesAwaitingStart(storeId, { excludeBooked: true }),
   ])
   // รวมเข้า badge เดียวกัน — ถ้าไม่รวม พนักงานจะไม่มีวันรู้ว่ามีเรื่องต้องดู จนกว่าจะบังเอิญเปิดหน้านี้
-  return notifications + awaitingCallback + upcomingBookings + servicesAwaitingStart
+  return notifications + awaitingCallback + servicesAwaitingStart
 }
 
 /// เวลาที่ยอมให้ callback ของธนาคารมาช้าได้ ก่อนจะเตือนพนักงานให้ไปตรวจเอง
@@ -3092,13 +3091,27 @@ export type ServiceAwaitingStart = {
 /// นับจากบรรทัด SERVICE ที่ยัง `AWAITING_KITCHEN` ในบิลที่เปิดอยู่ ไม่ใช่จากสถานะคิวจอง —
 /// ลูกค้า walk-in จากจอขายก็ต้องขึ้นด้วย · คำนวณสด ไม่ใช่แถวใน Notification จึงหายเองเมื่อกดเริ่มนวด/ยกเลิก
 /// ไม่ต้องมีปุ่มรับทราบ (หลักเดียวกับ listUpcomingBookings)
-export async function listServicesAwaitingStart(storeId: string): Promise<ServiceAwaitingStart[]> {
-  const rows = await forStore(storeId).mobileOrderItem.findMany({
-    where: {
-      status: "AWAITING_KITCHEN",
-      menuItem: { itemType: "SERVICE" },
-      order: { storeId, session: { status: { in: ["OPEN", "AWAITING_BILL"] } } },
+/// `excludeBooked` = ตัดบิลที่มาจากคิวจองที่เช็กอินแล้ว (2026-10-08) — คิวจองจัดการที่หน้า "คิวนวด" ทั้งหมด
+/// หน้าแจ้งเตือนจึงเหลือแค่ walk-in · ผังโต๊ะยังเห็นทุกห้อง (ไม่ส่ง option)
+type AwaitingStartOptions = { excludeBooked?: boolean }
+
+function awaitingStartWhere(storeId: string, options: AwaitingStartOptions) {
+  return {
+    status: "AWAITING_KITCHEN" as const,
+    menuItem: { itemType: "SERVICE" as const },
+    order: {
+      storeId,
+      session: {
+        status: { in: ["OPEN" as const, "AWAITING_BILL" as const] },
+        ...(options.excludeBooked ? { bookings: { none: { status: { in: ["CHECKED_IN" as const, "IN_SERVICE" as const] } } } } : {}),
+      },
     },
+  }
+}
+
+export async function listServicesAwaitingStart(storeId: string, options: AwaitingStartOptions = {}): Promise<ServiceAwaitingStart[]> {
+  const rows = await forStore(storeId).mobileOrderItem.findMany({
+    where: awaitingStartWhere(storeId, options),
     orderBy: [{ createdAt: "asc" }],
     select: {
       id: true,
@@ -3132,12 +3145,30 @@ export async function listServicesAwaitingStart(storeId: string): Promise<Servic
   })
 }
 
-export async function countServicesAwaitingStart(storeId: string): Promise<number> {
-  return forStore(storeId).mobileOrderItem.count({
+export async function countServicesAwaitingStart(storeId: string, options: AwaitingStartOptions = {}): Promise<number> {
+  return forStore(storeId).mobileOrderItem.count({ where: awaitingStartWhere(storeId, options) })
+}
+
+/// badge ของเมนู "คิวนวด" (2026-10-08) — คิววันนี้ที่ต้องมีคนลงมือ (ตรงกับ chip บนแท็บ "ตอนนี้"):
+/// ใกล้ถึง/เลยเวลาแล้วยังไม่เช็กอิน · เช็กอินแล้วรอเริ่มนวด · นวดเกินเวลา · นวดเสร็จแต่บิลยังไม่ปิด
+/// คำนวณสด ไม่มีปุ่มรับทราบ — หายเองเมื่อทำขั้นถัดไป
+export async function countSpaQueueActions(storeId: string, now: Date = new Date()): Promise<number> {
+  const { start, end } = bookingDayRange(businessDayKey(now))
+  return forStore(storeId).booking.count({
     where: {
-      status: "AWAITING_KITCHEN",
-      menuItem: { itemType: "SERVICE" },
-      order: { storeId, session: { status: { in: ["OPEN", "AWAITING_BILL"] } } },
+      startAt: { gte: start, lt: end },
+      OR: [
+        {
+          status: "BOOKED",
+          startAt: {
+            lte: new Date(now.getTime() + BOOKING_ALERT_LEAD_MINUTES * 60_000),
+            gte: new Date(now.getTime() - BOOKING_ALERT_OVERDUE_HOURS * 60 * 60_000),
+          },
+        },
+        { status: "CHECKED_IN" },
+        { status: "IN_SERVICE", endAt: { lte: now } },
+        { status: "DONE", session: { status: { in: ["OPEN", "AWAITING_BILL"] } } },
+      ],
     },
   })
 }

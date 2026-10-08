@@ -397,7 +397,7 @@ export function TherapistManager({
 
             <label className="checkbox-row">
               <input type="checkbox" checked={draft.isActive} onChange={(e) => setDraft({ ...draft, isActive: e.target.checked })} />
-              <span>เปิดใช้งาน (ขึ้นให้เลือกบนจอขาย/ตารางจอง)</span>
+              <span>เปิดใช้งาน (ขึ้นให้เลือกบนจอขาย/คิวนวด)</span>
             </label>
 
             <DialogFooter>

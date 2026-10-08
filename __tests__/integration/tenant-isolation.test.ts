@@ -520,6 +520,8 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["countUpcomingBookings", (q, a) => q.countUpcomingBookings(a.storeId)],
     ["listServicesAwaitingStart", (q, a) => q.listServicesAwaitingStart(a.storeId)],
     ["countServicesAwaitingStart", (q, a) => q.countServicesAwaitingStart(a.storeId)],
+    // 2026-10-08 — badge ของเมนู "คิวนวด"
+    ["countSpaQueueActions", (q, a) => q.countSpaQueueActions(a.storeId)],
     ["getTherapistSalesReport", (q, a) => q.getTherapistSalesReport(a.storeId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getTherapistHistory", (q, a, b) => q.getTherapistHistory(a.storeId, b.therapistId, { from: addDays(businessDayKey(), -29), to: businessDayKey() })],
     ["getTherapistById", (q, a, b) => q.getTherapistById(a.storeId, b.therapistId)],

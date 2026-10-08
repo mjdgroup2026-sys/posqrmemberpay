@@ -18,11 +18,10 @@ export default async function BillingPage({ params, searchParams }: PageProps<"/
   const { tableId } = await params
   // ?session= = บิลของลูกค้าคนไหนในห้องสปาที่มีหลายบิล (2026-09-23)
   const { session, paid, back } = await searchParams
-  // ?back=bookings = มาจากปุ่ม "ปิดบิล / ชำระเงิน" บนตารางจอง (2026-10-08) — จ่ายเสร็จกลับไปตารางจอง ไม่ใช่ผังโต๊ะ
-  // ?back=board = มาจากการ์ดบนกระดานห้องนวด (2026-10-08)
+  // ?back=bookings (แท็บรายการ) / ?back=board (แท็บตอนนี้) = มาจากหน้า "คิวนวด" (2026-10-08) — จ่ายเสร็จกลับแท็บเดิม ไม่ใช่ผังโต๊ะ
   const returnTo = back === "bookings" || back === "board" ? back : undefined
-  const doneHref = returnTo === "bookings" ? "/spa/bookings" : returnTo === "board" ? "/spa/board" : "/mobile-order/tables"
-  const doneLabel = returnTo === "bookings" ? "ตารางจอง" : returnTo === "board" ? "กระดานห้องนวด" : "ผังโต๊ะ"
+  const doneHref = returnTo === "bookings" ? "/spa/bookings?tab=list" : returnTo === "board" ? "/spa/bookings?tab=now" : "/mobile-order/tables"
+  const doneLabel = returnTo ? "คิวนวด" : "ผังโต๊ะ"
 
   // ?paid=<saleId> = เพิ่งปิดบิลเงินสดที่มีเงินทอน (2026-10-03) — โชว์เงินทอนจากบิลจริงค้างไว้จนพนักงานกด "ทอนเงินแล้ว"
   // ต้องมาก่อน getBillingView เพราะ session ปิดไปแล้ว · getSaleById กรองร้านให้เอง
