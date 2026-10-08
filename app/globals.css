@@ -778,6 +778,14 @@
     border-left: 4px solid;
   }
   /* ขีดชั่วโมง (เข้ม) / ครึ่งชั่วโมง (จาง) ลากลงทุกแถว — บอกได้ทันทีว่าคิวเริ่มเต็มชั่วโมงหรือครึ่ง */
+  /* คอลัมน์ชื่อพนักงาน/ห้องบนตารางเวลาอยู่กับที่ตอนเลื่อนแนวนอน (2026-10-08 — ตารางเลื่อนไปเวลาปัจจุบันเอง ชื่อต้องไม่หาย) */
+  .timeline-label {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+  }
   .timeline-tick {
     position: absolute;
     top: 0;
