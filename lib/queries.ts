@@ -2757,6 +2757,8 @@ export type TherapistBoardRow = {
   nextBookingOverdue: boolean
   /// คิวของวันนั้นทั้งหมด (ไม่รวมยกเลิก/ไม่มา) — ใช้ดูแทนสถานะสดเมื่อเลือกวันอื่น
   bookings: BookingRow[]
+  /// คิวที่กำลังทำ/รอเริ่ม (การ์ดใช้วาดแถบความคืบหน้า + ปุ่ม) · null = ไม่มีงาน หรือ walk-in ที่ไม่มีคิวจอง (2026-10-08)
+  current: BookingRow | null
 }
 
 /// สถานะห้องบนกระดาน — ลำดับความสำคัญ: กำลังนวด > เช็กอินแล้วรอเริ่ม > มีบิลเปิด > ถึงเวลาแต่ลูกค้ายังไม่มา > ว่าง
@@ -2777,6 +2779,10 @@ export type RoomBoardRow = {
   nextBookingAt: Date | null
   nextBookingCustomer: string | null
   bookings: BookingRow[]
+  /// คิวที่การ์ดห้องโฟกัสอยู่ (กำลังนวด/รอเริ่ม/ถึงเวลา/รอปิดบิล) — ใช้วาดความคืบหน้า + ปุ่ม (2026-10-08)
+  current: BookingRow | null
+  /// บิลที่เปิดอยู่ในห้อง — ปุ่ม "ปิดบิล / ชำระเงิน" บนการ์ด (รวม walk-in ที่ไม่มีคิว)
+  billSessionId: string | null
 }
 
 /// คิวที่แสดงบนกระดาน — ยกเลิก/ไม่มาไม่นับ · DONE อยู่ในรายการของวันแต่ไม่ทำให้ใครไม่ว่าง
@@ -2905,6 +2911,7 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
       nextBookingCustomer: next?.customerName ?? null,
       nextBookingOverdue: live && next !== null && next.startAt <= now,
       bookings: mine,
+      current: job ?? (workingSession ? (mine.find((row) => row.tableSessionId === workingSession.id) ?? null) : null),
     }
   })
 
@@ -2929,6 +2936,8 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
       nextBookingAt: next?.startAt ?? null,
       nextBookingCustomer: next?.customerName ?? null,
       bookings: mine,
+      current: null as BookingRow | null,
+      billSessionId: null as string | null,
     }
     // มีงานนวดกำลังทำในห้อง (เช่น เริ่มจากหน้าห้อง/เปลี่ยนพนักงาน) ชนะ "รอเริ่มนวด" — ไม่งั้นห้องขึ้นรอทั้งที่พนักงานกำลังนวด
     const job = inService ?? (working ? null : waiting)
@@ -2940,6 +2949,8 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
         therapistLabel: job.therapistLabel,
         until: job.endAt,
         overrun: inService !== null && inService.endAt <= now,
+        current: job,
+        billSessionId: job.tableSessionId,
       }
     }
     if (working) {
@@ -2952,6 +2963,8 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
         therapistLabel: therapist ? `${therapist.code} ${therapist.nickname ?? therapist.name}` : null,
         until: linked?.endAt ?? null,
         overrun: linked !== null && linked.endAt <= now,
+        current: linked,
+        billSessionId: working.session.id,
       }
     }
     if (openBill) {
@@ -2965,6 +2978,8 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
         until: null,
         awaitingPayment: linked.length > 0 && linked.every((row) => row.status === "DONE"),
         staleSince: openBill.openedAt < start ? openBill.openedAt : null,
+        current: linked[linked.length - 1] ?? null,
+        billSessionId: openBill.id,
       }
     }
     if (guestDue) {
@@ -2974,6 +2989,7 @@ export async function getSpaBoard(storeId: string, options: { dayKey?: string; n
         customerName: guestDue.customerName,
         therapistLabel: guestDue.therapistLabel,
         until: guestDue.endAt,
+        current: guestDue,
       }
     }
     return { ...base, state: "FREE", customerName: null, therapistLabel: null, until: null }

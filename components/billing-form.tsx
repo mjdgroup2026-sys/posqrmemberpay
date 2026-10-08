@@ -23,10 +23,10 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
-export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: "bookings" }) {
+export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: "bookings" | "board" }) {
   const router = useRouter()
   // ปิดบิลเสร็จกลับไปหน้าที่มา — ตารางจอง (ปุ่มปิดบิลบนคิวนวด · 2026-10-08) หรือผังโต๊ะ (ค่าเดิม)
-  const doneHref = returnTo === "bookings" ? "/spa/bookings" : "/mobile-order/tables"
+  const doneHref = returnTo === "bookings" ? "/spa/bookings" : returnTo === "board" ? "/spa/board" : "/mobile-order/tables"
   const [pending, setPending] = useState(false)
   const [method, setMethod] = useState<PaymentMethodValue>("PROMPTPAY")
   const [cashInput, setCashInput] = useState("")
@@ -119,9 +119,9 @@ export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: 
       <div className="page-head">
         <div>
           <p className="t-eyebrow">
-            {returnTo === "bookings" ? (
-              <Link href="/spa/bookings" className="row" style={{ gap: 6 }}>
-                <IconBack size={14} aria-hidden /> กลับไปตารางจอง
+            {returnTo ? (
+              <Link href={doneHref} className="row" style={{ gap: 6 }}>
+                <IconBack size={14} aria-hidden /> กลับไป{returnTo === "board" ? "กระดานห้องนวด" : "ตารางจอง"}
               </Link>
             ) : (
               <Link href={`/mobile-order/tables/${bill.tableId}?session=${bill.sessionId}`} className="row" style={{ gap: 6 }}>

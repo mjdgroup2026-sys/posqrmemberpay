@@ -1,5 +1,6 @@
 "use client"
 
+import { BOOKING_STATUS_CHIP, BOOKING_STATUS_LABEL } from "@/lib/booking-status"
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -36,23 +37,9 @@ const DEFAULT_END = 21 * 60
 /// ความกว้างของ 1 ชั่วโมงบนตาราง (px) — เลื่อนแนวนอนได้เมื่อร้านเปิดยาว
 const HOUR_WIDTH = 96
 
-const STATUS_LABEL: Record<BookingRow["status"], string> = {
-  BOOKED: "จองไว้",
-  CHECKED_IN: "เช็กอินแล้ว",
-  IN_SERVICE: "กำลังนวด",
-  DONE: "เสร็จแล้ว",
-  CANCELLED: "ยกเลิก",
-  NO_SHOW: "ไม่มาตามนัด",
-}
-
-const STATUS_CHIP: Record<BookingRow["status"], string> = {
-  BOOKED: "chip-info",
-  CHECKED_IN: "chip-brand",
-  IN_SERVICE: "chip-warning",
-  DONE: "chip-success",
-  CANCELLED: "chip-neutral",
-  NO_SHOW: "chip-danger",
-}
+// ชื่อ/สีสถานะคิวใช้ร่วมกับกระดานห้อง — แก้ที่ lib/booking-status.ts ที่เดียว (2026-10-08)
+const STATUS_LABEL = BOOKING_STATUS_LABEL
+const STATUS_CHIP = BOOKING_STATUS_CHIP
 
 const LIVE_STATUS: BookingRow["status"][] = ["BOOKED", "CHECKED_IN", "IN_SERVICE"]
 /// คิวที่วาดบนไทม์ไลน์ — คิวที่เสร็จแล้วยังโชว์แบบจาง ให้เห็นว่าวันนั้นใครทำไปแล้วบ้าง (20e) · ยกเลิก/ไม่มาไม่วาด
