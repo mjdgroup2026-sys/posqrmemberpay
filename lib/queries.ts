@@ -1622,6 +1622,16 @@ export type BillingView = {
   servicePercent: number
   serviceCharge: number
   total: number
+  /// รายการนวดในบิลที่ยังไม่เสร็จ (ยังไม่เริ่ม/กำลังนวด) — หน้าปิดบิลเตือน + ถามยืนยันก่อนปิด (2026-10-08 เจ้าของสั่ง)
+  /// ปิดบิลตอนนี้ = ห้องคืนว่างและคิวถูกปิดเป็นเสร็จทั้งที่ยังไม่ได้นวด
+  unfinishedServices: UnfinishedService[]
+}
+
+export type UnfinishedService = {
+  id: string
+  name: string
+  therapistLabel: string | null
+  status: "AWAITING_KITCHEN" | "COOKING" | "READY"
 }
 
 /// ใบเสร็จของโต๊ะสำหรับหน้าปิดบิลฝั่งพนักงาน (F17) — ยอดคิดจาก `computeBillTotals` ตัวเดียวกับที่ปิดบิลจริง
@@ -1660,8 +1670,10 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
                 quantity: true,
                 unitPrice: true,
                 selectedOptionsSnapshot: true,
-                menuItem: { select: { name: true } },
+                status: true,
+                menuItem: { select: { name: true, itemType: true } },
                 product: { select: { name: true } },
+                therapist: { select: { code: true, name: true, nickname: true } },
               },
             },
           },
@@ -1706,6 +1718,18 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
   const lines = [...grouped.values()]
   const servicePercent = toNumber(settings?.serviceChargePercent ?? 0)
   const totals = computeBillTotals(lines, servicePercent, session)
+  const unfinishedServices: UnfinishedService[] = raw.flatMap((item) =>
+    item.menuItem?.itemType === "SERVICE" && (item.status === "AWAITING_KITCHEN" || item.status === "COOKING" || item.status === "READY")
+      ? [
+          {
+            id: item.id,
+            name: item.menuItem.name,
+            therapistLabel: item.therapist ? `${item.therapist.code} ${item.therapist.nickname ?? item.therapist.name}` : null,
+            status: item.status,
+          },
+        ]
+      : [],
+  )
 
   return {
     tableId: session.table.id,
@@ -1727,6 +1751,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
     servicePercent,
     serviceCharge: totals.serviceCharge,
     total: totals.total,
+    unfinishedServices,
   }
 }
 

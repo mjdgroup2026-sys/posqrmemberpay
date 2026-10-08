@@ -22,6 +22,7 @@ const bill: BillingView = {
   tableId: "t1",
   tableCode: "A1",
   tableKind: "TABLE",
+  unfinishedServices: [],
   sessionId: "s1",
   sessionStatus: "OPEN",
   openedAt: new Date("2026-10-03T10:00:00Z"),
@@ -134,5 +135,34 @@ describe("AmountDueHero", () => {
     const hero = screen.getByLabelText("ยอดที่ต้องชำระ 75.00 บาท")
     expect(hero.textContent).toContain("ยอดรวม฿80.00")
     expect(hero.textContent).toContain("ส่วนลด−฿5.00")
+  })
+})
+
+/// เตือนก่อนรับเงินเมื่อยังนวดไม่เสร็จ (2026-10-08 เจ้าของสั่ง) — หน้าปิดบิลเปิดจากผังห้องได้โดยไม่ผ่านปุ่มทีละขั้นของคิวนวด
+describe("BillingForm — รายการนวดที่ยังไม่เสร็จ", () => {
+  const unfinishedBill: BillingView = {
+    ...bill,
+    unfinishedServices: [{ id: "x1", name: "นวดไทย 60", therapistLabel: "001 นิด", status: "COOKING" }],
+  }
+
+  it("มีแถบเตือนบอกรายการและสถานะ · ไม่มีรายการค้าง = ไม่มีแถบ", async () => {
+    render(<BillingForm bill={unfinishedBill} />)
+    const banner = screen.getByText(/ยังมีรายการนวดที่ยังไม่เสร็จ 1 รายการ/).closest(".alert-banner")
+    expect(banner?.textContent).toContain("นวดไทย 60 · 001 นิด — กำลังนวด")
+    cleanup()
+    render(<BillingForm bill={bill} />)
+    expect(screen.queryByText(/ยังมีรายการนวดที่ยังไม่เสร็จ/)).toBeNull()
+  })
+
+  it("กดรับเงินแล้วตอบ \"ยกเลิก\" ในกล่องยืนยัน = ไม่ปิดบิล", async () => {
+    const { confirmMobilePayment } = await import("@/app/actions/payments")
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
+    render(<BillingForm bill={unfinishedBill} />)
+    fireEvent.click(screen.getByRole("button", { name: "เงินสด" }))
+    fireEvent.change(screen.getByLabelText(/รับเงินมา/), { target: { value: "80" } })
+    fireEvent.submit(screen.getByRole("button", { name: /ยืนยัน|ปิดบิล/ }).closest("form") as HTMLFormElement)
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(confirmMobilePayment).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
   })
 })
