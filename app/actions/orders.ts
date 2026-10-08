@@ -5,7 +5,7 @@ import { forStore } from "@/lib/db"
 import { storeErrorMessage, type StoreContext } from "@/lib/session"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
-import { orderTicketLabel } from "@/lib/order-label"
+import { orderTicketLabel, ticketHeading } from "@/lib/order-label"
 import { advanceSessionBooking } from "@/lib/booking"
 import { idSchema, cancelOrderItemSchema, reduceOrderItemSchema, assignTherapistSchema, firstIssueMessage, zodToFieldErrors } from "@/lib/validation"
 import type { OrderItemStatus } from "@/generated/prisma/client"
@@ -510,7 +510,7 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
   const order = await db.mobileOrder.findUnique({
     where: { id: parsed.data.id },
     include: {
-      session: { select: { table: { select: { code: true } } } },
+      session: { select: { table: { select: { code: true, kind: true } } } },
       items: {
         // ทิกเก็ตครัวพิมพ์เฉพาะอาหาร — สินค้าในสต็อก (Phase 21b) และโปรแกรมนวดไม่เข้าครัว
         where: { status: { not: "CANCELLED" }, menuItem: { itemType: "FOOD" } },
@@ -528,11 +528,15 @@ export async function reprintKitchenTicket(formData: FormData): Promise<ActionRe
   }
 
   const printed = await printKitchenTicket({
-    tableCode: orderTicketLabel({
+    heading: ticketHeading({
       orderType: order.orderType,
-      tableCode: order.session?.table.code ?? null,
-      orderNumber: order.orderNumber,
-      customerLabel: order.customerLabel,
+      tableCode: orderTicketLabel({
+        orderType: order.orderType,
+        tableCode: order.session?.table.code ?? null,
+        orderNumber: order.orderNumber,
+        customerLabel: order.customerLabel,
+      }),
+      tableKind: order.session?.table.kind,
     }),
     orderNumber: order.orderNumber,
     submittedAt: order.submittedAt,

@@ -20,7 +20,9 @@ const ESC = "\x1B"
 const GS = "\x1D"
 
 export type KitchenTicketPayload = {
-  tableCode: string
+  /// หัวทิกเก็ตที่ประกอบเสร็จแล้ว ("โต๊ะ A1" / "ห้อง 3/1" / "กลับบ้าน #3") — ผู้เรียกใช้ `ticketHeading`/`placeLabel`
+  /// เดิมรับรหัสโต๊ะแล้วเติม "โต๊ะ" เอง ทำให้ห้องนวดพิมพ์ว่าโต๊ะ และกลับบ้านพิมพ์ว่า "โต๊ะ กลับบ้าน #3" (แก้ 2026-10-08)
+  heading: string
   orderNumber: number
   submittedAt: Date
   items: {
@@ -47,7 +49,7 @@ function buildTicket(payload: KitchenTicketPayload): Buffer {
   lines.push(`${ESC}t\x15`) // เลือก code page 21 (PC874/TIS-620)
   lines.push(`${ESC}a\x01`) // จัดกึ่งกลาง
   lines.push(`${GS}!\x11`) // ตัวใหญ่ 2 เท่า
-  lines.push(`โต๊ะ ${payload.tableCode}\n`)
+  lines.push(`${payload.heading}\n`)
   lines.push(`${GS}!\x00`) // กลับขนาดปกติ
   lines.push(`ออร์เดอร์ที่ ${payload.orderNumber}\n`)
   lines.push(

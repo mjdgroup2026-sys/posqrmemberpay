@@ -74,6 +74,7 @@ describe.skipIf(!dbReady)("ทิกเก็ตครัวแบบพิม�
     const ticket = await getKitchenTicket(TEST_STORE_ID, order.id)
     expect(ticket).not.toBeNull()
     expect(ticket?.tableCode).toBe(table.code)
+    expect(ticket?.tableKind).toBe("TABLE")
     expect(ticket?.orderNumber).toBe(1)
     expect(ticket?.storeName).toBe("ร้านทดสอบ test-a")
     expect(ticket?.printedAt).toBeNull()

@@ -27,7 +27,7 @@ export default async function PaySuccessPage({ params }: PageProps<"/order/[qrTo
   return (
     <CustomerShell
       storeName={settings?.storeName ?? "MJD Mobile Order"}
-      tableCode={status.tableCode}
+      tableCode={status.tableCode} tableKind={status.tableKind}
       title="ชำระเงินสำเร็จ"
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

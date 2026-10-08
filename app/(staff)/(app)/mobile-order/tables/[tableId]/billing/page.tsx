@@ -1,3 +1,4 @@
+import { placeLabel } from "@/lib/order-label"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getBillingView, getSaleById } from "@/lib/queries"
@@ -103,7 +104,7 @@ export default async function BillingPage({ params, searchParams }: PageProps<"/
     return (
       <section className="card-ui card-pad">
         <h1 className="t-h2">
-          โต๊ะ {bill.tableCode}
+          {placeLabel(bill.tableKind, bill.tableCode)}
           {bill.customerLabel ? ` · ${bill.customerLabel}` : ""} ยังไม่มีรายการที่ต้องชำระ
         </h1>
         <p className="t-body" style={{ marginTop: 8 }}>

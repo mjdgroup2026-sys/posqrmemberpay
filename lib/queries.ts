@@ -5,7 +5,7 @@ import { hashInviteToken } from "@/lib/invite-token"
 import { isPlanActive } from "@/lib/subscription"
 import { inviteTokenSchema } from "@/lib/validation"
 import { toNumber } from "@/lib/format"
-import { orderTicketLabel } from "@/lib/order-label"
+import { orderTicketLabel, type PlaceKind } from "@/lib/order-label"
 import { decodeStoreScb, getStoreScb } from "@/lib/scb-store"
 import { SCB_SANDBOX_BASE } from "@/lib/payment-provider/scb"
 import { addDays, businessDayKey, businessDayRange, businessDateOnly, dateOnlyFromKey, minuteOfBusinessDay } from "@/lib/day"
@@ -849,6 +849,8 @@ export type NotificationCard = {
   acknowledgedByName: string | null
   tableId: string
   tableCode: string
+  /// โต๊ะ/ห้อง — แสดงผ่าน placeLabel() (2026-10-08)
+  tableKind: PlaceKind
   /// เวลาเปิดโต๊ะของ session ที่แจ้งเตือนมา — คนละอันกับ createdAt ของการแจ้งเตือนเอง (F12)
   openedAt: Date
   sessionTotal: number
@@ -866,7 +868,7 @@ export async function listNotifications(storeId: string, limit = 60): Promise<No
           select: {
             id: true,
             openedAt: true,
-            table: { select: { id: true, code: true } },
+            table: { select: { id: true, code: true, kind: true } },
           },
         },
       },
@@ -884,6 +886,7 @@ export async function listNotifications(storeId: string, limit = 60): Promise<No
     acknowledgedByName: n.acknowledgedBy?.name ?? null,
     tableId: n.session.table.id,
     tableCode: n.session.table.code,
+    tableKind: n.session.table.kind,
     openedAt: n.session.openedAt,
     sessionTotal: totals.get(n.session.id)?.total ?? 0,
   }))
@@ -931,6 +934,7 @@ export type PaymentAwaitingCallback = {
   ref1: string
   tableId: string
   tableCode: string
+  tableKind: PlaceKind
   amount: number
   issuedAt: Date
 }
@@ -953,7 +957,7 @@ export async function listPaymentsAwaitingCallback(storeId: string): Promise<Pay
       ref1: true,
       amount: true,
       createdAt: true,
-      session: { select: { table: { select: { id: true, code: true } } } },
+      session: { select: { table: { select: { id: true, code: true, kind: true } } } },
     },
   })
 
@@ -962,6 +966,7 @@ export async function listPaymentsAwaitingCallback(storeId: string): Promise<Pay
     ref1: row.ref1,
     tableId: row.session.table.id,
     tableCode: row.session.table.code,
+    tableKind: row.session.table.kind,
     amount: toNumber(row.amount),
     issuedAt: row.createdAt,
   }))
@@ -1071,6 +1076,7 @@ export type OrderItemRow = {
 export type TableDetail = {
   tableId: string
   tableCode: string
+  tableKind: PlaceKind
   status: TableCardStatus
   sessionId: string
   openedAt: Date
@@ -1141,7 +1147,7 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
       where: { tableId: targetId, status: { in: ["OPEN", "AWAITING_BILL"] }, ...(sessionId ? { id: sessionId } : {}) },
       orderBy: { openedAt: "desc" },
       include: {
-        table: { select: { id: true, code: true, status: true } },
+        table: { select: { id: true, code: true, status: true, kind: true } },
         qrCode: { select: { type: true } },
         orders: {
           orderBy: { orderNumber: "asc" },
@@ -1198,6 +1204,7 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
   return {
     tableId: session.table.id,
     tableCode: session.table.code,
+    tableKind: session.table.kind,
     status: session.table.status,
     sessionId: session.id,
     openedAt: session.openedAt,
@@ -1216,8 +1223,10 @@ export async function getTableDetail(storeId: string, tableId: string, sessionId
 export type KitchenTicket = {
   orderId: string
   orderNumber: number
-  /// ป้ายที่ครัวเห็น — รหัสโต๊ะ หรือ "กลับบ้าน #n" (Phase 17c)
+  /// ป้ายที่ครัวเห็น — รหัสโต๊ะ หรือ "กลับบ้าน #n" (Phase 17c) · หัวการ์ด/ทิกเก็ตประกอบด้วย ticketHeading()
   tableCode: string
+  /// โต๊ะ/ห้อง (2026-10-08) — null = กลับบ้าน
+  tableKind: PlaceKind | null
   orderType: "DINE_IN" | "TAKEAWAY"
   submittedAt: Date
   printedAt: Date | null
@@ -1237,7 +1246,7 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
     },
     orderBy: { submittedAt: "asc" },
     include: {
-      session: { select: { table: { select: { code: true } } } },
+      session: { select: { table: { select: { code: true, kind: true } } } },
       items: {
         where: { status: { in: ["AWAITING_KITCHEN", "COOKING", "READY", "CANCELLED"] }, menuItem: { itemType: "FOOD" } },
         orderBy: { createdAt: "asc" },
@@ -1255,6 +1264,7 @@ export async function listKitchenTickets(storeId: string): Promise<KitchenTicket
       orderNumber: order.orderNumber,
       customerLabel: order.customerLabel,
     }),
+    tableKind: order.session?.table.kind ?? null,
     orderType: order.orderType,
     submittedAt: order.submittedAt,
     printedAt: order.printedAt,
@@ -1327,6 +1337,7 @@ export type CustomerSession =
       sessionId: string
       tableId: string
       tableCode: string
+      tableKind: PlaceKind
       openedAt: Date
       awaitingBill: boolean
     }
@@ -1354,7 +1365,7 @@ export async function resolveCustomerSession(qrToken: string): Promise<CustomerS
   const session = await db.tableSession.findFirst({
     where: { tableId: targetTableId, status: { in: ["OPEN", "AWAITING_BILL"] } },
     orderBy: { openedAt: "desc" },
-    select: { id: true, openedAt: true, status: true, table: { select: { id: true, code: true } } },
+    select: { id: true, openedAt: true, status: true, table: { select: { id: true, code: true, kind: true } } },
   })
   // แพ็กเกจหมดอายุ (Phase 14b): โต๊ะที่เปิดอยู่แล้วยังเช็กบิล/จ่ายได้ → บอกเฉพาะตอนที่ยังไม่มี session ให้เกาะ
   if (!session) return { ok: false, reason: isPlanActive(new Date(), store.planExpiresAt) ? "NO_SESSION" : "STORE_EXPIRED" }
@@ -1365,6 +1376,7 @@ export async function resolveCustomerSession(qrToken: string): Promise<CustomerS
     sessionId: session.id,
     tableId: session.table.id,
     tableCode: session.table.code,
+    tableKind: session.table.kind,
     openedAt: session.openedAt,
     awaitingBill: session.status === "AWAITING_BILL",
   }
@@ -1542,6 +1554,7 @@ export async function getCustomerOrderView(storeId: string, sessionId: string): 
 export type QrCodeRow = {
   tableId: string
   tableCode: string
+  tableKind: PlaceKind
   tableStatus: TableCardStatus
   qrId: string | null
   token: string | null
@@ -1565,6 +1578,7 @@ export async function listQrCodes(storeId: string): Promise<QrCodeRow[]> {
     return {
       tableId: table.id,
       tableCode: table.code,
+      tableKind: table.kind,
       tableStatus: table.status,
       qrId: active?.id ?? null,
       token: active?.token ?? null,
@@ -1589,6 +1603,7 @@ export type BillingLine = {
 export type BillingView = {
   tableId: string
   tableCode: string
+  tableKind: PlaceKind
   sessionId: string
   sessionStatus: "OPEN" | "AWAITING_BILL"
   openedAt: Date
@@ -1634,7 +1649,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
         openedAt: true,
         customerLabel: true,
         ...SESSION_DISCOUNT_SELECT,
-        table: { select: { id: true, code: true } },
+        table: { select: { id: true, code: true, kind: true } },
         orders: {
           orderBy: { orderNumber: "asc" },
           select: {
@@ -1696,6 +1711,7 @@ export async function getBillingView(storeId: string, tableId: string, sessionId
   return {
     tableId: session.table.id,
     tableCode: session.table.code,
+    tableKind: session.table.kind,
     sessionId: session.id,
     sessionStatus: session.status as "OPEN" | "AWAITING_BILL",
     openedAt: session.openedAt,
@@ -1721,6 +1737,7 @@ export type CustomerPaymentStatus =
       storeId: string
       sessionId: string
       tableCode: string
+      tableKind: PlaceKind
       itemsTotal: number
       discount: number
       servicePercent: number
@@ -1730,7 +1747,7 @@ export type CustomerPaymentStatus =
       /// ห้องมีบิลเปิดมากกว่า 1 ใบ (ห้องสปาหลายลูกค้า · 20e) — ลูกค้าจ่ายเองผ่าน QR ไม่ได้ ต้องจ่ายที่พนักงาน
       sharedRoom: boolean
     }
-  | { state: "PAID"; tableCode: string; saleNumber: string; total: number; paidAt: Date }
+  | { state: "PAID"; tableCode: string; tableKind: PlaceKind; saleNumber: string; total: number; paidAt: Date }
   | { state: "UNKNOWN" }
 
 /// สถานะการชำระเงินสำหรับหน้า `/order/[qrToken]/pay/*` และ endpoint ที่หน้านั้นโพล
@@ -1757,7 +1774,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
       id: true,
       status: true,
       ...SESSION_DISCOUNT_SELECT,
-      table: { select: { code: true } },
+      table: { select: { code: true, kind: true } },
       sale: { select: { saleNumber: true, total: true, createdAt: true } },
       orders: {
         select: {
@@ -1775,6 +1792,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
     return {
       state: "PAID",
       tableCode: session.table.code,
+      tableKind: session.table.kind,
       saleNumber: session.sale.saleNumber,
       total: toNumber(session.sale.total),
       paidAt: session.sale.createdAt,
@@ -1801,6 +1819,7 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
     storeId,
     sessionId: session.id,
     tableCode: session.table.code,
+    tableKind: session.table.kind,
     itemsTotal: totals.itemsTotal,
     discount: totals.discount,
     servicePercent,
@@ -1816,8 +1835,10 @@ export async function getCustomerPaymentStatus(qrToken: string): Promise<Custome
 export type KitchenTicketDoc = {
   orderId: string
   orderNumber: number
-  /// ป้ายที่ครัวเห็น — รหัสโต๊ะ หรือ "กลับบ้าน #n" (Phase 17c)
+  /// ป้ายที่ครัวเห็น — รหัสโต๊ะ หรือ "กลับบ้าน #n" (Phase 17c) · หัวการ์ด/ทิกเก็ตประกอบด้วย ticketHeading()
   tableCode: string
+  /// โต๊ะ/ห้อง (2026-10-08) — null = กลับบ้าน
+  tableKind: PlaceKind | null
   orderType: "DINE_IN" | "TAKEAWAY"
   mergedTableCodes: string[]
   submittedAt: Date
@@ -1850,7 +1871,7 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
       printedAt: true,
       orderType: true,
       customerLabel: true,
-      session: { select: { tableId: true, table: { select: { code: true } } } },
+      session: { select: { tableId: true, table: { select: { code: true, kind: true } } } },
       items: {
         where: { status: { not: "CANCELLED" }, menuItem: { itemType: "FOOD" } },
         orderBy: { createdAt: "asc" },
@@ -1884,6 +1905,7 @@ export async function getKitchenTicket(storeId: string, orderId: string): Promis
       orderNumber: order.orderNumber,
       customerLabel: order.customerLabel,
     }),
+    tableKind: order.session?.table.kind ?? null,
     orderType: order.orderType,
     mergedTableCodes: merged.map((m) => m.code),
     submittedAt: order.submittedAt,

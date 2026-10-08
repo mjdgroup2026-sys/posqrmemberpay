@@ -59,6 +59,7 @@ const ticket: KitchenTicket = {
   orderId: "o1",
   orderNumber: 1,
   tableCode: "A1",
+  tableKind: "TABLE",
   orderType: "DINE_IN",
   submittedAt: new Date(),
   printedAt: null,
@@ -146,5 +147,12 @@ describe("KitchenDisplay — รายรายการ / สิทธิ์ / 
     expect(screen.getByRole("tab", { name: "ไม่ระบุครัว" })).toBeInTheDocument()
     expect(screen.getByText(/ข้าวผัด/)).toBeInTheDocument()
     expect(screen.queryByText(/ชาเย็น/)).toBeNull()
+  })
+
+  it("ออร์เดอร์จากห้องนวดขึ้น \"ห้อง\" ไม่ใช่ \"โต๊ะ\" (2026-10-08)", () => {
+    params = new URLSearchParams()
+    render(<KitchenDisplay tickets={[{ ...ticket, tableCode: "3/1", tableKind: "ROOM" }]} stations={stations} canEdit canCancel />)
+    expect(screen.getAllByText(/ห้อง 3\/1/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/โต๊ะ 3\/1/)).toBeNull()
   })
 })

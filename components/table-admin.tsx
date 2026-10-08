@@ -1,5 +1,6 @@
 "use client"
 
+import { placeLabel } from "@/lib/order-label"
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -324,7 +325,7 @@ export function TableAdmin({
       <Dialog open={renaming !== null} onOpenChange={(next) => !next && setRenaming(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>แก้รหัสโต๊ะ {renaming?.code}</DialogTitle>
+            <DialogTitle>แก้รหัส{placeLabel(renaming?.kind, renaming?.code ?? "")}</DialogTitle>
             <DialogDescription>
               รหัสใหม่จะปรากฏบนทิกเก็ตครัวและใบเสร็จของบิลถัดไป — บิลเก่าที่ออกไปแล้วไม่เปลี่ยน
             </DialogDescription>
@@ -371,7 +372,7 @@ export function TableAdmin({
       <Dialog open={removing !== null} onOpenChange={(next) => !next && setRemoving(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>ลบโต๊ะ {removing?.code}</DialogTitle>
+            <DialogTitle>ลบ{placeLabel(removing?.kind, removing?.code ?? "")}</DialogTitle>
             <DialogDescription>
               ลบได้เฉพาะโต๊ะที่ว่างและยังไม่เคยเปิดใช้งาน — QR ของโต๊ะนี้จะถูกลบไปด้วย
             </DialogDescription>

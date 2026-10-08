@@ -18,6 +18,7 @@ export default async function QrCodesPage() {
       return {
         tableId: row.tableId,
         tableCode: row.tableCode,
+        tableKind: row.tableKind,
         qrId: row.qrId,
         token: row.token,
         type: row.type,

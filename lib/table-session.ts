@@ -2,6 +2,7 @@ import "server-only"
 import type { StoreTx } from "@/lib/db"
 import type { TableSessionStatus } from "@/generated/prisma/client"
 import type { RawClient } from "@/lib/sale-number"
+import { placeLabel, type PlaceKind } from "@/lib/order-label"
 
 /// "หา session ที่เปิดอยู่ของโต๊ะ หรือเปิดใหม่ให้" — ตรรกะเดียวที่ใช้ร่วมกันทุกทางเข้า (Phase 17b)
 ///
@@ -23,6 +24,8 @@ export type OpenSessionOutcome = {
   sessionId: string
   tableId: string
   tableCode: string
+  /// โต๊ะ/ห้อง — ใช้กับ placeLabel() (2026-10-08)
+  tableKind: PlaceKind
   /// true = กลับเข้าบิลเดิมของโต๊ะ (ไม่ได้เปิดใหม่)
   reused: boolean
   /// สถานะของ session ที่ได้ — โต๊ะที่ขอเช็กบิลแล้วสั่งอาหารเพิ่มไม่ได้ (ผู้เรียกเป็นคนตัดสิน)
@@ -63,7 +66,7 @@ export async function openOrReuseSession(tx: StoreTx, storeId: string, input: Op
       select: { id: true, status: true },
     })
     if (!chosen) throw new SessionError("บิลที่เลือกถูกปิดหรือยกเลิกไปแล้ว กรุณาเลือกบิลใหม่")
-    return { sessionId: chosen.id, tableId: effectiveTableId, tableCode: effectiveTable.code, reused: true, status: chosen.status as LiveSessionStatus }
+    return { sessionId: chosen.id, tableId: effectiveTableId, tableCode: effectiveTable.code, tableKind: effectiveTable.kind, reused: true, status: chosen.status as LiveSessionStatus }
   }
 
   // ── ลูกค้าใหม่ในห้องสปา = บิลใหม่แยก ──
@@ -81,7 +84,7 @@ export async function openOrReuseSession(tx: StoreTx, storeId: string, input: Op
       data: { storeId, tableId: effectiveTableId, qrCodeId: input.qrCodeId, customerLabel: input.newCustomer.label },
       select: { id: true },
     })
-    return { sessionId: created.id, tableId: effectiveTableId, tableCode: effectiveTable.code, reused: false, status: "OPEN" }
+    return { sessionId: created.id, tableId: effectiveTableId, tableCode: effectiveTable.code, tableKind: effectiveTable.kind, reused: false, status: "OPEN" }
   }
 
   const existing = await tx.tableSession.findFirst({
@@ -94,13 +97,14 @@ export async function openOrReuseSession(tx: StoreTx, storeId: string, input: Op
       sessionId: existing.id,
       tableId: effectiveTableId,
       tableCode: effectiveTable.code,
+      tableKind: effectiveTable.kind,
       reused: true,
       status: existing.status as LiveSessionStatus,
     }
   }
 
   if (table.primaryTableId !== null) {
-    throw new SessionError(`โต๊ะ ${table.code} ถูกรวมกับโต๊ะ ${effectiveTable.code} อยู่ กรุณาแจ้งพนักงาน`)
+    throw new SessionError(`${placeLabel(table.kind, table.code)} ถูกรวมกับ${placeLabel(effectiveTable.kind, effectiveTable.code)} อยู่ กรุณาแจ้งพนักงาน`)
   }
 
   // ★ conditional update — ด่านเดียวที่กันการสร้าง session ซ้ำตอนสแกน/กดขายพร้อมกันสองเครื่อง
@@ -120,11 +124,12 @@ export async function openOrReuseSession(tx: StoreTx, storeId: string, input: Op
         sessionId: again.id,
         tableId: effectiveTableId,
         tableCode: effectiveTable.code,
+        tableKind: effectiveTable.kind,
         reused: true,
         status: again.status as LiveSessionStatus,
       }
     }
-    throw new SessionError(`โต๊ะ ${effectiveTable.code} ไม่พร้อมเปิด กรุณาแจ้งพนักงาน`)
+    throw new SessionError(`${placeLabel(effectiveTable.kind, effectiveTable.code)} ไม่พร้อมเปิด กรุณาแจ้งพนักงาน`)
   }
 
   const session = await tx.tableSession.create({
@@ -136,6 +141,7 @@ export async function openOrReuseSession(tx: StoreTx, storeId: string, input: Op
     sessionId: session.id,
     tableId: effectiveTableId,
     tableCode: effectiveTable.code,
+    tableKind: effectiveTable.kind,
     reused: false,
     status: "OPEN",
   }

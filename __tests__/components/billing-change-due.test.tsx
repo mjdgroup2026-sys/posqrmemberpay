@@ -21,6 +21,7 @@ afterEach(cleanup)
 const bill: BillingView = {
   tableId: "t1",
   tableCode: "A1",
+  tableKind: "TABLE",
   sessionId: "s1",
   sessionStatus: "OPEN",
   openedAt: new Date("2026-10-03T10:00:00Z"),

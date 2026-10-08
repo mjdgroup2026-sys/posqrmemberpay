@@ -50,7 +50,7 @@ export default async function PayPage({ params }: PageProps<"/order/[qrToken]/pa
   return (
     <CustomerShell
       storeName={settings?.storeName ?? "MJD Mobile Order"}
-      tableCode={status.tableCode}
+      tableCode={status.tableCode} tableKind={status.tableKind}
       backHref={`/order/${qrToken}/check-bill`}
       title="ชำระเงิน"
     >

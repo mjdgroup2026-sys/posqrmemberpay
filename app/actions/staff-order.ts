@@ -11,7 +11,7 @@ import { LIVE_SESSION_STATUS, openOrReuseSession, SessionError } from "@/lib/tab
 import { printKitchenTicket, isPrinterConfigured } from "@/lib/kitchen-printer"
 import { nextSaleNumber } from "@/lib/sale-number"
 import { businessDayRange } from "@/lib/day"
-import { orderTicketLabel } from "@/lib/order-label"
+import { orderTicketLabel, placeLabel } from "@/lib/order-label"
 import { getStorePaymentProfile } from "@/lib/payment-methods"
 import { buildPromptPayPayload } from "@/lib/promptpay"
 import QRCode from "qrcode"
@@ -120,7 +120,7 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
       // โต๊ะที่ลูกค้าขอเช็กบิลแล้ว สั่งเพิ่มไม่ได้ — กติกาเดียวกับฝั่งลูกค้า (ยอดถูกล็อกไว้รอจ่าย)
       if (session.status === "AWAITING_BILL") {
         throw new StaffOrderAbort(
-          `โต๊ะ ${session.tableCode} ขอเช็กบิลแล้ว สั่งเพิ่มไม่ได้ — ปิดบิลก่อนแล้วเปิดโต๊ะใหม่`,
+          `${placeLabel(session.tableKind, session.tableCode)} ขอเช็กบิลแล้ว สั่งเพิ่มไม่ได้ — ปิดบิลก่อนแล้วเปิดบิลใหม่`,
         )
       }
 
@@ -158,7 +158,7 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
 
       // ★ สินค้าในสต็อก (Phase 21b): หยิบให้ลูกค้าทันที จึงตัดสต็อกตอนส่ง ไม่ใช่ตอนปิดบิล · ไม่เข้าครัว = SERVED ตั้งแต่แรก
       //   ตัดผ่าน takeStock (updateMany gte · กติกาข้อ 4) ผูก ledger กับบรรทัด — ยกเลิกรายการ/โต๊ะคืนสต็อกจาก orderItemId นี้
-      await addProductLines(tx, storeId, order.id, productRows, `โต๊ะ ${session.tableCode} ออร์เดอร์ที่ ${order.orderNumber}`)
+      await addProductLines(tx, storeId, order.id, productRows, `${placeLabel(session.tableKind, session.tableCode)} ออร์เดอร์ที่ ${order.orderNumber}`)
 
       // โต๊ะเปลี่ยนเป็น "สั่งแล้ว" ในทรานแซคชันเดียวกับการสร้างออร์เดอร์เสมอ (denormalized field)
       await tx.table.update({ where: { id: session.tableId }, data: { status: "ORDERED" } })
@@ -167,7 +167,12 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
     })
 
     // พิมพ์ทิกเก็ตหลัง commit — พิมพ์ไม่ผ่านต้องไม่ทำให้ออร์เดอร์หาย
-    const printed = await printTicketAfterCommit(db, created.order, created.session.tableCode, created.rows)
+    const printed = await printTicketAfterCommit(
+      db,
+      created.order,
+      placeLabel(created.session.tableKind, created.session.tableCode),
+      created.rows,
+    )
 
     revalidateStaffOrderPages(storeId)
     const total = round2(
@@ -179,8 +184,8 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
       ok: true,
       message:
         created.rows.length > 0
-          ? `ส่งออร์เดอร์ที่ ${created.order.orderNumber} ของโต๊ะ ${created.session.tableCode} เข้าครัวแล้ว`
-          : `เพิ่มสินค้า ${created.productRows.length} รายการเข้าโต๊ะ ${created.session.tableCode} แล้ว (ตัดสต็อกแล้ว)`,
+          ? `ส่งออร์เดอร์ที่ ${created.order.orderNumber} ของ${placeLabel(created.session.tableKind, created.session.tableCode)} เข้าครัวแล้ว`
+          : `เพิ่มสินค้า ${created.productRows.length} รายการเข้า${placeLabel(created.session.tableKind, created.session.tableCode)} แล้ว (ตัดสต็อกแล้ว)`,
       data: {
         orderId: created.order.id,
         orderNumber: created.order.orderNumber,
@@ -232,7 +237,7 @@ function stockErrorMessage(error: unknown): string | null {
 async function printTicketAfterCommit(
   db: ReturnType<typeof forStore>,
   order: { id: string; orderNumber: number; submittedAt: Date },
-  tableCode: string,
+  heading: string,
   rows: OrderLine[],
 ): Promise<boolean> {
   if (!isPrinterConfigured()) return false
@@ -241,7 +246,7 @@ async function printTicketAfterCommit(
   if (foodRows.length === 0) return false
 
   const printed = await printKitchenTicket({
-    tableCode,
+    heading,
     orderNumber: order.orderNumber,
     submittedAt: order.submittedAt,
     items: foodRows.map((row) => ({

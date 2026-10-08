@@ -22,7 +22,7 @@ export default async function CustomerCartPage({ params }: PageProps<"/order/[qr
   return (
     <CustomerShell
       storeName={settings?.storeName ?? "MJD Mobile Order"}
-      tableCode={session.tableCode}
+      tableCode={session.tableCode} tableKind={session.tableKind}
       backHref={`/order/${qrToken}/menu`}
       title="ตะกร้าของคุณ"
     >

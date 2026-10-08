@@ -29,7 +29,7 @@ export default async function CustomerStatusPage({ params }: PageProps<"/order/[
   return (
     <CustomerShell
       storeName={settings?.storeName ?? "MJD Mobile Order"}
-      tableCode={session.tableCode}
+      tableCode={session.tableCode} tableKind={session.tableKind}
       backHref={`/order/${qrToken}/menu`}
       title="ติดตามออร์เดอร์"
     >

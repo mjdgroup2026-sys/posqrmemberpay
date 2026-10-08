@@ -1,5 +1,6 @@
 "use client"
 
+import { placeLabel, placeNoun } from "@/lib/order-label"
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { BillSwitcher } from "@/components/bill-switcher"
@@ -121,11 +122,11 @@ export function BillingForm({ bill }: { bill: BillingView }) {
             </Link>
           </p>
           <h1 className="t-h1">
-            ปิดบิลโต๊ะ {bill.tableCode}
+            ปิดบิล{placeLabel(bill.tableKind, bill.tableCode)}
             {bill.customerLabel ? <> · {bill.customerLabel}</> : null}
           </h1>
           <p className="t-body" style={{ marginTop: 4 }}>
-            เปิดโต๊ะ <span className="num">{formatClock(bill.openedAt)}</span>
+            เปิด{placeNoun(bill.tableKind)} <span className="num">{formatClock(bill.openedAt)}</span>
             {bill.mergedTableCodes.length > 0
               ? ` · รวมโต๊ะ ${bill.mergedTableCodes.map((c) => `โต๊ะ ${c}`).join(", ")}`
               : ""}
@@ -152,7 +153,7 @@ export function BillingForm({ bill }: { bill: BillingView }) {
           <div style={{ textAlign: "center", marginBottom: 12 }}>
             <p style={{ fontWeight: 700, fontSize: "1.05rem" }}>{bill.storeName}</p>
             <p className="t-caption">
-              ใบแจ้งยอด · โต๊ะ {bill.tableCode}
+              ใบแจ้งยอด · {placeLabel(bill.tableKind, bill.tableCode)}
               {bill.customerLabel ? ` · ${bill.customerLabel}` : ""}
             </p>
           </div>
@@ -243,7 +244,7 @@ export function BillingForm({ bill }: { bill: BillingView }) {
                     ]
                   : []
               }
-              caption={`โต๊ะ ${bill.tableCode}${bill.customerLabel ? ` · ${bill.customerLabel}` : ""} · ${formatNumber(bill.lines.length)} รายการ`}
+              caption={`${placeLabel(bill.tableKind, bill.tableCode)}${bill.customerLabel ? ` · ${bill.customerLabel}` : ""} · ${formatNumber(bill.lines.length)} รายการ`}
             />
           </div>
 

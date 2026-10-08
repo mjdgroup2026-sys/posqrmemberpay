@@ -1,5 +1,6 @@
 "use client"
 
+import { placeLabel, type PlaceKind } from "@/lib/order-label"
 import { FULL_ACCESS, type AllowedActions } from "@/lib/types"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
@@ -16,6 +17,7 @@ import { IconSpinner } from "@/components/icons"
 export type QrCard = {
   tableId: string
   tableCode: string
+  tableKind: PlaceKind
   qrId: string | null
   token: string | null
   type: "STATIC" | "DYNAMIC" | null
@@ -126,7 +128,7 @@ export function QrManager({ cards, allowed = FULL_ACCESS }: { cards: QrCard[]; a
         {cards.map((card) => (
           <article key={card.tableId} className="card-ui card-pad" style={{ display: "grid", gap: 10 }}>
             <div className="row" style={{ justifyContent: "space-between" }}>
-              <span style={{ fontWeight: 700 }}>โต๊ะ {card.tableCode}</span>
+              <span style={{ fontWeight: 700 }}>{placeLabel(card.tableKind, card.tableCode)}</span>
               {card.type ? (
                 <span className={`chip ${card.type === "STATIC" ? "chip-neutral" : "chip-info"}`}>
                   <span className="dot" />
