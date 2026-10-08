@@ -26,7 +26,7 @@ function round2(value: number): number {
 export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: "bookings" | "board" }) {
   const router = useRouter()
   // ปิดบิลเสร็จกลับไปหน้าที่มา — ตารางจอง (ปุ่มปิดบิลบนคิวนวด · 2026-10-08) หรือผังโต๊ะ (ค่าเดิม)
-  const doneHref = returnTo === "bookings" ? "/spa/bookings" : returnTo === "board" ? "/spa/board" : "/mobile-order/tables"
+  const doneHref = returnTo === "bookings" ? "/spa/bookings?tab=list" : returnTo === "board" ? "/spa/bookings?tab=now" : "/mobile-order/tables"
   const [pending, setPending] = useState(false)
   const [method, setMethod] = useState<PaymentMethodValue>("PROMPTPAY")
   const [cashInput, setCashInput] = useState("")
@@ -121,7 +121,7 @@ export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: 
           <p className="t-eyebrow">
             {returnTo ? (
               <Link href={doneHref} className="row" style={{ gap: 6 }}>
-                <IconBack size={14} aria-hidden /> กลับไป{returnTo === "board" ? "กระดานห้องนวด" : "ตารางจอง"}
+                <IconBack size={14} aria-hidden /> กลับไปคิวนวด
               </Link>
             ) : (
               <Link href={`/mobile-order/tables/${bill.tableId}?session=${bill.sessionId}`} className="row" style={{ gap: 6 }}>

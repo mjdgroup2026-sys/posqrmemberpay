@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import { getSession, resolveStoreContext } from "@/lib/session"
 import { prisma } from "@/lib/prisma"
-import { getLowStockCount, getPendingNotificationCount, getStoreSettings } from "@/lib/queries"
+import { countSpaQueueActions, getLowStockCount, getPendingNotificationCount, getStoreSettings } from "@/lib/queries"
 import { getCurrentPermissions, type ResourceKey } from "@/lib/permissions"
 import { Sidebar } from "@/components/sidebar"
 import { Topbar } from "@/components/topbar"
@@ -18,15 +18,17 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   const context = result.ok ? result.context : null
   const memberships = result.ok ? result.context.memberships : result.memberships
 
-  const [lowStockCount, pendingNotificationCount, permissions, settings] = context
+  const [lowStockCount, pendingNotificationCount, permissions, settings, spaQueueCount] = context
     ? await Promise.all([
         getLowStockCount(context.storeId),
         getPendingNotificationCount(context.storeId),
         getCurrentPermissions(),
         // ตัวเลือกร้านนวด (Phase 20) — คุมว่ากลุ่มเมนู "ร้านนวด" โผล่ไหม
         getStoreSettings(context.storeId),
+        // badge ของเมนู "คิวนวด" (2026-10-08) — ร้านที่ไม่ได้เปิดร้านนวดไม่มีแถว booking ค่าจึงเป็น 0
+        countSpaQueueActions(context.storeId),
       ])
-    : [0, 0, null, null]
+    : [0, 0, null, null, 0]
 
   const user = context?.user ?? (await requireUserSummary())
   // โมดูลคลังที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) — ไม่มีป้าย/badge สินค้าใกล้หมด
@@ -46,6 +48,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       <Sidebar
         lowStockCount={shownLowStock}
         pendingNotificationCount={pendingNotificationCount}
+        spaQueueCount={spaQueueCount}
         viewableResources={viewableResources}
         isPlatformAdmin={user.isPlatformAdmin}
         isOwner={context?.role === "OWNER"}

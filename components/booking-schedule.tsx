@@ -13,9 +13,14 @@ import {
   saveBooking,
   startBookingService,
 } from "@/app/actions/bookings"
-import type { BookingProgram, BookingRoom, BookingRow, ShiftRow, TherapistOption } from "@/lib/queries"
+import type { BookingProgram, BookingRoom, BookingRow, RoomBoardRow, ShiftRow, TherapistBoardRow, TherapistOption } from "@/lib/queries"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
-import { IconCalendar, IconPlus, IconPrinter, IconReceipt, IconSpinner } from "@/components/icons"
+import { IconCalendar, IconList, IconMore, IconPlus, IconPrinter, IconReceipt, IconRoom, IconSpinner, IconTherapist } from "@/components/icons"
+import { SegmentTabs } from "@/components/segment-tabs"
+import { SpaBoard } from "@/components/spa-board"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { addDays } from "@/lib/day"
+import { formatBusinessDate } from "@/lib/format"
 import { AutoRefresh } from "@/components/auto-refresh"
 import {
   Dialog,
@@ -75,8 +80,15 @@ const EMPTY_DRAFT = {
   note: "",
 }
 
+/// แท็บของหน้า "คิวนวด" (2026-10-08 รวมตารางจอง + กระดานห้องนวด) — ตอนนี้ (การ์ด) · ตารางเวลา · รายการ
+export type QueueTab = "now" | "timeline" | "list"
+
 export function BookingSchedule({
   dayKey,
+  todayKey,
+  tab,
+  board,
+  nowMs,
   programs,
   rooms,
   therapists,
@@ -88,6 +100,13 @@ export function BookingSchedule({
   canBill = false,
 }: {
   dayKey: string
+  /// วันนี้ตามเวลาไทย (server คำนวณ) — ปุ่ม "วันนี้" + เส้นเวลา
+  todayKey: string
+  tab: QueueTab
+  /// ข้อมูลของแท็บ "ตอนนี้" จาก getSpaBoard() — สถานะเดียวกับตารางจอง
+  board: { live: boolean; rooms: RoomBoardRow[]; therapists: TherapistBoardRow[]; unassigned: BookingRow[] }
+  /// เวลา server ตอน render — นาฬิกาของการ์ดเริ่มจากค่านี้
+  nowMs: number
   programs: BookingProgram[]
   rooms: BookingRoom[]
   therapists: TherapistOption[]
@@ -109,6 +128,9 @@ export function BookingSchedule({
   const [detailId, setDetailId] = useState<string | null>(null)
   const detail = bookings.find((b) => b.id === detailId) ?? null
   const [checkInRoom, setCheckInRoom] = useState("")
+  // แถวของตารางเวลา: ตามพนักงาน (จองได้ตามกะ) หรือตามห้อง (เห็นห้องว่าง/ไม่ว่าง)
+  const [timelineRows, setTimelineRows] = useState<"therapists" | "rooms">("therapists")
+  const dayLabel = formatBusinessDate(new Date(`${dayKey}T12:00:00+07:00`))
 
   const shiftByTherapist = useMemo(() => new Map(shifts.map((s) => [s.therapistId, s])), [shifts])
   const live = useMemo(() => bookings.filter((b) => LIVE_STATUS.includes(b.status)), [bookings])
@@ -235,10 +257,11 @@ export function BookingSchedule({
     startCreate(therapist.id, startMinute)
   }
 
-  function startCreate(therapistId?: string, startMinute?: number) {
+  function startCreate(therapistId?: string, startMinute?: number, tableId?: string) {
     setDraft({
       ...EMPTY_DRAFT,
       therapistId: therapistId ?? "",
+      tableId: tableId ?? "",
       menuItemId: programs[0]?.id ?? "",
       startTime: startMinute === undefined ? EMPTY_DRAFT.startTime : hhmm(startMinute),
     })
@@ -371,42 +394,205 @@ export function BookingSchedule({
     if (done) setDetailId(null)
   }
 
+  /// เปลี่ยนวัน/แท็บผ่าน URL (`?date=&tab=`) — ลิงก์แชร์/รีเฟรชแล้วกลับมาที่เดิม
+  function navigate(next: { date?: string; tab?: QueueTab }) {
+    const params = new URLSearchParams({ date: next.date ?? dayKey, tab: next.tab ?? tab })
+    router.push(`/spa/bookings?${params.toString()}`)
+  }
   function goToDay(next: string) {
-    router.push(`/spa/bookings?date=${next}`)
+    navigate({ date: next })
+  }
+
+  /// ขั้นถัดไปของคิว (แท็บรายการ · 2026-10-08) — ปุ่มเดียวที่เห็นในแถว ที่เหลือไปอยู่ในเมนู "⋯"
+  function nextStep(booking: BookingRow) {
+    if (booking.status === "BOOKED" && allowed.includes("ADD")) {
+      return (
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => openDetail(booking)} disabled={pending}>
+          เช็กอิน
+        </button>
+      )
+    }
+    if (booking.status === "CHECKED_IN" && allowed.includes("EDIT")) {
+      return (
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => advance(booking, "IN_SERVICE")} disabled={pending}>
+          เริ่มนวด
+        </button>
+      )
+    }
+    if (booking.status === "IN_SERVICE" && allowed.includes("EDIT")) {
+      return (
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => advance(booking, "DONE")} disabled={pending}>
+          เสร็จแล้ว
+        </button>
+      )
+    }
+    if (booking.status === "DONE" && canBill && booking.billOpen && booking.tableId && booking.tableSessionId) {
+      return (
+        <Link href={billHref(booking)} className="btn btn-primary btn-sm">
+          <IconReceipt size={14} aria-hidden />
+          ปิดบิล
+        </Link>
+      )
+    }
+    return null
+  }
+
+  function billHref(booking: BookingRow): string {
+    return `/mobile-order/tables/${booking.tableId}/billing?session=${booking.tableSessionId}&back=bookings`
+  }
+
+  /// เมนู "⋯" ของแถว — คำสั่งที่ใช้ไม่บ่อย (server ตรวจสิทธิ์/สถานะซ้ำทุกตัว)
+  function moreMenu(booking: BookingRow) {
+    const items: React.ReactNode[] = []
+    if (booking.status === "BOOKED" && allowed.includes("EDIT")) {
+      items.push(<DropdownMenuItem key="edit" onClick={() => startEdit(booking)}>แก้ไขคิว</DropdownMenuItem>)
+    }
+    if (booking.status === "CHECKED_IN" && allowed.includes("EDIT")) {
+      items.push(<DropdownMenuItem key="done" onClick={() => advance(booking, "DONE")}>เสร็จแล้ว (ข้ามเริ่มนวด)</DropdownMenuItem>)
+    }
+    if (booking.status !== "DONE" && canBill && booking.billOpen && booking.tableId && booking.tableSessionId) {
+      items.push(
+        <DropdownMenuItem key="bill" render={<Link href={billHref(booking)} />}>
+          ปิดบิล / ชำระเงิน
+        </DropdownMenuItem>,
+      )
+    }
+    if (TICKET_STATUS.includes(booking.status)) {
+      items.push(<DropdownMenuItem key="ticket" onClick={() => printTicket(booking.id)}>พิมพ์ทิกเก็ต</DropdownMenuItem>)
+    }
+    items.push(<DropdownMenuItem key="detail" onClick={() => openDetail(booking)}>ดูรายละเอียด</DropdownMenuItem>)
+    if (booking.status === "BOOKED" && allowed.includes("DELETE")) {
+      items.push(<DropdownMenuItem key="noshow" onClick={() => close(booking, "NO_SHOW")}>ไม่มาตามนัด</DropdownMenuItem>)
+    }
+    if (LIVE_STATUS.includes(booking.status) && allowed.includes("DELETE")) {
+      items.push(
+        <DropdownMenuItem key="cancel" variant="destructive" onClick={() => close(booking, "CANCELLED")}>
+          ยกเลิกคิว
+        </DropdownMenuItem>,
+      )
+    }
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`คำสั่งอื่นของ ${booking.customerName}`} disabled={pending} />}
+        >
+          <IconMore size={16} aria-hidden />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          {items}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+
+  const isToday = dayKey === todayKey
+
+  /// แถวตารางเวลาแบบ "ตามห้อง" — กดช่องว่างจองโดยเลือกห้องไว้ให้ (เลือกพนักงานในฟอร์ม) · คิวที่ยังไม่ระบุห้องรวมไว้แถวท้าย
+  function roomTimelineRows() {
+    const rows = [
+      ...rooms.map((room) => ({ key: room.id, label: `ห้อง ${room.code}`, roomId: room.id as string | null })),
+      ...(onTimeline.some((b) => b.tableId === null) ? [{ key: "none", label: "ยังไม่ระบุห้อง", roomId: null }] : []),
+    ]
+    return rows.map((row) => {
+      const items = onTimeline.filter((b) => b.tableId === row.roomId)
+      return (
+        <div key={row.key} className="row" style={{ gap: 0, borderTop: "1px solid var(--line)", alignItems: "stretch" }}>
+          <div style={{ width: 160, flex: "none", padding: "10px 12px", fontWeight: 700 }}>{row.label}</div>
+          <div style={{ position: "relative", width: range.width, minHeight: 52 }}>
+            {slots.map((minute) => (
+              <span key={minute} className={`timeline-tick${minute % 60 === 0 ? "" : " is-half"}`} style={{ left: xOf(minute) }} aria-hidden />
+            ))}
+            {nowX !== null ? <span className="timeline-now" style={{ left: nowX }} aria-hidden /> : null}
+            {row.roomId && allowed.includes("ADD") && programs.length > 0
+              ? slots.map((minute) => (
+                  <button
+                    key={minute}
+                    type="button"
+                    className="btn btn-ghost"
+                    title={`จองห้องนี้ เวลา ${hhmm(minute)} น.`}
+                    onClick={() => startCreate(undefined, minute, row.roomId ?? undefined)}
+                    style={{ position: "absolute", left: xOf(minute), width: (SLOT_MINUTES / 60) * HOUR_WIDTH, top: 0, bottom: 0, borderRadius: 0, opacity: 0, padding: 0, minWidth: 0 }}
+                  >
+                    <span className="sr-only">{`จอง${row.label} เวลา ${hhmm(minute)} น.`}</span>
+                  </button>
+                ))
+              : null}
+            {items.map((booking) => (
+              <button
+                key={booking.id}
+                type="button"
+                className={`booking-bar ${STATUS_BAR[booking.status] ?? ""}`}
+                title={bookingHint(booking)}
+                onClick={() => openDetail(booking)}
+                style={{
+                  position: "absolute",
+                  left: xOf(booking.startMinute),
+                  width: Math.max(((booking.endMinute - booking.startMinute) / 60) * HOUR_WIDTH, 52),
+                  top: 6,
+                  bottom: 6,
+                  overflow: "hidden",
+                  textAlign: "left",
+                  padding: "3px 8px",
+                  zIndex: 1,
+                }}
+              >
+                <span style={{ display: "block", lineHeight: 1.25, whiteSpace: "nowrap" }}>
+                  <span className="num" style={{ fontWeight: 600 }}>
+                    {hhmm(booking.startMinute)}
+                  </span>
+                  <span className="t-caption"> · {booking.therapistLabel}</span>
+                  <br />
+                  {booking.customerName}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )
+    })
   }
 
   return (
     <>
       {/* คิวเปลี่ยนจากหลายเครื่อง (เช็กอินหน้าเคาน์เตอร์ · เริ่มนวดหน้าห้อง) — SSE ก่อน polling สำรอง */}
-      <AutoRefresh seconds={30} />
+      <AutoRefresh seconds={tab === "now" ? 20 : 30} />
 
+      {/* หัวหน้าใช้ร่วมทั้ง 3 แท็บ (2026-10-08 รวมตารางจอง + กระดานห้องนวดเป็นหน้าเดียว) */}
       <div className="page-head">
         <div>
           <p className="t-eyebrow">ร้านนวด</p>
           <h1 className="t-h1">
             <span className="row" style={{ gap: 10 }}>
               <IconCalendar size={22} aria-hidden />
-              ตารางจอง
+              คิวนวด
             </span>
           </h1>
           <p className="t-body" style={{ marginTop: 4 }}>
-            คิวของวันที่เลือก — กดที่ช่องว่างของพนักงานเพื่อจองเวลานั้น หรือกดที่คิวเพื่อเช็กอิน/แก้ไข
-            {bufferMinutes > 0 ? ` · เว้นช่วงพักระหว่างคิว ${bufferMinutes} นาที` : null}
+            <strong>{dayLabel}</strong>
+            {` · คิว ${live.length} รายการ`}
+            {bufferMinutes > 0 ? ` · พักระหว่างคิว ${bufferMinutes} นาที` : null}
           </p>
         </div>
-        <div className="row" style={{ gap: 10 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className="btn btn-ghost" onClick={() => goToDay(addDays(dayKey, -1))} aria-label="วันก่อนหน้า">
+            ‹ วันก่อน
+          </button>
+          {!isToday ? (
+            <button type="button" className="btn btn-subtle" onClick={() => navigate({ date: todayKey, tab: "now" })}>
+              วันนี้
+            </button>
+          ) : null}
+          <button type="button" className="btn btn-ghost" onClick={() => goToDay(addDays(dayKey, 1))} aria-label="วันถัดไป">
+            วันถัดไป ›
+          </button>
           <input
             type="date"
             className="input"
             value={dayKey}
             onChange={(e) => e.target.value && goToDay(e.target.value)}
-            style={{ width: 170 }}
-            aria-label="วันที่ของตารางจอง"
+            style={{ width: 160 }}
+            aria-label="วันที่ของคิวนวด"
           />
-          {/* กระดานใช้วันเดียวกับตารางนี้ — สองหน้าต้องเห็นข้อมูลชุดเดียวกัน (2026-10-08) */}
-          <Link href={`/spa/board?date=${dayKey}`} className="btn btn-ghost">
-            กระดานห้อง
-          </Link>
           {allowed.includes("ADD") ? (
             <button type="button" className="btn btn-primary" onClick={() => startCreate()} disabled={programs.length === 0}>
               <IconPlus size={17} aria-hidden />
@@ -414,6 +600,19 @@ export function BookingSchedule({
             </button>
           ) : null}
         </div>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <SegmentTabs<QueueTab>
+          label="มุมมองคิวนวด"
+          value={tab}
+          onChange={(next) => navigate({ tab: next })}
+          tabs={[
+            { key: "now", label: isToday ? "ตอนนี้" : "สรุปรายห้อง", Icon: IconRoom },
+            { key: "timeline", label: "ตารางเวลา", Icon: IconCalendar },
+            { key: "list", label: "รายการ", count: bookings.length, Icon: IconList },
+          ]}
+        />
       </div>
 
       {programs.length === 0 ? (
@@ -425,12 +624,34 @@ export function BookingSchedule({
         <div className="alert-banner info">ยังไม่มีพนักงานนวดที่เปิดใช้งาน — เพิ่มที่หน้าพนักงานนวดก่อน</div>
       ) : null}
 
+      {/* แท็บ "ตอนนี้" = การ์ดต่อห้อง/พนักงาน (เดิมคือหน้ากระดานห้องนวด) — ไทม์ไลน์ย่อซ่อนเพราะมีแท็บตารางเวลาแล้ว */}
+      {tab === "now" ? (
+        <SpaBoard
+          dayKey={dayKey}
+          live={board.live}
+          nowMs={nowMs}
+          rooms={board.rooms}
+          therapists={board.therapists}
+          unassigned={board.unassigned}
+          allowed={allowed}
+          canBill={canBill}
+          showTimeline={false}
+        />
+      ) : null}
+
+      {tab === "timeline" ? (
       <section className="card-ui" style={{ overflow: "hidden" }}>
         <div className="panel-head">
-          <h2 className="t-h2">
-            คิววันนี้ <span className="num">{live.length}</span> รายการ
-          </h2>
-          <span className="t-caption">เลื่อนตารางไปทางขวาเพื่อดูเวลาถัดไป</span>
+          <SegmentTabs<"therapists" | "rooms">
+            label="แถวของตารางเวลา"
+            value={timelineRows}
+            onChange={setTimelineRows}
+            tabs={[
+              { key: "therapists", label: "ตามพนักงาน", Icon: IconTherapist },
+              { key: "rooms", label: "ตามห้อง", Icon: IconRoom },
+            ]}
+          />
+          <span className="t-caption">กดช่องว่างเพื่อจอง · กดแท่งคิวเพื่อจัดการ · เลื่อนไปทางขวาดูเวลาถัดไป</span>
         </div>
 
         {/* คำอธิบายสี — ดูสถานะคิวได้จากสีโดยไม่ต้องกดเข้าไป (20e) */}
@@ -454,7 +675,7 @@ export function BookingSchedule({
             {/* แถบเวลา */}
             <div className="row" style={{ gap: 0, borderBottom: "1px solid var(--line)" }}>
               <div style={{ width: 160, flex: "none", padding: "8px 12px" }} className="t-caption">
-                พนักงาน
+                {timelineRows === "rooms" ? "ห้อง" : "พนักงาน"}
               </div>
               <div style={{ position: "relative", height: 36, width: range.width }}>
                 {/* ขีดเต็มชั่วโมง (ตัวเลขเข้ม) + ขีดครึ่งชั่วโมง (เส้นประ ":30" จาง) — 20e */}
@@ -482,7 +703,9 @@ export function BookingSchedule({
               </div>
             </div>
 
-            {therapists.map((therapist) => {
+            {timelineRows === "rooms" ? roomTimelineRows() : null}
+
+            {timelineRows === "therapists" && therapists.map((therapist) => {
               const shift = shiftByTherapist.get(therapist.id)
               const rows = onTimeline.filter((b) => b.therapistId === therapist.id)
               // ไม่มีกะ/หยุด = จองไม่ได้ (2026-09-24) — ทำแถวจางให้เห็นก่อนกด
@@ -593,11 +816,11 @@ export function BookingSchedule({
           </div>
         </div>
       </section>
+      ) : null}
 
-      <section className="card-ui" style={{ marginTop: 18 }}>
-        <div className="panel-head">
-          <h2 className="t-h2">รายการทั้งหมดของวันนี้</h2>
-        </div>
+      {/* แท็บ "รายการ" แบบกระชับ (2026-10-08) — 4 คอลัมน์ · ปุ่มขั้นถัดไปปุ่มเดียว · ที่เหลือในเมนู "⋯" */}
+      {tab === "list" ? (
+      <section className="card-ui">
         {bookings.length === 0 ? (
           <p className="t-body" style={{ padding: 24 }}>ยังไม่มีคิวของวันนี้</p>
         ) : (
@@ -605,55 +828,59 @@ export function BookingSchedule({
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>
               <thead>
                 <tr style={{ textAlign: "left", color: "var(--ink-3)", background: "var(--surface-2)" }}>
-                  <th style={{ padding: "10px 24px", fontWeight: 500 }}>เวลา</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 500 }}>ลูกค้า</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 500 }}>โปรแกรม</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 500 }}>พนักงาน / ห้อง</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 500 }}>สถานะ</th>
-                  <th style={{ padding: "10px 24px", fontWeight: 500 }}>จัดการ</th>
+                  <th style={{ padding: "8px 16px", fontWeight: 500 }}>เวลา · ลูกค้า</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>โปรแกรม · พนักงาน · ห้อง</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>สถานะ</th>
+                  <th style={{ padding: "8px 16px", fontWeight: 500, textAlign: "right" }}>จัดการ</th>
                 </tr>
               </thead>
               <tbody>
-                {bookings.map((booking) => (
-                  <tr key={booking.id} style={{ borderTop: "1px solid var(--line)" }}>
-                    <td className="num" style={{ padding: "12px 24px" }}>
-                      {hhmm(booking.startMinute)}–{hhmm(booking.endMinute)}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => openDetail(booking)}
-                      >
-                        {booking.customerName}
-                      </button>
-                      {booking.customerPhone ? <span className="t-caption num"> · {booking.customerPhone}</span> : null}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      {booking.menuItemName} <span className="t-caption num">({booking.durationMinutes} นาที)</span>
-                    </td>
-                    <td className="t-caption" style={{ padding: "12px" }}>
-                      {booking.therapistLabel}
-                      {booking.tableCode ? ` · ห้อง ${booking.tableCode}` : " · ยังไม่เลือกห้อง"}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <span className={`chip ${STATUS_CHIP[booking.status]}`}>
-                        <span className="dot" />
-                        {STATUS_LABEL[booking.status]}
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px 24px" }}>
-                      <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                        {statusActions(booking, true)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {bookings.map((booking) => {
+                  const overdue = isToday && nowMinute !== null && booking.status === "BOOKED" && booking.startMinute <= nowMinute
+                  return (
+                    <tr key={booking.id} style={{ borderTop: "1px solid var(--line)" }}>
+                      <td style={{ padding: "8px 16px" }}>
+                        <button
+                          type="button"
+                          onClick={() => openDetail(booking)}
+                          style={{ background: "none", border: 0, padding: 0, font: "inherit", textAlign: "left", cursor: "pointer", color: "inherit" }}
+                        >
+                          <span className="num" style={{ fontWeight: 700 }}>
+                            {hhmm(booking.startMinute)}–{hhmm(booking.endMinute)}
+                          </span>{" "}
+                          <span style={{ fontWeight: 600 }}>{booking.customerName}</span>
+                          {booking.customerPhone ? <span className="t-caption num"> · {booking.customerPhone}</span> : null}
+                        </button>
+                      </td>
+                      <td className="t-small" style={{ padding: "8px 12px" }}>
+                        {booking.menuItemName} <span className="t-caption num">({booking.durationMinutes} นาที)</span>
+                        <span className="t-caption">
+                          {" · "}
+                          {booking.therapistLabel}
+                          {booking.tableCode ? ` · ห้อง ${booking.tableCode}` : " · ยังไม่เลือกห้อง"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <span className={`chip ${overdue ? "chip-q-late" : STATUS_CHIP[booking.status]}`}>
+                          <span className="dot" />
+                          {overdue ? "เลยเวลา" : STATUS_LABEL[booking.status]}
+                        </span>
+                      </td>
+                      <td style={{ padding: "8px 16px" }}>
+                        <span className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
+                          {nextStep(booking)}
+                          {moreMenu(booking)}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         )}
       </section>
+      ) : null}
 
       {/* ฟอร์มจอง / แก้ไข */}
       <Dialog open={formOpen} onOpenChange={(next) => !pending && setFormOpen(next)}>

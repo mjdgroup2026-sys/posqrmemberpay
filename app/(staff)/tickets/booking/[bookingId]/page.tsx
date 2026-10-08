@@ -22,8 +22,8 @@ export default async function BookingTicketPage({ params, searchParams }: PagePr
           <p className="t-body" style={{ marginTop: 8 }}>
             ไม่พบคิวนี้ หรือคิวยังไม่ได้เช็กอิน — ทิกเก็ตจัดห้องพิมพ์ได้หลังเช็กอินแล้วเท่านั้น
           </p>
-          <Link href="/spa/bookings" className="btn btn-primary" style={{ marginTop: 16 }}>
-            กลับไปตารางจอง
+          <Link href="/spa/bookings?tab=list" className="btn btn-primary" style={{ marginTop: 16 }}>
+            กลับไปคิวนวด
           </Link>
         </div>
       </main>

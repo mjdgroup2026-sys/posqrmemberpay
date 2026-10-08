@@ -429,7 +429,7 @@ function KindPicker({
               </option>
             ))}
           </select>
-          <span className="field-hint">ประเภทห้อง เช่น ห้องนวดเท้า / ห้องนวดไทย — ตารางจอง (20b) จะเสนอเฉพาะห้องที่ตรงกับโปรแกรม</span>
+          <span className="field-hint">ประเภทห้อง เช่น ห้องนวดเท้า / ห้องนวดไทย — หน้าคิวนวดจะเสนอเฉพาะห้องที่ตรงกับโปรแกรม</span>
           {error ? <span className="field-hint error">{error}</span> : null}
         </>
       ) : null}

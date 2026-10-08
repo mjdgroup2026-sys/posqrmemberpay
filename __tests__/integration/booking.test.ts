@@ -342,13 +342,17 @@ describe.skipIf(!dbReady)("ร้านนวด — จองล่วงหน
       const waiting = await queries.listServicesAwaitingStart(TEST_STORE_ID)
       expect(waiting).toHaveLength(1)
       expect(waiting[0]).toMatchObject({ itemId: item.id, tableCode: "3/1", therapistId: t1.id, customerLabel: "คุณเอ" })
+      // 2026-10-08: คิวจองนับใน badge ของเมนู "คิวนวด" แทนหน้าแจ้งเตือน (ไม่นับซ้ำสองที่)
+      const midService = businessDayTime(today, 13 * 60 + 30)
+      expect(await queries.countSpaQueueActions(TEST_STORE_ID, midService)).toBe(1)
       const badgeBefore = await queries.getPendingNotificationCount(TEST_STORE_ID)
 
       expect((await startServiceItem(makeFormData({ id: item.id }))).ok).toBe(true)
       expect((await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe("IN_SERVICE")
       // กดเริ่มนวดแล้วหายเอง ไม่ต้องรับทราบ
       expect(await queries.listServicesAwaitingStart(TEST_STORE_ID)).toHaveLength(0)
-      expect(await queries.getPendingNotificationCount(TEST_STORE_ID)).toBe(badgeBefore - 1)
+      expect(await queries.getPendingNotificationCount(TEST_STORE_ID)).toBe(badgeBefore)
+      expect(await queries.countSpaQueueActions(TEST_STORE_ID, midService)).toBe(0)
 
       expect((await markItemServed(makeFormData({ id: item.id }))).ok).toBe(true)
       expect((await db.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe("DONE")

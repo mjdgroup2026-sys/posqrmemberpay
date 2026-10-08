@@ -206,6 +206,7 @@ export function SpaBoard({
   unassigned,
   allowed = FULL_ACCESS,
   canBill = false,
+  showTimeline = true,
 }: {
   dayKey: string
   live: boolean
@@ -216,6 +217,8 @@ export function SpaBoard({
   unassigned: BookingRow[]
   allowed?: AllowedActions
   canBill?: boolean
+  /// ไทม์ไลน์ย่อทั้งวันใต้การ์ด — หน้า "คิวนวด" ปิดไว้เพราะมีแท็บตารางเวลาเต็มอยู่แล้ว (2026-10-08)
+  showTimeline?: boolean
 }) {
   const router = useRouter()
   // นาฬิกา: ค่าจาก server ตอน render (refresh แล้วได้ค่าใหม่) หรือค่าจาก interval แล้วแต่อันไหนใหม่กว่า
@@ -337,6 +340,42 @@ export function SpaBoard({
     return buttons.length > 0 ? <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>{buttons}</div> : null
   }
 
+  /// รายการคิวท้ายการ์ด — วันนี้: คิวที่ยังรอ · วันอื่น: คิวทั้งวัน · ไม่มีอะไรเลยไม่ต้องวาดส่วนนี้ การ์ดจะได้เตี้ยลง (2026-10-08)
+  function queueSection(card: CardView) {
+    const list = live ? card.upcoming : ((view === "rooms" ? rooms.find((r) => r.id === card.key)?.bookings : therapists.find((t) => t.id === card.key)?.bookings) ?? [])
+    if (list.length === 0 && card.doneCount === 0) return null
+    return (
+      <div className="board-queue">
+        <span className="t-eyebrow">
+          {live ? "คิวถัดไป" : "คิวของวันนี้"}
+          {card.doneCount > 0 ? <span className="t-caption"> · เสร็จแล้ว {card.doneCount} คิว</span> : null}
+        </span>
+        {list.slice(0, QUEUE_PREVIEW).map((row) => {
+          const overdue = live && row.status === "BOOKED" && row.startAt.getTime() <= now
+          return (
+            <div key={row.id} className="board-queue-row">
+              <span className="num" style={{ fontWeight: 600 }}>
+                {formatHhMm(row.startMinute)}
+              </span>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {row.customerName} · {view === "rooms" ? row.therapistLabel : row.tableCode ? `ห้อง ${row.tableCode}` : "ยังไม่ระบุห้อง"}
+              </span>
+              <span className={`chip ${overdue ? "chip-q-late" : BOOKING_STATUS_CHIP[row.status]}`}>
+                <span className="dot" />
+                {overdue ? "เลยเวลา" : BOOKING_STATUS_LABEL[row.status]}
+              </span>
+            </div>
+          )
+        })}
+        {list.length > QUEUE_PREVIEW ? (
+          <Link href={`/spa/bookings?date=${dayKey}&tab=list`} className="t-caption">
+            + อีก {list.length - QUEUE_PREVIEW} คิว — ดูในรายการ
+          </Link>
+        ) : null}
+      </div>
+    )
+  }
+
   function timing(card: CardView) {
     const booking = card.current
     if (!booking || !live) return null
@@ -432,43 +471,7 @@ export function SpaBoard({
                 {card.hint ? <span className="t-caption">{card.hint}</span> : null}
                 {live ? actions(card) : null}
               </div>
-              <div className="board-queue">
-                <span className="t-eyebrow">
-                  {live ? "คิวถัดไป" : "คิวของวันนี้"}
-                  {card.doneCount > 0 ? <span className="t-caption"> · เสร็จแล้ว {card.doneCount} คิว</span> : null}
-                </span>
-                {(live ? card.upcoming : view === "rooms" ? rooms.find((r) => r.id === card.key)?.bookings ?? [] : therapists.find((t) => t.id === card.key)?.bookings ?? [])
-                  .slice(0, QUEUE_PREVIEW)
-                  .map((row) => {
-                    const overdue = live && row.status === "BOOKED" && row.startAt.getTime() <= now
-                    return (
-                      <div key={row.id} className="board-queue-row">
-                        <span className="num" style={{ fontWeight: 600 }}>
-                          {formatHhMm(row.startMinute)}
-                        </span>
-                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {row.customerName} · {view === "rooms" ? row.therapistLabel : row.tableCode ? `ห้อง ${row.tableCode}` : "ยังไม่ระบุห้อง"}
-                        </span>
-                        <span className={`chip ${overdue ? "chip-q-late" : BOOKING_STATUS_CHIP[row.status]}`}>
-                          <span className="dot" />
-                          {overdue ? "เลยเวลา" : BOOKING_STATUS_LABEL[row.status]}
-                        </span>
-                      </div>
-                    )
-                  })}
-                {(() => {
-                  const list = live ? card.upcoming : (view === "rooms" ? rooms.find((r) => r.id === card.key)?.bookings : therapists.find((t) => t.id === card.key)?.bookings) ?? []
-                  if (list.length === 0) return <span className="t-caption">ไม่มีคิว</span>
-                  if (list.length > QUEUE_PREVIEW) {
-                    return (
-                      <Link href={`/spa/bookings?date=${dayKey}`} className="t-caption">
-                        + อีก {list.length - QUEUE_PREVIEW} คิว — ดูในตารางจอง
-                      </Link>
-                    )
-                  }
-                  return null
-                })()}
-              </div>
+              {queueSection(card)}
             </article>
           ))}
         </div>
@@ -478,7 +481,7 @@ export function SpaBoard({
         <section className="card-ui" style={{ marginTop: 18 }}>
           <div className="panel-head">
             <h2 className="t-h2">คิวที่ยังไม่ระบุห้อง</h2>
-            <span className="t-caption">เลือกห้องตอนเช็กอินที่ตารางจอง</span>
+            <span className="t-caption">เลือกห้องตอนกดเช็กอินในแท็บรายการ</span>
           </div>
           <div style={{ padding: "0 24px 16px", display: "grid", gap: 6 }}>
             {unassigned.map((row) => (
@@ -499,6 +502,7 @@ export function SpaBoard({
         </section>
       ) : null}
 
+      {showTimeline ? (
       <BoardTimeline
         dayKey={dayKey}
         live={live}
@@ -509,6 +513,7 @@ export function SpaBoard({
             : therapists.map((t) => ({ key: t.id, label: t.label, bookings: t.bookings }))
         }
       />
+      ) : null}
     </>
   )
 }

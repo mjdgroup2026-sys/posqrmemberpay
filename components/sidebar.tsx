@@ -28,7 +28,6 @@ import {
   IconBrand,
   IconTherapist,
   IconCalendar,
-  IconRoom,
   IconStockAdjust,
   IconDocument,
   IconReorder,
@@ -42,7 +41,7 @@ type NavItem = {
   href: string
   label: string
   Icon: typeof IconDashboard
-  badge?: "lowStock" | "pending"
+  badge?: "lowStock" | "pending" | "spaQueue"
   resource?: ResourceKey
   /// เมนูของผู้ดูแลแพลตฟอร์ม (Phase 14a) — คนละแกนกับ resource ของร้าน เห็นเฉพาะ User.isPlatformAdmin
   platformAdmin?: true
@@ -83,8 +82,8 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
     items: [
       { href: "/spa/therapists", label: "พนักงานนวด", Icon: IconTherapist, resource: "SPA_THERAPISTS", spaOnly: true },
       { href: "/spa/shifts", label: "ตารางกะ", Icon: IconCalendar, resource: "SPA_THERAPISTS", spaOnly: true },
-      { href: "/spa/bookings", label: "ตารางจอง", Icon: IconCalendar, resource: "SPA_BOOKINGS", spaOnly: true },
-      { href: "/spa/board", label: "กระดานห้องนวด", Icon: IconRoom, resource: "SPA_BOOKINGS", spaOnly: true },
+      // ตารางจอง + กระดานห้องนวด รวมเป็นหน้าเดียว 3 แท็บ (2026-10-08 เจ้าของสั่ง) — /spa/board พาไปแท็บ "ตอนนี้"
+      { href: "/spa/bookings", label: "คิวนวด", Icon: IconCalendar, badge: "spaQueue", resource: "SPA_BOOKINGS", spaOnly: true },
       { href: "/spa/reports", label: "รายงานพนักงานนวด", Icon: IconReports, resource: "SPA_THERAPISTS", spaOnly: true },
     ],
   },
@@ -128,6 +127,7 @@ const EXACT_MATCH = new Set(["/", "/pos", "/admin/stores", "/brand", "/reports"]
 export function Sidebar({
   lowStockCount,
   pendingNotificationCount = 0,
+  spaQueueCount = 0,
   viewableResources,
   isPlatformAdmin = false,
   isOwner = false,
@@ -136,6 +136,8 @@ export function Sidebar({
 }: {
   lowStockCount: number
   pendingNotificationCount?: number
+  /// คิวนวดที่ต้องจัดการตอนนี้ (2026-10-08) — badge ของเมนู "คิวนวด"
+  spaQueueCount?: number
   /// resource ที่ผู้ใช้มีสิทธิ์ VIEW — layout คำนวณจาก DB ให้ทุกคำขอ
   viewableResources: ResourceKey[]
   isPlatformAdmin?: boolean
@@ -165,6 +167,7 @@ export function Sidebar({
   function badgeCount(item: NavItem): number {
     if (item.badge === "lowStock") return lowStockCount
     if (item.badge === "pending") return pendingNotificationCount
+    if (item.badge === "spaQueue") return spaQueueCount
     return 0
   }
 

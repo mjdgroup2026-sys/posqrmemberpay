@@ -62,6 +62,8 @@ export {
   Volume2 as IconSoundOn,
   VolumeX as IconSoundOff,
   Printer as IconPrinter,
+  MoreHorizontal as IconMore,
+  List as IconList,
   Flame as IconStation,
   // Phase 20 — ร้านนวด
   HandHeart as IconTherapist,
