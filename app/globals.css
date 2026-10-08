@@ -55,6 +55,23 @@
   --danger-bg: #fdecec;
   --info: #1c6bb0;
   --info-bg: #e8f2fb;
+
+  /* สีสถานะคิวนวด (2026-10-08 เจ้าของสั่ง "ให้แยกกันง่าย ๆ") — 7 สีคนละโทนชัด ๆ ใช้ร่วมกระดานห้อง + ตารางจอง
+     ห้ามใช้ซ้ำกับ --success/--brand (เดิมเช็กอินแล้ว = teal กับเสร็จ = เขียว แยกกันยาก) */
+  --q-booked: #2563eb;
+  --q-booked-bg: #e8effd;
+  --q-checkin: #7c3aed;
+  --q-checkin-bg: #f1ebfe;
+  --q-active: #ea580c;
+  --q-active-bg: #fff0e6;
+  --q-due: #a16207;
+  --q-due-bg: #fdf6d8;
+  --q-billing: #db2777;
+  --q-billing-bg: #fdebf3;
+  --q-free: #15803d;
+  --q-free-bg: #e8f6ec;
+  --q-done: #64748b;
+  --q-done-bg: #eef1f4;
 }
 
 /* ═══════════════ ธีมพนักงาน/หลังบ้าน ═══════════════ */
@@ -621,6 +638,39 @@
     background: var(--brand-soft);
     color: var(--brand-strong);
   }
+  /* chip สถานะคิวนวด — คู่กับ .booking-bar และการ์ดกระดานห้อง (สีชุด --q-*) */
+  .chip-q-booked {
+    background: var(--q-booked-bg);
+    color: var(--q-booked);
+  }
+  .chip-q-checkin {
+    background: var(--q-checkin-bg);
+    color: var(--q-checkin);
+  }
+  .chip-q-active {
+    background: var(--q-active-bg);
+    color: var(--q-active);
+  }
+  .chip-q-due {
+    background: var(--q-due-bg);
+    color: var(--q-due);
+  }
+  .chip-q-billing {
+    background: var(--q-billing-bg);
+    color: var(--q-billing);
+  }
+  .chip-q-free {
+    background: var(--q-free-bg);
+    color: var(--q-free);
+  }
+  .chip-q-done {
+    background: var(--q-done-bg);
+    color: var(--q-done);
+  }
+  .chip-q-late {
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
 
   /* ───────────── ฟอร์มนับเงินและปิดยอด (20g) — การ์ดทีละช่องทาง ─────────────
      คอลัมน์ฟอร์มกว้างแค่ ~420px ตารางหลายคอลัมน์เบียดกัน → ใช้การ์ดซ้อนแนวตั้งแทน */
@@ -700,21 +750,21 @@
     filter: brightness(0.97);
   }
   .booking-bar.is-booked {
-    background: var(--info-bg);
-    border-color: var(--info);
+    background: var(--q-booked-bg);
+    border-color: var(--q-booked);
   }
   .booking-bar.is-checked-in {
-    background: var(--brand-soft);
-    border-color: var(--brand);
+    background: var(--q-checkin-bg);
+    border-color: var(--q-checkin);
   }
   .booking-bar.is-in-service {
-    background: var(--warning-bg);
-    border-color: var(--warning);
+    background: var(--q-active-bg);
+    border-color: var(--q-active);
   }
   .booking-bar.is-done {
-    background: var(--success-bg);
-    border-color: var(--success);
-    opacity: 0.7;
+    background: var(--q-done-bg);
+    border-color: var(--q-done);
+    opacity: 0.75;
   }
   .booking-legend {
     display: inline-flex;
@@ -748,6 +798,124 @@
     border-left: 2px solid var(--danger);
     pointer-events: none;
     z-index: 2;
+  }
+
+  /* ───────────── กระดานห้องนวดแบบการ์ด (2026-10-08) ─────────────
+     แต่ละการ์ดตั้ง --tone/--tone-bg จากคลาส .tone-* (สีชุด --q-*) แล้วทุกชิ้นในการ์ด (แถบซ้าย · แถบความคืบหน้า) ใช้ตาม */
+  .tone-booked { --tone: var(--q-booked); --tone-bg: var(--q-booked-bg); }
+  .tone-checkin { --tone: var(--q-checkin); --tone-bg: var(--q-checkin-bg); }
+  .tone-active { --tone: var(--q-active); --tone-bg: var(--q-active-bg); }
+  .tone-due { --tone: var(--q-due); --tone-bg: var(--q-due-bg); }
+  .tone-billing { --tone: var(--q-billing); --tone-bg: var(--q-billing-bg); }
+  .tone-free { --tone: var(--q-free); --tone-bg: var(--q-free-bg); }
+  .tone-done { --tone: var(--q-done); --tone-bg: var(--q-done-bg); }
+  .tone-late { --tone: var(--danger); --tone-bg: var(--danger-bg); }
+  .tone-off { --tone: var(--ink-3); --tone-bg: var(--surface-2); }
+
+  .board-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+    gap: var(--sp-4);
+  }
+  .board-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 6px solid var(--tone);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .board-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--tone-bg);
+    border-top-right-radius: var(--radius);
+  }
+  .board-card-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+  }
+  .board-card-body {
+    padding: var(--sp-3) var(--sp-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+  .board-card-customer {
+    font-size: 1.0625rem;
+    font-weight: 600;
+  }
+  .board-progress {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .board-progress > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--tone);
+    transition: width 0.4s;
+  }
+  .board-queue {
+    border-top: 1px dashed var(--line);
+    padding: var(--sp-3) var(--sp-4);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: auto;
+  }
+  .board-queue-row {
+    display: grid;
+    grid-template-columns: 3.25rem 1fr auto;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: 0.875rem;
+  }
+  .board-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font: inherit;
+  }
+  .board-filter[aria-pressed="true"] {
+    border-color: currentColor;
+    box-shadow: var(--shadow-sm);
+  }
+  .board-timeline-row {
+    display: grid;
+    grid-template-columns: 7rem 1fr;
+    align-items: stretch;
+    border-top: 1px solid var(--line);
+    min-height: 40px;
+  }
+  .board-timeline-track {
+    position: relative;
+  }
+  .board-timeline-bar {
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    border-radius: 6px;
+    background: var(--tone-bg);
+    border: 1px solid var(--tone);
+    border-left-width: 4px;
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    overflow: hidden;
+    white-space: nowrap;
+    color: var(--ink);
+  }
+  .board-timeline-bar:hover {
+    filter: brightness(0.96);
   }
 
   /* ───────────── ตัวอักษร ───────────── */
