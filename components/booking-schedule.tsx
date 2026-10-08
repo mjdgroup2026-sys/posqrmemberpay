@@ -1,7 +1,7 @@
 "use client"
 
 import { BOOKING_STATUS_CHIP, BOOKING_STATUS_LABEL } from "@/lib/booking-status"
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -130,6 +130,9 @@ export function BookingSchedule({
   const [checkInRoom, setCheckInRoom] = useState("")
   // แถวของตารางเวลา: ตามพนักงาน (จองได้ตามกะ) หรือตามห้อง (เห็นห้องว่าง/ไม่ว่าง)
   const [timelineRows, setTimelineRows] = useState<"therapists" | "rooms">("therapists")
+  // เปิดตารางเวลาของวันนี้แล้วเลื่อนไปที่ "ตอนนี้" ให้เอง (2026-10-08) — เดิมเปิดมาที่ 09:00 คิวช่วงเย็นต้องเลื่อนหาเอง
+  // เลื่อนครั้งเดียวต่อการเปิดแท็บ (refresh อัตโนมัติทุก 30 วิไม่ดึงกลับ) · ปิดแท็บแล้ว ref ได้ null → เปิดใหม่เลื่อนอีกรอบ
+  const scrolledToNow = useRef(false)
   const dayLabel = formatBusinessDate(new Date(`${dayKey}T12:00:00+07:00`))
 
   const shiftByTherapist = useMemo(() => new Map(shifts.map((s) => [s.therapistId, s])), [shifts])
@@ -154,6 +157,20 @@ export function BookingSchedule({
 
   const xOf = (minute: number) => ((minute - range.start) / 60) * HOUR_WIDTH
   const nowX = nowMinute !== null && nowMinute >= range.start && nowMinute <= range.end ? xOf(nowMinute) : null
+  // อ่านตำแหน่งเส้น "ตอนนี้" จาก DOM (ไม่ผูกกับ nowX) — callback คงที่ จึงไม่ถูกเรียกซ้ำทุกครั้งที่หน้า refresh
+  const scrollToNow = useCallback((el: HTMLDivElement | null) => {
+    if (!el) {
+      scrolledToNow.current = false
+      return
+    }
+    if (scrolledToNow.current) return
+    const line = el.querySelector(".timeline-now")
+    if (!line) return
+    // เว้นซ้ายไว้ราว 2 ชั่วโมงให้เห็นคิวที่เพิ่งผ่านไปด้วย
+    const offset = line.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft
+    el.scrollLeft = Math.max(0, offset - HOUR_WIDTH * 2)
+    scrolledToNow.current = true
+  }, [])
 
   const selectedProgram = programs.find((p) => p.id === draft.menuItemId) ?? null
 
@@ -497,7 +514,7 @@ export function BookingSchedule({
       const items = onTimeline.filter((b) => b.tableId === row.roomId)
       return (
         <div key={row.key} className="row" style={{ gap: 0, borderTop: "1px solid var(--line)", alignItems: "stretch" }}>
-          <div style={{ width: 160, flex: "none", padding: "10px 12px", fontWeight: 700 }}>{row.label}</div>
+          <div className="timeline-label" style={{ width: 160, flex: "none", padding: "10px 12px", fontWeight: 700 }}>{row.label}</div>
           <div style={{ position: "relative", width: range.width, minHeight: 52 }}>
             {slots.map((minute) => (
               <span key={minute} className={`timeline-tick${minute % 60 === 0 ? "" : " is-half"}`} style={{ left: xOf(minute) }} aria-hidden />
@@ -670,11 +687,11 @@ export function BookingSchedule({
           ) : null}
         </div>
 
-        <div style={{ overflowX: "auto" }}>
+        <div style={{ overflowX: "auto" }} ref={scrollToNow}>
           <div style={{ minWidth: range.width + 160 }}>
             {/* แถบเวลา */}
             <div className="row" style={{ gap: 0, borderBottom: "1px solid var(--line)" }}>
-              <div style={{ width: 160, flex: "none", padding: "8px 12px" }} className="t-caption">
+              <div style={{ width: 160, flex: "none", padding: "8px 12px" }} className="t-caption timeline-label">
                 {timelineRows === "rooms" ? "ห้อง" : "พนักงาน"}
               </div>
               <div style={{ position: "relative", height: 36, width: range.width }}>
@@ -716,7 +733,7 @@ export function BookingSchedule({
                   className="row"
                   style={{ gap: 0, borderTop: "1px solid var(--line)", alignItems: "stretch", background: unavailable ? "var(--surface-2)" : undefined }}
                 >
-                  <div style={{ width: 160, flex: "none", padding: "10px 12px" }}>
+                  <div className="timeline-label" style={{ width: 160, flex: "none", padding: "10px 12px", background: unavailable ? "var(--surface-2)" : undefined }}>
                     <span className="num" style={{ fontWeight: 700 }}>
                       {therapist.code}
                     </span>{" "}
