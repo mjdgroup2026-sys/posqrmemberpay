@@ -513,6 +513,9 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     ["listBookingsForDay", (q, a) => q.listBookingsForDay(a.storeId, addDays(businessDayKey(), 1))],
     ["getBookingDay", (q, a) => q.getBookingDay(a.storeId, addDays(businessDayKey(), 1))],
     ["getSpaBoard", (q, a) => q.getSpaBoard(a.storeId)],
+    // 2026-10-08 — กระดานเลือกวันได้ (คิวของร้าน B อยู่พรุ่งนี้) · ทิกเก็ตจัดห้องด้วย id ของร้าน B ต้องได้ null
+    ["getSpaBoard", (q, a) => q.getSpaBoard(a.storeId, { dayKey: addDays(businessDayKey(), 1) })],
+    ["getBookingTicket", (q, a, b) => q.getBookingTicket(a.storeId, b.bookingId)],
     ["listUpcomingBookings", (q, a) => q.listUpcomingBookings(a.storeId)],
     ["countUpcomingBookings", (q, a) => q.countUpcomingBookings(a.storeId)],
     ["listServicesAwaitingStart", (q, a) => q.listServicesAwaitingStart(a.storeId)],
@@ -1076,6 +1079,17 @@ describe.skipIf(!dbReady)("การแยกข้อมูลตามร้�
     [
       "checkInBooking",
       (b) => makeFormData({ id: b.bookingId, tableId: b.roomId }),
+      async (b) => expect((await testPrisma().booking.findUniqueOrThrow({ where: { id: b.bookingId } })).status).toBe("BOOKED"),
+    ],
+    // 2026-10-08 — ปุ่มเริ่มนวด/เสร็จบนตารางจอง ด้วย id ของร้าน B ต้องไม่ถึง
+    [
+      "startBookingService",
+      (b) => makeFormData({ id: b.bookingId }),
+      async (b) => expect((await testPrisma().booking.findUniqueOrThrow({ where: { id: b.bookingId } })).status).toBe("BOOKED"),
+    ],
+    [
+      "finishBookingService",
+      (b) => makeFormData({ id: b.bookingId }),
       async (b) => expect((await testPrisma().booking.findUniqueOrThrow({ where: { id: b.bookingId } })).status).toBe("BOOKED"),
     ],
     [

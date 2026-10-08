@@ -2702,41 +2702,71 @@ export async function getBookingDay(storeId: string, dayKey: string) {
   }
 }
 
-export type TherapistBoardState = "OFF" | "NO_SHIFT" | "BEFORE_SHIFT" | "AFTER_SHIFT" | "BUSY" | "FREE"
+/// สถานะพนักงานบนกระดาน — `BUSY`/`WAITING` มาจากคิวจริงก่อน (ตรงกับตารางจอง) · ที่เหลือมาจากกะ
+/// · `ON_SHIFT` ใช้กับวันที่ไม่ใช่วันนี้ (ไม่มีสถานะสด — บอกแค่ว่ามีกะ)
+export type TherapistBoardState = "OFF" | "NO_SHIFT" | "BEFORE_SHIFT" | "AFTER_SHIFT" | "BUSY" | "WAITING" | "FREE" | "ON_SHIFT"
 
 export type TherapistBoardRow = {
   id: string
   code: string
   label: string
   state: TherapistBoardState
-  /// ห้องที่กำลังนวดอยู่ (เมื่อ state = BUSY)
+  /// ลูกค้า/ห้อง/โปรแกรมของงานที่ทำให้เป็น BUSY หรือ WAITING
+  customerName: string | null
   roomCode: string | null
   programName: string | null
-  /// เวลาที่คาดว่าจะเสร็จ — มาจากคิวที่จองไว้ · null = ลูกค้า walk-in จึงไม่มีเวลาจบที่แน่นอน
+  /// เวลาที่ควรเสร็จ — มาจากคิวที่จองไว้ · null = ลูกค้า walk-in จึงไม่มีเวลาจบที่แน่นอน
   busyUntil: Date | null
+  /// นวดเลยเวลาที่จองไว้แล้ว (ยังไม่มีใครกดเสร็จ)
+  overrun: boolean
+  /// งานที่กำลังทำเป็นลูกค้า walk-in (ไม่มีคิวจอง)
+  walkIn: boolean
   shiftStartMinute: number | null
   shiftEndMinute: number | null
   nextBookingAt: Date | null
   nextBookingCustomer: string | null
+  /// คิวถัดไปเลยเวลาแล้วแต่ยังไม่เช็กอิน (เฉพาะวันนี้)
+  nextBookingOverdue: boolean
+  /// คิวของวันนั้นทั้งหมด (ไม่รวมยกเลิก/ไม่มา) — ใช้ดูแทนสถานะสดเมื่อเลือกวันอื่น
+  bookings: BookingRow[]
 }
+
+/// สถานะห้องบนกระดาน — ลำดับความสำคัญ: กำลังนวด > เช็กอินแล้วรอเริ่ม > มีบิลเปิด > ถึงเวลาแต่ลูกค้ายังไม่มา > ว่าง
+export type RoomBoardState = "IN_SERVICE" | "WAITING" | "OCCUPIED" | "AWAITING_GUEST" | "FREE"
 
 export type RoomBoardRow = {
   id: string
   code: string
-  status: string
-  currentCustomer: string | null
-  currentUntil: Date | null
-  currentTherapistLabel: string | null
+  state: RoomBoardState
+  customerName: string | null
+  therapistLabel: string | null
+  until: Date | null
+  overrun: boolean
+  /// OCCUPIED: คิวในบิลนั้นนวดเสร็จหมดแล้ว เหลือแค่รอปิดบิล
+  awaitingPayment: boolean
+  /// OCCUPIED: บิลที่เปิดค้างมาตั้งแต่วันก่อน (ลืมปิดบิล) — เวลาที่เปิด
+  staleSince: Date | null
   nextBookingAt: Date | null
+  nextBookingCustomer: string | null
+  bookings: BookingRow[]
 }
 
-/// กระดานสด "ใครว่าง/ใครไม่ว่าง · ห้องไหนใช้อยู่" (Phase 20b)
+/// คิวที่แสดงบนกระดาน — ยกเลิก/ไม่มาไม่นับ · DONE อยู่ในรายการของวันแต่ไม่ทำให้ใครไม่ว่าง
+const BOARD_BOOKING_STATUS = ["BOOKED", "CHECKED_IN", "IN_SERVICE", "DONE"] as const
+
+/// กระดานห้องนวด (Phase 20b · เขียนใหม่ 2026-10-08)
 ///
-/// ทุกค่าคำนวณสดจากของที่มีอยู่แล้ว (กะ · คิว · บรรทัดบริการที่กำลังทำ) — ไม่มีตารางสถานะแยกให้ค้าง
-/// ด้วยเหตุผลเดียวกับใบเตือน "รอธนาคารยืนยัน": สถานะที่เก็บไว้จะเพี้ยนทันทีที่มีทางอื่นมาเปลี่ยนข้อมูล
-export async function getSpaBoard(storeId: string, now: Date = new Date()) {
+/// ★ **ต้องตรงกับตารางจอง** — สถานะพนักงาน/ห้องคิดจาก `Booking.status` เป็นหลัก (แหล่งเดียวกับ `/spa/bookings`)
+/// เดิมห้องดูแค่ "ตอนนี้อยู่ในช่วงเวลาที่จองไหม" จึงขึ้นใช้งานอยู่ทั้งที่ลูกค้ายังไม่มา และขึ้นว่างทั้งที่นวดเลยเวลา ·
+/// พนักงานดูรายการที่ "กำลังทำ" ในบิลไหนก็ได้ จึงค้างสถานะข้ามวันจากบิลที่ลืมปิด
+/// · ข้อมูลที่ไม่มีในตารางจอง (ลูกค้า walk-in / บิลที่ยังไม่ปิด) เสริมเข้ามาเฉพาะวันนี้
+/// · วันอื่น (`dayKey` ≠ วันนี้) ไม่มีสถานะสด — แสดงกะและคิวตามที่บันทึกไว้
+export async function getSpaBoard(storeId: string, options: { dayKey?: string; now?: Date } = {}) {
   const db = forStore(storeId)
-  const dayKey = businessDayKey(now)
+  const now = options.now ?? new Date()
+  const today = businessDayKey(now)
+  const dayKey = options.dayKey ?? today
+  const live = dayKey === today
   const { start, end } = bookingDayRange(dayKey)
   const nowMinute = minuteOfBusinessDay(now)
 
@@ -2750,14 +2780,18 @@ export async function getSpaBoard(storeId: string, now: Date = new Date()) {
         name: true,
         nickname: true,
         shifts: { where: { workDate: dateOnlyFromKey(dayKey) }, select: { startMinute: true, endMinute: true, isOff: true } },
-        // บรรทัดบริการที่กำลังทำอยู่ — อ่านผ่าน therapist (scoped ด้วย storeId แล้ว) ไม่ยิง mobileOrderItem ตรง ๆ
+        // งานนวดที่กำลังทำอยู่ — นับเฉพาะบิลที่เปิดวันนี้ (บิลที่ลืมปิดตั้งแต่เมื่อวานต้องไม่ทำให้พนักงานติด "กำลังนวด" ข้ามวัน)
+        // อ่านผ่าน therapist (scoped ด้วย storeId แล้ว) ไม่ยิง mobileOrderItem ตรง ๆ
         orderItems: {
-          where: { status: "COOKING", order: { session: { status: { in: ["OPEN", "AWAITING_BILL"] } } } },
+          where: {
+            status: "COOKING",
+            order: { session: { status: { in: ["OPEN", "AWAITING_BILL"] }, openedAt: { gte: start, lt: end } } },
+          },
           orderBy: { updatedAt: "desc" },
-          take: 1,
+          take: live ? 1 : 0,
           select: {
             menuItem: { select: { name: true } },
-            order: { select: { session: { select: { id: true, table: { select: { code: true } } } } } },
+            order: { select: { session: { select: { id: true, customerLabel: true, table: { select: { code: true } } } } } },
           },
         },
       },
@@ -2765,64 +2799,204 @@ export async function getSpaBoard(storeId: string, now: Date = new Date()) {
     db.table.findMany({
       where: { kind: "ROOM", primaryTableId: null },
       orderBy: [{ code: "asc" }],
-      select: { id: true, code: true, status: true },
+      select: {
+        id: true,
+        code: true,
+        // บิลที่ยังเปิดอยู่ในห้อง (walk-in / นวดเสร็จรอปิดบิล / ค้างจากวันก่อน) — ใช้เฉพาะสถานะสดของวันนี้
+        sessions: {
+          where: { status: { in: ["OPEN", "AWAITING_BILL"] } },
+          orderBy: { openedAt: "asc" },
+          take: live ? undefined : 0,
+          select: {
+            id: true,
+            customerLabel: true,
+            openedAt: true,
+            // งานนวดที่กำลังทำในบิลนี้ — แหล่งเดียวกับสถานะ "กำลังนวด" ของพนักงาน ห้องกับพนักงานจึงขึ้นตรงกันเสมอ
+            // (คิวที่เริ่มนวดจากหน้าห้อง · walk-in ที่ไม่มีคิวจอง · คิวที่เปลี่ยนพนักงานหลังเช็กอิน)
+            orders: {
+              select: {
+                items: {
+                  where: { status: "COOKING", menuItem: { itemType: "SERVICE" } },
+                  take: 1,
+                  select: {
+                    menuItem: { select: { name: true } },
+                    therapist: { select: { code: true, name: true, nickname: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     }),
     db.booking.findMany({
-      where: { startAt: { gte: start, lt: end }, status: { in: ["BOOKED", "CHECKED_IN", "IN_SERVICE"] } },
+      where: { startAt: { gte: start, lt: end }, status: { in: [...BOARD_BOOKING_STATUS] } },
       orderBy: [{ startAt: "asc" }],
       include: BOOKING_INCLUDE,
     }),
   ])
 
-  const bookingRows = bookings.map(toBookingRow)
-  const nextOf = (match: (row: BookingRow) => boolean) => bookingRows.find((row) => match(row) && row.startAt > now) ?? null
-  const currentOf = (match: (row: BookingRow) => boolean) =>
-    bookingRows.find((row) => match(row) && row.startAt <= now && row.endAt > now) ?? null
+  const dayBookings = bookings.map(toBookingRow)
+  const firstBooked = (rows: BookingRow[]) => rows.find((row) => row.status === "BOOKED") ?? null
 
   const therapistRows: TherapistBoardRow[] = therapists.map((t) => {
     const shift = t.shifts[0] ?? null
+    const mine = dayBookings.filter((row) => row.therapistId === t.id)
+    const next = firstBooked(mine)
+    const inService = live ? (mine.find((row) => row.status === "IN_SERVICE") ?? null) : null
+    const waiting = live ? (mine.find((row) => row.status === "CHECKED_IN") ?? null) : null
     const working = t.orderItems[0] ?? null
-    const next = nextOf((row) => row.therapistId === t.id)
-    const current = currentOf((row) => row.therapistId === t.id)
+    const workingSession = working?.order.session ?? null
+    const walkIn = !inService && workingSession !== null && !mine.some((row) => row.tableSessionId === workingSession.id)
 
     let state: TherapistBoardState
-    if (working) state = "BUSY"
+    if (inService || working) state = "BUSY"
+    else if (waiting) state = "WAITING"
     else if (!shift) state = "NO_SHIFT"
     else if (shift.isOff) state = "OFF"
+    else if (!live) state = "ON_SHIFT"
     else if (nowMinute < shift.startMinute) state = "BEFORE_SHIFT"
     else if (nowMinute >= shift.endMinute) state = "AFTER_SHIFT"
     else state = "FREE"
 
+    const job = inService ?? (working ? null : waiting)
     return {
       id: t.id,
       code: t.code,
       label: `${t.code} ${t.nickname ?? t.name}`,
       state,
-      roomCode: working?.order.session?.table.code ?? null,
-      programName: working?.menuItem?.name ?? null,
-      busyUntil: working && current ? current.endAt : null,
+      customerName: job?.customerName ?? workingSession?.customerLabel ?? null,
+      roomCode: job?.tableCode ?? workingSession?.table.code ?? null,
+      programName: job?.menuItemName ?? working?.menuItem?.name ?? null,
+      busyUntil: job?.endAt ?? null,
+      overrun: inService !== null && inService.endAt <= now,
+      walkIn,
       shiftStartMinute: shift && !shift.isOff ? shift.startMinute : null,
       shiftEndMinute: shift && !shift.isOff ? shift.endMinute : null,
       nextBookingAt: next?.startAt ?? null,
       nextBookingCustomer: next?.customerName ?? null,
+      nextBookingOverdue: live && next !== null && next.startAt <= now,
+      bookings: mine,
     }
   })
 
   const roomRows: RoomBoardRow[] = rooms.map((room) => {
-    const current = currentOf((row) => row.tableId === room.id)
-    const next = nextOf((row) => row.tableId === room.id)
-    return {
+    const mine = dayBookings.filter((row) => row.tableId === room.id)
+    const next = firstBooked(mine)
+    const inService = live ? (mine.find((row) => row.status === "IN_SERVICE") ?? null) : null
+    const waiting = live ? (mine.find((row) => row.status === "CHECKED_IN") ?? null) : null
+    const openBill = room.sessions[0] ?? null
+    // บิลเปิดวันนี้ที่มีงานนวดกำลังทำอยู่ — บิลค้างจากวันก่อนไม่นับ (ตรงกับกติกาของพนักงานด้านบน)
+    const working = room.sessions
+      .filter((session) => session.openedAt >= start)
+      .flatMap((session) => session.orders.flatMap((order) => order.items.map((item) => ({ session, item }))))[0] ?? null
+    const guestDue = live && next !== null && next.startAt <= now ? next : null
+
+    const base = {
       id: room.id,
       code: room.code,
-      status: room.status,
-      currentCustomer: current?.customerName ?? null,
-      currentUntil: current?.endAt ?? null,
-      currentTherapistLabel: current?.therapistLabel ?? null,
+      overrun: false,
+      awaitingPayment: false,
+      staleSince: null as Date | null,
       nextBookingAt: next?.startAt ?? null,
+      nextBookingCustomer: next?.customerName ?? null,
+      bookings: mine,
     }
+    // มีงานนวดกำลังทำในห้อง (เช่น เริ่มจากหน้าห้อง/เปลี่ยนพนักงาน) ชนะ "รอเริ่มนวด" — ไม่งั้นห้องขึ้นรอทั้งที่พนักงานกำลังนวด
+    const job = inService ?? (working ? null : waiting)
+    if (job) {
+      return {
+        ...base,
+        state: inService ? "IN_SERVICE" : "WAITING",
+        customerName: job.customerName,
+        therapistLabel: job.therapistLabel,
+        until: job.endAt,
+        overrun: inService !== null && inService.endAt <= now,
+      }
+    }
+    if (working) {
+      const linked = dayBookings.find((row) => row.tableSessionId === working.session.id) ?? null
+      const therapist = working.item.therapist
+      return {
+        ...base,
+        state: "IN_SERVICE",
+        customerName: working.session.customerLabel ?? linked?.customerName ?? null,
+        therapistLabel: therapist ? `${therapist.code} ${therapist.nickname ?? therapist.name}` : null,
+        until: linked?.endAt ?? null,
+        overrun: linked !== null && linked.endAt <= now,
+      }
+    }
+    if (openBill) {
+      // บิลที่ผูกคิวของวันนี้และคิวจบหมดแล้ว = นวดเสร็จ รอปิดบิล · ไม่มีคิว = walk-in (หรือค้างจากวันก่อน)
+      const linked = dayBookings.filter((row) => row.tableSessionId === openBill.id)
+      return {
+        ...base,
+        state: "OCCUPIED",
+        customerName: openBill.customerLabel,
+        therapistLabel: linked[0]?.therapistLabel ?? null,
+        until: null,
+        awaitingPayment: linked.length > 0 && linked.every((row) => row.status === "DONE"),
+        staleSince: openBill.openedAt < start ? openBill.openedAt : null,
+      }
+    }
+    if (guestDue) {
+      return {
+        ...base,
+        state: "AWAITING_GUEST",
+        customerName: guestDue.customerName,
+        therapistLabel: guestDue.therapistLabel,
+        until: guestDue.endAt,
+      }
+    }
+    return { ...base, state: "FREE", customerName: null, therapistLabel: null, until: null }
   })
 
-  return { dayKey, therapists: therapistRows, rooms: roomRows, bookings: bookingRows }
+  // คิวที่ยังไม่เลือกห้อง — ไม่มีการ์ดห้องให้เกาะ ต้องโชว์แยกไม่งั้นหายไปจากกระดาน
+  const unassigned = dayBookings.filter((row) => row.tableId === null && row.status === "BOOKED")
+
+  return { dayKey, live, therapists: therapistRows, rooms: roomRows, unassigned, bookings: dayBookings }
+}
+
+/// ข้อมูลทิกเก็ตจัดห้อง/จัดคนนวด (2026-10-08) — ออกได้เฉพาะคิวที่เช็กอินแล้ว (มีห้องแน่นอน)
+export type BookingTicketDoc = {
+  bookingId: string
+  storeName: string
+  customerName: string
+  customerPhone: string | null
+  programName: string
+  durationMinutes: number
+  therapistLabel: string
+  roomCode: string | null
+  startAt: Date
+  endAt: Date
+  checkedInAt: Date | null
+  status: BookingStatusValue
+  note: string | null
+}
+
+export async function getBookingTicket(storeId: string, bookingId: string): Promise<BookingTicketDoc | null> {
+  const db = forStore(storeId)
+  const [row, settings] = await Promise.all([
+    db.booking.findUnique({ where: { id: bookingId }, include: BOOKING_INCLUDE }),
+    db.storeSettings.findUnique({ where: { storeId }, select: { storeName: true } }),
+  ])
+  if (!row || !["CHECKED_IN", "IN_SERVICE", "DONE"].includes(row.status)) return null
+  const booking = toBookingRow(row)
+  return {
+    bookingId: booking.id,
+    storeName: settings?.storeName ?? "",
+    customerName: booking.customerName,
+    customerPhone: booking.customerPhone,
+    programName: booking.menuItemName,
+    durationMinutes: booking.durationMinutes,
+    therapistLabel: booking.therapistLabel,
+    roomCode: booking.tableCode,
+    startAt: booking.startAt,
+    endAt: booking.endAt,
+    checkedInAt: row.checkedInAt,
+    status: booking.status,
+    note: booking.note,
+  }
 }
 
 /// เตือนล่วงหน้ากี่นาทีก่อนถึงคิว — พนักงานต้องมีเวลาจัดห้องและตามพนักงานนวดให้พร้อม

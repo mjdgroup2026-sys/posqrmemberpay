@@ -13,10 +13,12 @@ import {
   bookingCancelSchema,
   bookingCheckInSchema,
   bookingSchema,
+  idSchema,
   firstIssueMessage,
   zodToFieldErrors,
 } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
+import type { OrderItemStatus } from "@/generated/prisma/client"
 
 /// การจองล่วงหน้าของร้านนวด (Phase 20b) — resource `SPA_BOOKINGS`
 ///
@@ -338,4 +340,92 @@ export async function checkInBooking(formData: FormData): Promise<ActionResult<C
     if (error instanceof OrderLineError) return { ok: false, error: error.reason }
     return { ok: false, error: "เช็กอินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
+}
+
+/// เปลี่ยนสถานะคิวจากหน้าตารางจอง (2026-10-08) — "เริ่มนวด" / "เสร็จแล้ว" ไม่ต้องเดินไปหน้าห้อง
+///
+/// เดินบรรทัดบริการในบิล (MobileOrderItem) **และ** คิว (Booking) ในทรานแซคชันเดียว ผลจึงเหมือนกดจากหน้าห้องทุกอย่าง
+/// (`startServiceItem`/`markItemServed` ใน orders.ts เลื่อนคิวตามบรรทัด · ที่นี่เลื่อนบรรทัดตามคิว — ปลายทางเดียวกัน)
+/// · ทั้งสองฝั่งเป็น conditional update ตามสถานะต้นทาง (กติกาข้อ 7) — กดพร้อมกันสองเครื่องผ่านได้ครั้งเดียว
+/// · บรรทัดของคิวหาจาก session + พนักงาน + โปรแกรม ที่เช็กอินสร้างไว้ (Booking ไม่ได้เก็บ id ของบรรทัด)
+async function advanceBookingService(formData: FormData, to: "IN_SERVICE" | "DONE"): Promise<ActionResult> {
+  let ctx: StoreContext
+  try {
+    ctx = await requireStoreAccess(["SPA_BOOKINGS", "EDIT"])
+  } catch (error) {
+    return { ok: false, error: storeErrorMessage(error) }
+  }
+  const storeId = ctx.storeId
+  const db = forStore(storeId)
+
+  const parsed = idSchema.safeParse({ id: formData.get("id") })
+  if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
+
+  const bookingFrom = to === "IN_SERVICE" ? "CHECKED_IN" : "IN_SERVICE"
+  const itemFrom: OrderItemStatus[] = to === "IN_SERVICE" ? ["AWAITING_KITCHEN"] : ["COOKING", "READY"]
+  const itemTo: OrderItemStatus = to === "IN_SERVICE" ? "COOKING" : "SERVED"
+
+  try {
+    const customerName = await db.$transaction(async (tx) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: parsed.data.id },
+        select: { id: true, status: true, customerName: true, therapistId: true, menuItemId: true, tableSessionId: true },
+      })
+      if (!booking) throw new BookingError("ไม่พบการจองที่ต้องการ")
+      if (booking.status !== bookingFrom || !booking.tableSessionId) {
+        throw new BookingError(
+          to === "IN_SERVICE" ? "เริ่มนวดได้เฉพาะคิวที่เช็กอินแล้วและยังไม่เริ่ม" : "กดเสร็จได้เฉพาะคิวที่กำลังนวดอยู่",
+        )
+      }
+
+      // ★ ปิดประตูที่คิวก่อน — กดพร้อมกันสองเครื่องต้องผ่านได้ครั้งเดียว
+      const claimed = await tx.booking.updateMany({
+        where: { id: booking.id, status: bookingFrom },
+        data: { status: to },
+      })
+      if (claimed.count === 0) throw new BookingError("คิวนี้เพิ่งถูกเปลี่ยนสถานะจากอีกเครื่องหนึ่ง")
+
+      // บรรทัดบริการของคิวนี้ — MobileOrderItem ไม่มี storeId ต้องกรองผ่าน order.storeId เอง (ดู transition ใน orders.ts)
+      const item = await tx.mobileOrderItem.findFirst({
+        where: {
+          order: { storeId, tableSessionId: booking.tableSessionId },
+          therapistId: booking.therapistId,
+          menuItemId: booking.menuItemId,
+          status: { in: itemFrom },
+        },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      })
+      if (!item) {
+        throw new BookingError(
+          to === "IN_SERVICE"
+            ? "ไม่พบรายการนวดของคิวนี้ในบิล (อาจถูกยกเลิกหรือเริ่มไปแล้ว) — ตรวจที่หน้าห้อง"
+            : "ไม่พบรายการนวดที่กำลังทำของคิวนี้ในบิล — ตรวจที่หน้าห้อง",
+        )
+      }
+      const moved = await tx.mobileOrderItem.updateMany({
+        where: { id: item.id, order: { storeId }, status: { in: itemFrom } },
+        data: { status: itemTo },
+      })
+      if (moved.count === 0) throw new BookingError("รายการนวดของคิวนี้เพิ่งถูกเปลี่ยนสถานะจากอีกเครื่องหนึ่ง")
+
+      return booking.customerName
+    })
+
+    revalidateCheckInPages(storeId)
+    return { ok: true, message: to === "IN_SERVICE" ? `เริ่มนวดคุณ${customerName}แล้ว` : `คุณ${customerName} นวดเสร็จแล้ว` }
+  } catch (error) {
+    if (error instanceof BookingError) return { ok: false, error: error.reason }
+    return { ok: false, error: "เปลี่ยนสถานะคิวไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
+}
+
+/// เช็กอินแล้ว → กำลังนวด
+export async function startBookingService(formData: FormData): Promise<ActionResult> {
+  return advanceBookingService(formData, "IN_SERVICE")
+}
+
+/// กำลังนวด → เสร็จแล้ว
+export async function finishBookingService(formData: FormData): Promise<ActionResult> {
+  return advanceBookingService(formData, "DONE")
 }

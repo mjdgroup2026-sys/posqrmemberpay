@@ -1,12 +1,20 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { cancelBooking, checkInBooking, markBookingNoShow, saveBooking } from "@/app/actions/bookings"
+import {
+  cancelBooking,
+  checkInBooking,
+  finishBookingService,
+  markBookingNoShow,
+  saveBooking,
+  startBookingService,
+} from "@/app/actions/bookings"
 import type { BookingProgram, BookingRoom, BookingRow, ShiftRow, TherapistOption } from "@/lib/queries"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
-import { IconCalendar, IconPlus, IconSpinner } from "@/components/icons"
+import { IconCalendar, IconPlus, IconPrinter, IconSpinner } from "@/components/icons"
 import { AutoRefresh } from "@/components/auto-refresh"
 import {
   Dialog,
@@ -58,6 +66,9 @@ const STATUS_BAR: Partial<Record<BookingRow["status"], string>> = {
   DONE: "is-done",
 }
 
+/// คิวที่พิมพ์ทิกเก็ตจัดห้องได้ — ต้องเช็กอินแล้ว (มีห้องแน่นอน) ตรงกับ getBookingTicket()
+const TICKET_STATUS: BookingRow["status"][] = ["CHECKED_IN", "IN_SERVICE", "DONE"]
+
 /// ความละเอียดของช่องจองบนไทม์ไลน์ — ครึ่งชั่วโมง ตรงกับขีดจางที่วาดไว้ (20e)
 const SLOT_MINUTES = 30
 
@@ -104,7 +115,9 @@ export function BookingSchedule({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [formOpen, setFormOpen] = useState(false)
   const [draft, setDraft] = useState(EMPTY_DRAFT)
-  const [detail, setDetail] = useState<BookingRow | null>(null)
+  // เก็บแค่ id แล้วอ่านแถวสดจาก props — หลังเช็กอิน/เริ่มนวด router.refresh() แล้วกล่องเห็นสถานะใหม่เอง
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const detail = bookings.find((b) => b.id === detailId) ?? null
   const [checkInRoom, setCheckInRoom] = useState("")
 
   const shiftByTherapist = useMemo(() => new Map(shifts.map((s) => [s.therapistId, s])), [shifts])
@@ -254,7 +267,7 @@ export function BookingSchedule({
       startTime: hhmm(booking.startMinute),
       note: booking.note ?? "",
     })
-    setDetail(null)
+    setDetailId(null)
     setFieldErrors({})
     setFormOpen(true)
   }
@@ -274,19 +287,68 @@ export function BookingSchedule({
     if (await run(() => saveBooking(fd))) setFormOpen(false)
   }
 
+  function openDetail(booking: BookingRow) {
+    setDetailId(booking.id)
+    setCheckInRoom(booking.tableId ?? "")
+  }
+
+  /// ทิกเก็ตจัดห้อง/จัดคนนวด — เปิดแท็บใหม่แล้วเด้งกล่องพิมพ์ให้เลย (หน้าตารางจองไม่ถูกแทนที่)
+  function printTicket(bookingId: string) {
+    window.open(`/tickets/booking/${bookingId}?auto=1`, "_blank")
+  }
+
+  /// เช็กอินแล้วไม่ปิดกล่อง (2026-10-08) — กล่องเปลี่ยนเป็นสถานะ "เช็กอินแล้ว" พร้อมปุ่มพิมพ์ทิกเก็ต/เริ่มนวด
   async function submitCheckIn() {
     if (!detail) return
     const fd = new FormData()
     fd.set("id", detail.id)
     fd.set("tableId", checkInRoom || detail.tableId || "")
-    if (await run(() => checkInBooking(fd))) setDetail(null)
+    await run(() => checkInBooking(fd))
+  }
+
+  /// เริ่มนวด / เสร็จแล้ว จากหน้านี้เลย (2026-10-08) — server เดินทั้งคิวและรายการในบิลพร้อมกัน
+  async function advance(booking: BookingRow, to: "IN_SERVICE" | "DONE") {
+    const fd = new FormData()
+    fd.set("id", booking.id)
+    await run(() => (to === "IN_SERVICE" ? startBookingService(fd) : finishBookingService(fd)))
+  }
+
+  /// ปุ่มตามสถานะคิว (2026-10-08): เช็กอิน → เริ่มนวด → (กำลังนวด) → เสร็จแล้ว + พิมพ์ทิกเก็ตตั้งแต่เช็กอินแล้ว
+  /// · `inTable` = แถวในรายการ — เช็กอินต้องเลือกห้องจึงเปิดกล่องรายละเอียด (ในกล่องมีปุ่มเช็กอินของตัวเองอยู่แล้ว)
+  function statusActions(booking: BookingRow, inTable: boolean) {
+    const size = inTable ? " btn-sm" : ""
+    return (
+      <>
+        {inTable && booking.status === "BOOKED" && allowed.includes("ADD") ? (
+          <button type="button" className={`btn btn-primary${size}`} onClick={() => openDetail(booking)} disabled={pending}>
+            เช็กอิน
+          </button>
+        ) : null}
+        {booking.status === "CHECKED_IN" && allowed.includes("EDIT") ? (
+          <button type="button" className={`btn btn-primary${size}`} onClick={() => advance(booking, "IN_SERVICE")} disabled={pending}>
+            เริ่มนวด
+          </button>
+        ) : null}
+        {booking.status === "IN_SERVICE" && allowed.includes("EDIT") ? (
+          <button type="button" className={`btn btn-primary${size}`} onClick={() => advance(booking, "DONE")} disabled={pending}>
+            เสร็จแล้ว
+          </button>
+        ) : null}
+        {TICKET_STATUS.includes(booking.status) ? (
+          <button type="button" className={`btn btn-ghost${size}`} onClick={() => printTicket(booking.id)}>
+            <IconPrinter size={15} aria-hidden />
+            พิมพ์ทิกเก็ต
+          </button>
+        ) : null}
+      </>
+    )
   }
 
   async function close(booking: BookingRow, mode: "CANCELLED" | "NO_SHOW") {
     const fd = new FormData()
     fd.set("id", booking.id)
     const done = await run(() => (mode === "CANCELLED" ? cancelBooking(fd) : markBookingNoShow(fd)))
-    if (done) setDetail(null)
+    if (done) setDetailId(null)
   }
 
   function goToDay(next: string) {
@@ -321,6 +383,10 @@ export function BookingSchedule({
             style={{ width: 170 }}
             aria-label="วันที่ของตารางจอง"
           />
+          {/* กระดานใช้วันเดียวกับตารางนี้ — สองหน้าต้องเห็นข้อมูลชุดเดียวกัน (2026-10-08) */}
+          <Link href={`/spa/board?date=${dayKey}`} className="btn btn-ghost">
+            กระดานห้อง
+          </Link>
           {allowed.includes("ADD") ? (
             <button type="button" className="btn btn-primary" onClick={() => startCreate()} disabled={programs.length === 0}>
               <IconPlus size={17} aria-hidden />
@@ -477,10 +543,7 @@ export function BookingSchedule({
                         className={`booking-bar ${STATUS_BAR[booking.status] ?? ""}`}
                         // เอาเมาส์วางแล้วเห็นครบ รวมเวลาสิ้นสุด (20f — เจ้าของสั่ง)
                         title={bookingHint(booking)}
-                        onClick={() => {
-                          setDetail(booking)
-                          setCheckInRoom(booking.tableId ?? "")
-                        }}
+                        onClick={() => openDetail(booking)}
                         style={{
                           position: "absolute",
                           left: xOf(booking.startMinute),
@@ -526,7 +589,8 @@ export function BookingSchedule({
                   <th style={{ padding: "10px 12px", fontWeight: 500 }}>ลูกค้า</th>
                   <th style={{ padding: "10px 12px", fontWeight: 500 }}>โปรแกรม</th>
                   <th style={{ padding: "10px 12px", fontWeight: 500 }}>พนักงาน / ห้อง</th>
-                  <th style={{ padding: "10px 24px", fontWeight: 500 }}>สถานะ</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 500 }}>สถานะ</th>
+                  <th style={{ padding: "10px 24px", fontWeight: 500 }}>จัดการ</th>
                 </tr>
               </thead>
               <tbody>
@@ -539,10 +603,7 @@ export function BookingSchedule({
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          setDetail(booking)
-                          setCheckInRoom(booking.tableId ?? "")
-                        }}
+                        onClick={() => openDetail(booking)}
                       >
                         {booking.customerName}
                       </button>
@@ -555,10 +616,15 @@ export function BookingSchedule({
                       {booking.therapistLabel}
                       {booking.tableCode ? ` · ห้อง ${booking.tableCode}` : " · ยังไม่เลือกห้อง"}
                     </td>
-                    <td style={{ padding: "12px 24px" }}>
+                    <td style={{ padding: "12px" }}>
                       <span className={`chip ${STATUS_CHIP[booking.status]}`}>
                         <span className="dot" />
                         {STATUS_LABEL[booking.status]}
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 24px" }}>
+                      <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                        {statusActions(booking, true)}
                       </span>
                     </td>
                   </tr>
@@ -704,7 +770,7 @@ export function BookingSchedule({
       </Dialog>
 
       {/* รายละเอียดคิว + เช็กอิน */}
-      <Dialog open={detail !== null} onOpenChange={(next) => !pending && !next && setDetail(null)}>
+      <Dialog open={detail !== null} onOpenChange={(next) => !pending && !next && setDetailId(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{detail ? `${detail.customerName} · ${hhmm(detail.startMinute)}–${hhmm(detail.endMinute)} น.` : ""}</DialogTitle>
@@ -759,6 +825,7 @@ export function BookingSchedule({
                 </button>
               </>
             ) : null}
+            {detail ? statusActions(detail, false) : null}
             {detail && detail.status === "BOOKED" && allowed.includes("ADD") ? (
               <button type="button" className="btn btn-primary" onClick={submitCheckIn} disabled={pending || !checkInRoom}>
                 {pending ? <IconSpinner size={16} className="animate-spin" aria-hidden /> : null}
