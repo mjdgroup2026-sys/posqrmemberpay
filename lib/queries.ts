@@ -2619,6 +2619,8 @@ export type BookingRow = {
   status: BookingStatusValue
   note: string | null
   tableSessionId: string | null
+  /// บิลห้องของคิวนี้ยังเปิดอยู่ (เช็กอินแล้วและยังไม่ปิดบิล) — ปุ่มปิดบิลบนตารางจอง
+  billOpen: boolean
 }
 
 type BookingWithRelations = {
@@ -2637,6 +2639,7 @@ type BookingWithRelations = {
   menuItem: { name: string }
   therapist: { code: string; name: string; nickname: string | null }
   table: { code: string } | null
+  session: { status: string } | null
 }
 
 function toBookingRow(row: BookingWithRelations): BookingRow {
@@ -2660,6 +2663,7 @@ function toBookingRow(row: BookingWithRelations): BookingRow {
     status: row.status as BookingStatusValue,
     note: row.note,
     tableSessionId: row.tableSessionId,
+    billOpen: row.session !== null && (row.session.status === "OPEN" || row.session.status === "AWAITING_BILL"),
   }
 }
 
@@ -2667,6 +2671,8 @@ const BOOKING_INCLUDE = {
   menuItem: { select: { name: true } },
   therapist: { select: { code: true, name: true, nickname: true } },
   table: { select: { code: true } },
+  // บิลของคิวยังเปิดอยู่ไหม — ตารางจองโชว์ปุ่ม "ปิดบิล / ชำระเงิน" เฉพาะบิลที่ยังไม่ปิด (2026-10-08)
+  session: { select: { status: true } },
 } as const
 
 /// การจองทั้งหมดของวันนั้น (รวมที่ยกเลิก/ไม่มา เพื่อให้พนักงานเห็นประวัติของวันครบ)

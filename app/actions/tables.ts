@@ -41,6 +41,10 @@ async function resolveRoomStation(
 function revalidateTablePages(storeId: string) {
   publishStoreEvent(storeId, "tables")
   publishStoreEvent(storeId, "notifications")
+  // ยกเลิกบิลห้องปิดคิวจองตามไปด้วย — ตารางจอง/กระดานต้องเห็นทันที (2026-10-08)
+  publishStoreEvent(storeId, "bookings")
+  revalidatePath("/spa/bookings")
+  revalidatePath("/spa/board")
   revalidatePath("/mobile-order/tables")
   revalidatePath("/mobile-order/notifications")
   revalidatePath("/mobile-order/kitchen")
@@ -308,6 +312,12 @@ export async function cancelTableSession(formData: FormData): Promise<ActionResu
       if (cancelled.count === 0) {
         throw new TableAbort({ error: `${placeLabel(session.table.kind, session.table.code)} ถูกปิดหรือยกเลิกไปแล้ว` })
       }
+
+      // คิวจองที่เช็กอินเข้าบิลนี้แล้วยังไม่จบ → ยกเลิกตาม (2026-10-08) — เดิมค้างเป็นเช็กอิน/กำลังนวดตลอดไป ปิดจากตารางจองไม่ได้
+      await tx.booking.updateMany({
+        where: { tableSessionId: sessionId, status: { in: ["CHECKED_IN", "IN_SERVICE"] } },
+        data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: `ยกเลิกบิลห้อง — ${reason}` },
+      })
 
       // ยกเลิกรายการอาหารที่ยังไม่เสิร์ฟทั้งหมด (SERVED/CANCELLED ไปแล้วไม่แตะ)
       await tx.mobileOrderItem.updateMany({

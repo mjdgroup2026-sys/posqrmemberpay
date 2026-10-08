@@ -14,7 +14,7 @@ import {
 } from "@/app/actions/bookings"
 import type { BookingProgram, BookingRoom, BookingRow, ShiftRow, TherapistOption } from "@/lib/queries"
 import { FULL_ACCESS, type AllowedActions, type FieldErrors } from "@/lib/types"
-import { IconCalendar, IconPlus, IconPrinter, IconSpinner } from "@/components/icons"
+import { IconCalendar, IconPlus, IconPrinter, IconReceipt, IconSpinner } from "@/components/icons"
 import { AutoRefresh } from "@/components/auto-refresh"
 import {
   Dialog,
@@ -98,6 +98,7 @@ export function BookingSchedule({
   bufferMinutes,
   nowMinute = null,
   allowed = FULL_ACCESS,
+  canBill = false,
 }: {
   dayKey: string
   programs: BookingProgram[]
@@ -109,6 +110,8 @@ export function BookingSchedule({
   /// นาทีปัจจุบันตามเวลาไทย เฉพาะเมื่อดูตารางของวันนี้ (null = วันอื่น ไม่วาดเส้น "ตอนนี้")
   nowMinute?: number | null
   allowed?: AllowedActions
+  /// มีสิทธิ์ปิดบิล (MO_TABLES:EDIT) — โชว์ปุ่ม "ปิดบิล / ชำระเงิน" บนคิวที่บิลห้องยังเปิดอยู่ (2026-10-08)
+  canBill?: boolean
 }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
@@ -340,6 +343,27 @@ export function BookingSchedule({
             เสร็จแล้ว
           </button>
         ) : null}
+        {/* ปิดบิลและรับเงินจากตารางจองได้เลย — ใช้หน้าปิดบิลเดิม (ทุกวิธีชำระ/QR/เงินทอน) แล้วกลับมาที่นี่ (?back=bookings) */}
+        {/* ปิด/ยกเลิกในแถวได้เลย รวมคิวที่ค้างเกินเวลา (เจ้าของสั่ง 2026-10-08) — server ตัดสินซ้ำใน closeBooking() */}
+        {inTable && booking.status === "BOOKED" && allowed.includes("DELETE") ? (
+          <button type="button" className={`btn btn-ghost${size}`} onClick={() => close(booking, "NO_SHOW")} disabled={pending}>
+            ไม่มาตามนัด
+          </button>
+        ) : null}
+        {inTable && LIVE_STATUS.includes(booking.status) && allowed.includes("DELETE") ? (
+          <button type="button" className={`btn btn-danger${size}`} onClick={() => close(booking, "CANCELLED")} disabled={pending}>
+            ยกเลิกคิว
+          </button>
+        ) : null}
+        {canBill && booking.billOpen && booking.tableId && booking.tableSessionId ? (
+          <Link
+            href={`/mobile-order/tables/${booking.tableId}/billing?session=${booking.tableSessionId}&back=bookings`}
+            className={`btn ${booking.status === "DONE" ? "btn-primary" : "btn-subtle"}${size}`}
+          >
+            <IconReceipt size={15} aria-hidden />
+            ปิดบิล / ชำระเงิน
+          </Link>
+        ) : null}
         {TICKET_STATUS.includes(booking.status) ? (
           <button type="button" className={`btn btn-ghost${size}`} onClick={() => printTicket(booking.id)}>
             <IconPrinter size={15} aria-hidden />
@@ -351,6 +375,9 @@ export function BookingSchedule({
   }
 
   async function close(booking: BookingRow, mode: "CANCELLED" | "NO_SHOW") {
+    // ปุ่มนี้อยู่ในแถวรายการด้วย (2026-10-08) — ถามก่อนกันกดพลาด
+    const question = mode === "CANCELLED" ? `ยกเลิกคิวของ ${booking.customerName}?` : `บันทึกว่า ${booking.customerName} ไม่มาตามนัด?`
+    if (!window.confirm(question)) return
     const fd = new FormData()
     fd.set("id", booking.id)
     const done = await run(() => (mode === "CANCELLED" ? cancelBooking(fd) : markBookingNoShow(fd)))
@@ -827,7 +854,7 @@ export function BookingSchedule({
                 ไม่มาตามนัด
               </button>
             ) : null}
-            {detail && (detail.status === "BOOKED" || detail.status === "CHECKED_IN") && allowed.includes("DELETE") ? (
+            {detail && LIVE_STATUS.includes(detail.status) && allowed.includes("DELETE") ? (
               <button type="button" className="btn btn-danger" onClick={() => close(detail, "CANCELLED")} disabled={pending}>
                 ยกเลิกคิว
               </button>

@@ -52,6 +52,8 @@ export default async function BookingsPage({ searchParams }: PageProps<"/spa/boo
       // เส้น "ตอนนี้" บนไทม์ไลน์ — คำนวณเวลาไทยฝั่ง server เพราะ client ไม่แตะ timezone (ดูหัวไฟล์ของ BookingSchedule)
       nowMinute={data.dayKey === businessDayKey() ? minuteOfBusinessDay(new Date()) : null}
       allowed={granted.SPA_BOOKINGS ?? []}
+      // ปุ่มปิดบิล/ชำระเงินบนคิว — หน้าปิดบิลต้องมี MO_TABLES:EDIT (ด่านเดิมของหน้านั้นยังตรวจซ้ำ)
+      canBill={granted.MO_TABLES?.includes("EDIT") ?? false}
     />
   )
 }

@@ -173,14 +173,22 @@ async function closeBooking(formData: FormData, to: "CANCELLED" | "NO_SHOW"): Pr
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
   // "ไม่มาตามนัด" ใช้ได้เฉพาะคิวที่ลูกค้ายังไม่มา (BOOKED) — เช็กอินแล้วแปลว่ามาแล้ว (2026-10-08 เจ้าของสั่ง)
-  // "ยกเลิกคิว" ได้ถึงตอนเช็กอินแล้วแต่ยังไม่เริ่มนวด · เริ่มนวดแล้วปิดคิวด้วย "เสร็จแล้ว" หรือปิดบิลเท่านั้น
-  const from: BookingStatus[] = to === "NO_SHOW" ? ["BOOKED"] : ["BOOKED", "CHECKED_IN"]
+  // "ยกเลิกคิว" ได้ทุกคิวที่ยังไม่จบ รวมคิวที่ค้างเกินเวลา (เจ้าของสั่ง 2026-10-08) — ด่านอยู่ที่รายการในบิลด้านล่าง:
+  // บิลยังเปิดและกำลังนวดอยู่จริง = ห้ามยกเลิก (ให้กด "เสร็จแล้ว") · บิลปิด/ยกเลิกไปแล้ว = ยกเลิกคิวได้เลย
+  const from: BookingStatus[] = to === "NO_SHOW" ? ["BOOKED"] : ["BOOKED", "CHECKED_IN", "IN_SERVICE"]
 
   try {
     const cancelledItem = await db.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: parsed.data.id },
-        select: { id: true, status: true, therapistId: true, menuItemId: true, tableSessionId: true },
+        select: {
+          id: true,
+          status: true,
+          therapistId: true,
+          menuItemId: true,
+          tableSessionId: true,
+          session: { select: { status: true } },
+        },
       })
       if (!booking) throw new BookingError("ไม่พบการจองที่ต้องการ")
 
@@ -193,23 +201,31 @@ async function closeBooking(formData: FormData, to: "CANCELLED" | "NO_SHOW"): Pr
         throw new BookingError(
           to === "NO_SHOW"
             ? "ลูกค้าเช็กอินแล้ว บันทึกว่าไม่มาตามนัดไม่ได้"
-            : "เริ่มนวดไปแล้ว ยกเลิกคิวไม่ได้ — กด “เสร็จแล้ว” หรือปิดบิลที่หน้าห้องแทน",
+            : "คิวนี้จบไปแล้ว (เสร็จ/ยกเลิก/ไม่มา)",
         )
       }
 
-      // เช็กอินแล้ว = มีรายการนวดในบิลห้อง → ยกเลิกรายการนั้นด้วย ไม่งั้นบิลคิดเงินโปรแกรมที่ไม่ได้นวด
-      if (booking.status !== "CHECKED_IN" || !booking.tableSessionId) return false
-      const item = await tx.mobileOrderItem.findFirst({
+      // บิลห้องปิด/ยกเลิกไปแล้ว (หรือยังไม่เช็กอิน) = ไม่มีรายการให้แตะ — ปิดคิวที่ค้างได้เลย
+      const billLive = booking.session?.status === "OPEN" || booking.session?.status === "AWAITING_BILL"
+      if (!booking.tableSessionId || !billLive) return false
+
+      // บิลยังเปิด: รายการนวดของคิวนี้ (บิล + โปรแกรม · ไม่บังคับพนักงานตรง) ที่ยังไม่จบ
+      const live = await tx.mobileOrderItem.findMany({
         where: {
           order: { storeId, tableSessionId: booking.tableSessionId },
-          therapistId: booking.therapistId,
           menuItemId: booking.menuItemId,
-          status: "AWAITING_KITCHEN",
+          status: { in: ["AWAITING_KITCHEN", "COOKING", "READY"] },
         },
         orderBy: { createdAt: "asc" },
-        select: { id: true },
+        select: { id: true, status: true, therapistId: true },
       })
-      if (!item) return false
+      const mine = live.find((c) => c.therapistId === booking.therapistId) ?? live[0] ?? null
+      if (!mine) return false
+      // กำลังนวดอยู่จริง — ยกเลิกแล้วบิลจะไม่คิดเงินงานที่ทำไปแล้ว ให้ปิดด้วย "เสร็จแล้ว" แทน
+      if (mine.status !== "AWAITING_KITCHEN") {
+        throw new BookingError("รายการนวดของคิวนี้กำลังทำอยู่ในบิล — กด “เสร็จแล้ว” เพื่อปิดคิว แล้วปิดบิลตามปกติ")
+      }
+      const item = { id: mine.id }
       const moved = await tx.mobileOrderItem.updateMany({
         where: { id: item.id, order: { storeId }, status: "AWAITING_KITCHEN" },
         data: { status: "CANCELLED", cancelReason: parsed.data.reason ?? "ยกเลิกคิวจอง" },
@@ -423,7 +439,15 @@ async function advanceBookingService(formData: FormData, to: "IN_SERVICE" | "DON
     const customerName = await db.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: parsed.data.id },
-        select: { id: true, status: true, customerName: true, therapistId: true, menuItemId: true, tableSessionId: true },
+        select: {
+          id: true,
+          status: true,
+          customerName: true,
+          therapistId: true,
+          menuItemId: true,
+          tableSessionId: true,
+          session: { select: { status: true } },
+        },
       })
       if (!booking) throw new BookingError("ไม่พบการจองที่ต้องการ")
       if (!bookingFrom.includes(booking.status) || !booking.tableSessionId) {
@@ -438,6 +462,13 @@ async function advanceBookingService(formData: FormData, to: "IN_SERVICE" | "DON
         data: { status: to },
       })
       if (claimed.count === 0) throw new BookingError("คิวนี้เพิ่งถูกเปลี่ยนสถานะจากอีกเครื่องหนึ่ง")
+
+      // บิลห้องปิด/ยกเลิกไปแล้วแต่คิวยังค้าง (คิวเกินเวลา · เจ้าของสั่ง 2026-10-08) — "เสร็จแล้ว" แค่ปิดคิว ไม่มีรายการให้แตะ
+      const billLive = booking.session?.status === "OPEN" || booking.session?.status === "AWAITING_BILL"
+      if (!billLive) {
+        if (to === "IN_SERVICE") throw new BookingError("บิลของคิวนี้ถูกปิดหรือยกเลิกไปแล้ว เริ่มนวดไม่ได้ — กด “เสร็จแล้ว” หรือ “ยกเลิกคิว” เพื่อปิดคิว")
+        return booking.customerName
+      }
 
       // บรรทัดบริการของคิวนี้ = บิลเดียวกัน + โปรแกรมเดียวกัน — **ไม่บังคับพนักงานตรง** เพราะเปลี่ยนพนักงานหลังเช็กอินได้
       // (มีหลายบรรทัดเลือกของพนักงานที่จองไว้ก่อน) · MobileOrderItem ไม่มี storeId ต้องกรองผ่าน order.storeId เอง

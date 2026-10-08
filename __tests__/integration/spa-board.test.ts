@@ -178,6 +178,21 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
       expect((await serviceItemOf(id)).status).toBe("SERVED")
     })
 
+    it("ปุ่มปิดบิลบนตารางจอง: billOpen จริงหลังเช็กอิน · เท็จก่อนเช็กอินและหลังปิดบิล", async () => {
+      const { program, t1, room1 } = await seedSpa()
+      const { closeSessionWithPayment } = await import("@/lib/close-session")
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      const billOpenOf = async () => (await queries.getBookingDay(TEST_STORE_ID, today)).bookings.find((b) => b.id === id)?.billOpen
+
+      expect(await billOpenOf()).toBe(false)
+      const checkedIn = await checkInBooking(makeFormData({ id, tableId: room1.id }))
+      expect(await billOpenOf()).toBe(true)
+
+      const sessionId = checkedIn.ok ? (checkedIn.data?.sessionId ?? "") : ""
+      expect((await closeSessionWithPayment({ storeId: TEST_STORE_ID, sessionId, paymentMethod: "CASH", cashierId: "owner" })).ok).toBe(true)
+      expect(await billOpenOf()).toBe(false)
+    })
+
     it("ทิกเก็ตจัดห้องออกได้หลังเช็กอินเท่านั้น และมีห้อง/พนักงาน/เวลาครบ", async () => {
       const { program, t1, room1 } = await seedSpa()
       const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
@@ -209,7 +224,7 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
       expect((await testPrisma().booking.findUniqueOrThrow({ where: { id } })).status).toBe("CHECKED_IN")
     })
 
-    it("เริ่มนวดแล้ว ยกเลิกคิวและบันทึกไม่มาไม่ได้ทั้งคู่", async () => {
+    it("กำลังนวดอยู่จริง (บิลยังเปิด) ยกเลิกคิวและบันทึกไม่มาไม่ได้ — ต้องกดเสร็จแล้ว", async () => {
       const { program, t1, room1 } = await seedSpa()
       const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
       await checkInBooking(makeFormData({ id, tableId: room1.id }))
@@ -229,6 +244,43 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
       expect((await cancelBooking(makeFormData({ id, reason: "ลูกค้าเปลี่ยนใจ" }))).ok).toBe(true)
       expect((await testPrisma().booking.findUniqueOrThrow({ where: { id } })).status).toBe("CANCELLED")
       expect((await serviceItemOf(id)).status).toBe("CANCELLED")
+    })
+
+    it("★ ยกเลิกบิลห้องแล้ว คิวที่เช็กอิน/กำลังนวดถูกยกเลิกตาม (เดิมค้างตลอดไป)", async () => {
+      const { program, t1, room1 } = await seedSpa()
+      const { cancelTableSession } = await import("@/app/actions/tables")
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      const checkedIn = await checkInBooking(makeFormData({ id, tableId: room1.id }))
+      await startBookingService(makeFormData({ id }))
+      const sessionId = checkedIn.ok ? (checkedIn.data?.sessionId ?? "") : ""
+
+      const cancelled = await cancelTableSession(makeFormData({ sessionId, reason: "ลูกค้าเปลี่ยนใจ" }))
+      expect(cancelled.ok, cancelled.ok ? "" : cancelled.error).toBe(true)
+      expect((await testPrisma().booking.findUniqueOrThrow({ where: { id } })).status).toBe("CANCELLED")
+    })
+
+    it("★ คิวเกินเวลาที่ค้างอยู่ทั้งที่บิลปิด/ยกเลิกไปแล้ว → กดเสร็จแล้ว หรือยกเลิกคิวได้", async () => {
+      const db = testPrisma()
+      const { program, t1, room1 } = await seedSpa()
+      const first = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "10:00" })
+      const second = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00", customerName: "คุณบี" })
+      for (const id of [first, second]) {
+        const checkedIn = await checkInBooking(makeFormData({ id, tableId: room1.id }))
+        expect(checkedIn.ok, checkedIn.ok ? "" : checkedIn.error).toBe(true)
+        await startBookingService(makeFormData({ id }))
+        // จำลองข้อมูลค้างบน production: บิลถูกยกเลิกด้วยโค้ดเก่าที่ไม่ปิดคิวตาม
+        const sessionId = (await db.booking.findUniqueOrThrow({ where: { id } })).tableSessionId ?? ""
+        await db.tableSession.update({ where: { id: sessionId }, data: { status: "CANCELLED" } })
+        await db.mobileOrderItem.updateMany({ where: { order: { tableSessionId: sessionId } }, data: { status: "CANCELLED" } })
+      }
+
+      const done = await finishBookingService(makeFormData({ id: first }))
+      expect(done.ok, done.ok ? "" : done.error).toBe(true)
+      expect((await db.booking.findUniqueOrThrow({ where: { id: first } })).status).toBe("DONE")
+
+      const cancel = await cancelBooking(makeFormData({ id: second }))
+      expect(cancel.ok, cancel.ok ? "" : cancel.error).toBe(true)
+      expect((await db.booking.findUniqueOrThrow({ where: { id: second } })).status).toBe("CANCELLED")
     })
 
     it("คิวที่ยังไม่มา บันทึกไม่มาตามนัดได้ตามเดิม", async () => {
