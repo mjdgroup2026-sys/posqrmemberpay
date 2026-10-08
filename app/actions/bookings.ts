@@ -18,7 +18,7 @@ import {
   zodToFieldErrors,
 } from "@/lib/validation"
 import type { ActionResult } from "@/lib/types"
-import type { OrderItemStatus } from "@/generated/prisma/client"
+import type { BookingStatus, OrderItemStatus } from "@/generated/prisma/client"
 
 /// การจองล่วงหน้าของร้านนวด (Phase 20b) — resource `SPA_BOOKINGS`
 ///
@@ -172,15 +172,67 @@ async function closeBooking(formData: FormData, to: "CANCELLED" | "NO_SHOW"): Pr
   const parsed = bookingCancelSchema.safeParse({ id: formData.get("id"), reason: formData.get("reason") ?? undefined })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  // conditional update — กันกดยกเลิกพร้อมกับเช็กอิน (แนวเดียวกับกติกาข้อ 7)
-  const updated = await db.booking.updateMany({
-    where: { id: parsed.data.id, status: { in: ["BOOKED", "CHECKED_IN"] } },
-    data: { status: to, cancelledAt: new Date(), cancelReason: parsed.data.reason ?? null },
-  })
-  if (updated.count === 0) return { ok: false, error: "การจองนี้ถูกปิดหรือเริ่มให้บริการไปแล้ว" }
+  // "ไม่มาตามนัด" ใช้ได้เฉพาะคิวที่ลูกค้ายังไม่มา (BOOKED) — เช็กอินแล้วแปลว่ามาแล้ว (2026-10-08 เจ้าของสั่ง)
+  // "ยกเลิกคิว" ได้ถึงตอนเช็กอินแล้วแต่ยังไม่เริ่มนวด · เริ่มนวดแล้วปิดคิวด้วย "เสร็จแล้ว" หรือปิดบิลเท่านั้น
+  const from: BookingStatus[] = to === "NO_SHOW" ? ["BOOKED"] : ["BOOKED", "CHECKED_IN"]
 
-  revalidateBookingPages(storeId)
-  return { ok: true, message: to === "CANCELLED" ? "ยกเลิกการจองแล้ว" : "บันทึกว่าลูกค้าไม่มาตามนัดแล้ว" }
+  try {
+    const cancelledItem = await db.$transaction(async (tx) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: parsed.data.id },
+        select: { id: true, status: true, therapistId: true, menuItemId: true, tableSessionId: true },
+      })
+      if (!booking) throw new BookingError("ไม่พบการจองที่ต้องการ")
+
+      // conditional update — กันกดยกเลิกพร้อมกับเช็กอิน/เริ่มนวด (แนวเดียวกับกติกาข้อ 7)
+      const updated = await tx.booking.updateMany({
+        where: { id: booking.id, status: { in: from } },
+        data: { status: to, cancelledAt: new Date(), cancelReason: parsed.data.reason ?? null },
+      })
+      if (updated.count === 0) {
+        throw new BookingError(
+          to === "NO_SHOW"
+            ? "ลูกค้าเช็กอินแล้ว บันทึกว่าไม่มาตามนัดไม่ได้"
+            : "เริ่มนวดไปแล้ว ยกเลิกคิวไม่ได้ — กด “เสร็จแล้ว” หรือปิดบิลที่หน้าห้องแทน",
+        )
+      }
+
+      // เช็กอินแล้ว = มีรายการนวดในบิลห้อง → ยกเลิกรายการนั้นด้วย ไม่งั้นบิลคิดเงินโปรแกรมที่ไม่ได้นวด
+      if (booking.status !== "CHECKED_IN" || !booking.tableSessionId) return false
+      const item = await tx.mobileOrderItem.findFirst({
+        where: {
+          order: { storeId, tableSessionId: booking.tableSessionId },
+          therapistId: booking.therapistId,
+          menuItemId: booking.menuItemId,
+          status: "AWAITING_KITCHEN",
+        },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      })
+      if (!item) return false
+      const moved = await tx.mobileOrderItem.updateMany({
+        where: { id: item.id, order: { storeId }, status: "AWAITING_KITCHEN" },
+        data: { status: "CANCELLED", cancelReason: parsed.data.reason ?? "ยกเลิกคิวจอง" },
+      })
+      if (moved.count === 0) throw new BookingError("รายการนวดของคิวนี้เพิ่งเริ่มจากอีกเครื่องหนึ่ง ยกเลิกไม่ได้แล้ว")
+      return true
+    })
+
+    if (cancelledItem) revalidateCheckInPages(storeId)
+    else revalidateBookingPages(storeId)
+    return {
+      ok: true,
+      message:
+        to === "NO_SHOW"
+          ? "บันทึกว่าลูกค้าไม่มาตามนัดแล้ว"
+          : cancelledItem
+            ? "ยกเลิกคิวและรายการนวดในบิลห้องแล้ว — ถ้าห้องไม่มีรายการอื่น ยกเลิกบิลได้ที่หน้าห้อง"
+            : "ยกเลิกการจองแล้ว",
+    }
+  } catch (error) {
+    if (error instanceof BookingError) return { ok: false, error: error.reason }
+    return { ok: false, error: "ทำรายการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
+  }
 }
 
 export async function cancelBooking(formData: FormData): Promise<ActionResult> {

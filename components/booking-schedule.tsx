@@ -815,15 +815,16 @@ export function BookingSchedule({
                 แก้ไข
               </button>
             ) : null}
-            {detail && LIVE_STATUS.includes(detail.status) && allowed.includes("DELETE") ? (
-              <>
-                <button type="button" className="btn btn-ghost" onClick={() => close(detail, "NO_SHOW")} disabled={pending}>
-                  ไม่มาตามนัด
-                </button>
-                <button type="button" className="btn btn-danger" onClick={() => close(detail, "CANCELLED")} disabled={pending}>
-                  ยกเลิกคิว
-                </button>
-              </>
+            {/* ไม่มาตามนัด = ลูกค้ายังไม่มาเท่านั้น · ยกเลิกคิวได้จนกว่าจะเริ่มนวด (2026-10-08) — ตรงกับด่านใน closeBooking() */}
+            {detail && detail.status === "BOOKED" && allowed.includes("DELETE") ? (
+              <button type="button" className="btn btn-ghost" onClick={() => close(detail, "NO_SHOW")} disabled={pending}>
+                ไม่มาตามนัด
+              </button>
+            ) : null}
+            {detail && (detail.status === "BOOKED" || detail.status === "CHECKED_IN") && allowed.includes("DELETE") ? (
+              <button type="button" className="btn btn-danger" onClick={() => close(detail, "CANCELLED")} disabled={pending}>
+                ยกเลิกคิว
+              </button>
             ) : null}
             {detail ? statusActions(detail, false) : null}
             {detail && detail.status === "BOOKED" && allowed.includes("ADD") ? (
