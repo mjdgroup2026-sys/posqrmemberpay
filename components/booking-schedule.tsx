@@ -138,6 +138,8 @@ export function BookingSchedule({
   const shiftByTherapist = useMemo(() => new Map(shifts.map((s) => [s.therapistId, s])), [shifts])
   const live = useMemo(() => bookings.filter((b) => LIVE_STATUS.includes(b.status)), [bookings])
   const onTimeline = useMemo(() => bookings.filter((b) => TIMELINE_STATUS.includes(b.status)), [bookings])
+  // แท็บรายการเรียงตามเวลาที่ทำรายการจอง ล่าสุดขึ้นก่อน (เจ้าของสั่ง 2026-10-08) — ไทม์ไลน์/การ์ดยังเรียงตามเวลานัด
+  const listRows = useMemo(() => [...bookings].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()), [bookings])
 
   // ขอบเขตเวลาบนตาราง — ครอบทั้งกะและคิวที่มีจริง เผื่อคิวที่จองไว้นอกกะ (จากตอนที่ยังไม่ได้ตั้งกะ)
   const range = useMemo(() => {
@@ -491,6 +493,11 @@ export function BookingSchedule({
 
   const isToday = dayKey === todayKey
 
+  /// เวลาทำรายการ (เวลาไทยเสมอ — ไม่พึ่ง TZ ของเครื่อง) เช่น "8 ต.ค. 19:42"
+  function stamp(date: Date): string {
+    return date.toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })
+  }
+
   /// แถวตารางเวลาแบบ "ตามห้อง" — กดช่องว่างจองโดยเลือกห้องไว้ให้ (เลือกพนักงานในฟอร์ม) · คิวที่ยังไม่ระบุห้องรวมไว้แถวท้าย
   function roomTimelineRows() {
     const rows = [
@@ -832,14 +839,14 @@ export function BookingSchedule({
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9375rem" }}>
               <thead>
                 <tr style={{ textAlign: "left", color: "var(--ink-3)", background: "var(--surface-2)" }}>
-                  <th style={{ padding: "8px 16px", fontWeight: 500 }}>เวลา · ลูกค้า</th>
+                  <th style={{ padding: "8px 16px", fontWeight: 500 }}>เวลานัด · ลูกค้า</th>
                   <th style={{ padding: "8px 12px", fontWeight: 500 }}>โปรแกรม · พนักงาน · ห้อง</th>
                   <th style={{ padding: "8px 12px", fontWeight: 500 }}>สถานะ</th>
                   <th style={{ padding: "8px 16px", fontWeight: 500, textAlign: "right" }}>จัดการ</th>
                 </tr>
               </thead>
               <tbody>
-                {bookings.map((booking) => {
+                {listRows.map((booking) => {
                   const overdue = isToday && nowMinute !== null && booking.status === "BOOKED" && booking.startMinute <= nowMinute
                   return (
                     <tr key={booking.id} style={{ borderTop: "1px solid var(--line)" }}>
@@ -855,6 +862,11 @@ export function BookingSchedule({
                           <span style={{ fontWeight: 600 }}>{booking.customerName}</span>
                           {booking.customerPhone ? <span className="t-caption num"> · {booking.customerPhone}</span> : null}
                         </button>
+                        {/* เวลาทำรายการ (2026-10-08 เจ้าของสั่ง) — จองตอนไหน · เช็กอินตอนไหน */}
+                        <span className="t-caption num" style={{ display: "block" }}>
+                          จองเมื่อ {stamp(booking.createdAt)}
+                          {booking.checkedInAt ? ` · เช็กอิน ${stamp(booking.checkedInAt)}` : ""}
+                        </span>
                       </td>
                       <td className="t-small" style={{ padding: "8px 12px" }}>
                         {booking.menuItemName} <span className="t-caption num">({booking.durationMinutes} นาที)</span>
