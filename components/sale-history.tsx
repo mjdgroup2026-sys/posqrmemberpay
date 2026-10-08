@@ -9,6 +9,7 @@ import { formatBaht, formatDateTime, formatNumber } from "@/lib/format"
 import type { SaleListItem } from "@/lib/queries"
 import { PAYMENT_METHOD_LABEL, type ReceiptData } from "@/lib/types"
 import { Receipt } from "@/components/receipt"
+import { placeLabel } from "@/lib/order-label"
 import { IconBack, IconPrinter, IconSearch, IconSpinner } from "@/components/icons"
 import {
   Dialog,
@@ -266,7 +267,7 @@ export function SaleHistory({ sales, from, to, status, search, storeName, allowe
                           <span className="t-caption">
                             {sale.channel === "TAKEAWAY"
                               ? "อาหารกลับบ้าน"
-                              : `Mobile Order${sale.tableCode ? ` · โต๊ะ ${sale.tableCode}` : ""}`}
+                              : `Mobile Order${sale.tableCode ? ` · ${placeLabel(sale.tableKind, sale.tableCode)}` : ""}`}
                           </span>
                         </>
                       ) : null}
@@ -371,7 +372,7 @@ export function SaleHistory({ sales, from, to, status, search, storeName, allowe
                     {detail.channel === "TAKEAWAY"
                       ? " · อาหารกลับบ้าน"
                       : detail.channel === "MOBILE_ORDER"
-                        ? ` · Mobile Order${detail.tableCode ? ` โต๊ะ ${detail.tableCode}` : ""}`
+                        ? ` · Mobile Order${detail.tableCode ? ` ${placeLabel(detail.tableKind, detail.tableCode)}` : ""}`
                         : ""}
                   </span>
                 </span>

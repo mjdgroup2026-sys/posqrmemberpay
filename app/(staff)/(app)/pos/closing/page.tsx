@@ -38,7 +38,8 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
   const [summary, rounds, history, storeDay] = await Promise.all([
     getOpenSalesSummary(storeId, cashierId, closingDay),
     getDayClosings(storeId, cashierId, closingDay),
-    listClosings(storeId, { cashierId, limit: 30 }),
+    // ประวัติขึ้นตามวันที่ที่เลือก (ค่าเริ่มต้นวันนี้ · 2026-10-08 เจ้าของสั่ง)
+    listClosings(storeId, { cashierId, date: closingDay, limit: 60 }),
     canSeeStore ? getStoreDaySummary(storeId, closingDay) : Promise.resolve(null),
   ])
 
@@ -121,13 +122,15 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
 
       <div className="form-split">
         <section className="card-ui card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {rounds.map((round) => (
-            <RoundResult
-              key={round.id}
-              round={round}
-              reopenable={canReopen && round.id === lastRound?.id}
-            />
-          ))}
+          {/* แสดงแค่รอบล่าสุด (2026-10-08 เจ้าของสั่ง) — รอบก่อนหน้าของวันนี้อยู่ในตารางประวัติด้านล่างแทน */}
+          {latest ? (
+            <RoundResult key={latest.id} round={latest} reopenable={canReopen && latest.id === lastRound?.id} />
+          ) : null}
+          {rounds.length > 1 ? (
+            <p className="t-caption">
+              รอบก่อนหน้าของวันนี้ <span className="num">{formatNumber(rounds.length - 1)}</span> รอบ — ดูได้ที่ “ประวัติการปิดยอด” ด้านล่าง
+            </p>
+          ) : null}
 
           {active.length > 0 && openBills > 0 ? (
             <div className="alert-banner warning">
@@ -164,11 +167,11 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
 
         <section className="card-ui">
           <div className="panel-head">
-            <h2 className="t-h2">ประวัติการปิดยอด</h2>
+            <h2 className="t-h2">ประวัติการปิดยอด · {formatBusinessDate(closingDay)}</h2>
           </div>
           {history.length === 0 ? (
             <p className="t-body" style={{ padding: 24 }}>
-              ยังไม่มีประวัติการปิดยอด
+              ยังไม่มีการปิดยอดของ{isToday ? "วันนี้" : "วันที่เลือก"}
             </p>
           ) : (
             <div className="datatable-wrap">

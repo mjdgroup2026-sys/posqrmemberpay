@@ -193,6 +193,25 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
       expect(await billOpenOf()).toBe(false)
     })
 
+    it("ประวัติการขาย: บิลห้องขึ้นชนิดห้อง · หมายเหตุบิลเก่า \"โต๊ะ 3/1\" แสดงเป็น \"ห้อง 3/1\" (ไม่แก้ข้อมูลในฐาน)", async () => {
+      const { program, t1, room1 } = await seedSpa()
+      const { closeSessionWithPayment } = await import("@/lib/close-session")
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      const checkedIn = await checkInBooking(makeFormData({ id, tableId: room1.id }))
+      const sessionId = checkedIn.ok ? (checkedIn.data?.sessionId ?? "") : ""
+      const closed = await closeSessionWithPayment({ storeId: TEST_STORE_ID, sessionId, paymentMethod: "CASH", cashierId: "owner" })
+      expect(closed.ok).toBe(true)
+
+      const sale = await testPrisma().sale.findFirstOrThrow({ where: { tableSessionId: sessionId } })
+      expect(sale.note ?? "").toContain("ห้อง 3/1")
+      // จำลองบิลเก่าก่อน 2026-10-08 ที่บันทึกว่า "โต๊ะ"
+      await testPrisma().sale.update({ where: { id: sale.id }, data: { note: "โต๊ะ 3/1 · ส่วนลด 10%" } })
+
+      const [row] = await queries.listSales(TEST_STORE_ID, { search: sale.saleNumber })
+      expect(row).toMatchObject({ tableCode: "3/1", tableKind: "ROOM", note: "ห้อง 3/1 · ส่วนลด 10%" })
+      expect((await testPrisma().sale.findUniqueOrThrow({ where: { id: sale.id } })).note).toBe("โต๊ะ 3/1 · ส่วนลด 10%")
+    })
+
     it("ทิกเก็ตจัดห้องออกได้หลังเช็กอินเท่านั้น และมีห้อง/พนักงาน/เวลาครบ", async () => {
       const { program, t1, room1 } = await seedSpa()
       const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })

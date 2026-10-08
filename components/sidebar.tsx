@@ -68,7 +68,7 @@ const GROUPS: { title?: string; items: NavItem[] }[] = [
     title: "MJD Mobile Order",
     items: [
       { href: "/mobile-order/pos", label: "ขายอาหาร", spaLabel: "ขายอาหาร/ร้านสปา", Icon: IconPos, resource: "MO_POS" },
-      { href: "/mobile-order/tables", label: "ผังโต๊ะ", spaLabel: "ผังโต๊ะอาหาร/ห้องสปา", Icon: IconTable, resource: "MO_TABLES" },
+      { href: "/mobile-order/tables", label: "ผังโต๊ะ", spaLabel: "ผังโต๊ะอาหาร", Icon: IconTable, resource: "MO_TABLES" },
       { href: "/mobile-order/notifications", label: "การแจ้งเตือน", Icon: IconBell, badge: "pending", resource: "MO_NOTIFICATIONS" },
       { href: "/mobile-order/kitchen", label: "หน้าจอครัว (KDS)", Icon: IconKitchen, resource: "MO_KITCHEN" },
       { href: "/mobile-order/menu", label: "จัดการเมนูอาหาร", spaLabel: "จัดการเมนูอาหาร/ร้านสปา", Icon: IconMenu, resource: "MO_MENU" },

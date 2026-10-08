@@ -86,15 +86,13 @@ describe("แท็บแยกอาหาร/สปา", () => {
     expect(screen.getByText("นวดไทย 60")).toBeInTheDocument()
   })
 
-  it("TableOverview ร้านสปา: ชื่อหน้าใหม่ · แท็บโต๊ะอาหาร/ห้องสปา แยกกัน", () => {
+  it("TableOverview ร้านสปา: เหลือแค่โต๊ะอาหาร ไม่มีแท็บห้องสปา — ห้องจัดการที่หน้าคิวนวด (2026-10-08)", () => {
     render(<TableOverview tables={tables} spaEnabled />)
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("ผังโต๊ะอาหาร/ห้องสปา")
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/^ผังโต๊ะอาหาร$/)
     expect(screen.getByText(/A1/)).toBeInTheDocument()
     expect(screen.queryByText(/3\/1/)).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("tab", { name: /ห้องสปา/ }))
-    expect(screen.getByText(/3\/1/)).toBeInTheDocument()
-    expect(screen.queryByText(/A1/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: /ห้องสปา/ })).toBeNull()
+    expect(screen.getByRole("link", { name: "คิวนวด" })).toHaveAttribute("href", "/spa/bookings?tab=now")
   })
 
   it("TableOverview ร้านอาหารล้วน: ไม่มีแท็บ ชื่อหน้าเดิม", () => {

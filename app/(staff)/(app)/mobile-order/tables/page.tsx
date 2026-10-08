@@ -10,7 +10,7 @@ import { requirePageAccess } from "@/lib/permissions"
 import { TableOverview } from "@/components/table-overview"
 
 export function generateMetadata() {
-  return spaAwareMetadata("ผังโต๊ะ", "ผังโต๊ะอาหาร/ห้องสปา")
+  return spaAwareMetadata("ผังโต๊ะ", "ผังโต๊ะอาหาร")
 }
 
 export default async function TablesPage() {
