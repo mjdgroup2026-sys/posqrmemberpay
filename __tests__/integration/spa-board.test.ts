@@ -108,11 +108,6 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
 
       expect((await checkInBooking(makeFormData({ id, tableId: room1.id }))).ok).toBe(true)
 
-      // เช็กอินแล้วแต่ยังไม่เริ่ม — กดเสร็จไม่ได้
-      const skip = await finishBookingService(makeFormData({ id }))
-      expect(skip.ok).toBe(false)
-      expect((await db.booking.findUniqueOrThrow({ where: { id } })).status).toBe("CHECKED_IN")
-
       expect((await startBookingService(makeFormData({ id }))).ok).toBe(true)
       expect((await db.booking.findUniqueOrThrow({ where: { id } })).status).toBe("IN_SERVICE")
       expect((await serviceItemOf(id)).status).toBe("COOKING")
@@ -144,8 +139,43 @@ describe.skipIf(!dbReady)("ร้านนวด — ตารางจองก
 
       const result = await startBookingService(makeFormData({ id }))
       expect(result.ok).toBe(false)
-      expect(result.ok === false && result.error).toContain("ไม่พบรายการนวด")
+      expect(result.ok === false && result.error).toContain("ถูกยกเลิกไปแล้ว")
       expect((await db.booking.findUniqueOrThrow({ where: { id } })).status).toBe("CHECKED_IN")
+      // กดเสร็จก็ไม่ได้เช่นกัน — ไม่มีอะไรให้ปิด
+      expect((await finishBookingService(makeFormData({ id }))).ok).toBe(false)
+      expect((await db.booking.findUniqueOrThrow({ where: { id } })).status).toBe("CHECKED_IN")
+    })
+
+    it("★ เคสเจ้าของเจอ 2026-10-08: เปลี่ยนพนักงานหลังเช็กอิน แล้วเริ่มนวดจากหน้าห้อง → คิวค้างเช็กอิน แต่กดเสร็จจากตารางจองได้", async () => {
+      const db = testPrisma()
+      const { program, t1, t2, room1 } = await seedSpa()
+      const { assignOrderItemTherapist, startServiceItem } = await import("@/app/actions/orders")
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      await checkInBooking(makeFormData({ id, tableId: room1.id }))
+      const item = await serviceItemOf(id)
+      expect((await assignOrderItemTherapist(makeFormData({ id: item.id, therapistId: t2.id }))).ok).toBe(true)
+      expect((await startServiceItem(makeFormData({ id: item.id }))).ok).toBe(true)
+      // คิวผูกพนักงานคนเดิม จึงไม่ขยับตามหน้าห้อง
+      expect((await db.booking.findUniqueOrThrow({ where: { id } })).status).toBe("CHECKED_IN")
+
+      // เริ่มนวดซ้ำจากตารางจอง = แค่ให้คิวตามให้ทัน ไม่ error
+      expect((await startBookingService(makeFormData({ id }))).ok).toBe(true)
+      expect((await db.booking.findUniqueOrThrow({ where: { id } })).status).toBe("IN_SERVICE")
+
+      const done = await finishBookingService(makeFormData({ id }))
+      expect(done.ok, done.ok ? "" : done.error).toBe(true)
+      expect((await db.booking.findUniqueOrThrow({ where: { id } })).status).toBe("DONE")
+      expect((await serviceItemOf(id)).status).toBe("SERVED")
+    })
+
+    it("กดเสร็จได้ตั้งแต่สถานะเช็กอินแล้ว (ข้ามเริ่มนวด) — รายการในบิลเป็นเสิร์ฟแล้ว", async () => {
+      const db = testPrisma()
+      const { program, t1, room1 } = await seedSpa()
+      const id = await book({ menuItemId: program.id, therapistId: t1.id, startTime: "13:00" })
+      await checkInBooking(makeFormData({ id, tableId: room1.id }))
+      expect((await finishBookingService(makeFormData({ id }))).ok).toBe(true)
+      expect((await db.booking.findUniqueOrThrow({ where: { id } })).status).toBe("DONE")
+      expect((await serviceItemOf(id)).status).toBe("SERVED")
     })
 
     it("ทิกเก็ตจัดห้องออกได้หลังเช็กอินเท่านั้น และมีห้อง/พนักงาน/เวลาครบ", async () => {

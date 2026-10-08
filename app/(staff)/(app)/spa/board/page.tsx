@@ -56,7 +56,7 @@ function therapistDetail(t: TherapistBoardRow): string {
   if (t.state === "BUSY" || t.state === "WAITING") {
     const parts = [
       t.walkIn ? "walk-in" : null,
-      t.customerName ? `คุณ${t.customerName}` : null,
+      t.customerName,
       t.programName,
       t.roomCode ? `ห้อง ${t.roomCode}` : null,
       t.busyUntil ? `ถึง ${clock(t.busyUntil)} น.` : null,
@@ -74,12 +74,12 @@ function roomDetail(room: RoomBoardRow): string {
   switch (room.state) {
     case "IN_SERVICE":
     case "WAITING":
-      return `คุณ${room.customerName ?? ""} · ${room.therapistLabel ?? ""} · ถึง ${clock(room.until)} น.`
+      return `${room.customerName ?? ""} · ${room.therapistLabel ?? ""} · ถึง ${clock(room.until)} น.`
     case "AWAITING_GUEST":
-      return `คิวคุณ${room.customerName ?? ""} ${clock(room.nextBookingAt)} น. ยังไม่เช็กอิน`
+      return `คิว ${room.customerName ?? ""} ${clock(room.nextBookingAt)} น. ยังไม่เช็กอิน`
     case "OCCUPIED":
       return [
-        room.customerName ? `คุณ${room.customerName}` : "ลูกค้า walk-in",
+        room.customerName ?? "ลูกค้า walk-in",
         room.awaitingPayment ? "นวดเสร็จแล้ว รอปิดบิล" : null,
         room.staleSince ? `บิลค้างตั้งแต่ ${formatBusinessDate(room.staleSince)} — ปิดหรือยกเลิกบิลที่หน้าโต๊ะ` : null,
       ]

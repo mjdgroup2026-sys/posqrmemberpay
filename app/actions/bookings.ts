@@ -326,7 +326,7 @@ export async function checkInBooking(formData: FormData): Promise<ActionResult<C
           : { tableId: parsed.data.tableId, newCustomer: { label: booking.customerName } },
       )
       if (session.status === "AWAITING_BILL") {
-        throw new BookingError(`บิลของคุณ${booking.customerName} ในห้อง ${session.tableCode} ขอเช็กบิลแล้ว — ปิดบิลนั้นก่อนแล้วค่อยเช็กอิน`)
+        throw new BookingError(`บิลของ ${booking.customerName} ในห้อง ${session.tableCode} ขอเช็กบิลแล้ว — ปิดบิลนั้นก่อนแล้วค่อยเช็กอิน`)
       }
 
       // บรรทัดบริการผ่านตัวเดียวกับจอขาย — ราคา/ทักษะ/ตัวเลือกเสริมถูกตรวจซ้ำในทรานแซคชันนี้
@@ -413,8 +413,10 @@ async function advanceBookingService(formData: FormData, to: "IN_SERVICE" | "DON
   const parsed = idSchema.safeParse({ id: formData.get("id") })
   if (!parsed.success) return { ok: false, error: firstIssueMessage(parsed.error) }
 
-  const bookingFrom = to === "IN_SERVICE" ? "CHECKED_IN" : "IN_SERVICE"
-  const itemFrom: OrderItemStatus[] = to === "IN_SERVICE" ? ["AWAITING_KITCHEN"] : ["COOKING", "READY"]
+  // เริ่มนวด ← เช็กอินแล้ว · เสร็จ ← กำลังนวด หรือเช็กอินแล้ว (2026-10-08: เจ้าของเจอคิวค้างปิดไม่ได้ —
+  // เช่น เริ่มนวดจากหน้าห้องหลังเปลี่ยนพนักงาน คิวจึงไม่ขยับตาม แต่รายการในบิลกำลังนวดอยู่)
+  const bookingFrom: BookingStatus[] = to === "IN_SERVICE" ? ["CHECKED_IN"] : ["CHECKED_IN", "IN_SERVICE"]
+  const itemFrom: OrderItemStatus[] = to === "IN_SERVICE" ? ["AWAITING_KITCHEN"] : ["AWAITING_KITCHEN", "COOKING", "READY"]
   const itemTo: OrderItemStatus = to === "IN_SERVICE" ? "COOKING" : "SERVED"
 
   try {
@@ -424,37 +426,40 @@ async function advanceBookingService(formData: FormData, to: "IN_SERVICE" | "DON
         select: { id: true, status: true, customerName: true, therapistId: true, menuItemId: true, tableSessionId: true },
       })
       if (!booking) throw new BookingError("ไม่พบการจองที่ต้องการ")
-      if (booking.status !== bookingFrom || !booking.tableSessionId) {
+      if (!bookingFrom.includes(booking.status) || !booking.tableSessionId) {
         throw new BookingError(
-          to === "IN_SERVICE" ? "เริ่มนวดได้เฉพาะคิวที่เช็กอินแล้วและยังไม่เริ่ม" : "กดเสร็จได้เฉพาะคิวที่กำลังนวดอยู่",
+          to === "IN_SERVICE" ? "เริ่มนวดได้เฉพาะคิวที่เช็กอินแล้วและยังไม่เริ่ม" : "กดเสร็จได้เฉพาะคิวที่เช็กอินหรือกำลังนวดอยู่",
         )
       }
 
       // ★ ปิดประตูที่คิวก่อน — กดพร้อมกันสองเครื่องต้องผ่านได้ครั้งเดียว
       const claimed = await tx.booking.updateMany({
-        where: { id: booking.id, status: bookingFrom },
+        where: { id: booking.id, status: { in: bookingFrom } },
         data: { status: to },
       })
       if (claimed.count === 0) throw new BookingError("คิวนี้เพิ่งถูกเปลี่ยนสถานะจากอีกเครื่องหนึ่ง")
 
-      // บรรทัดบริการของคิวนี้ — MobileOrderItem ไม่มี storeId ต้องกรองผ่าน order.storeId เอง (ดู transition ใน orders.ts)
-      const item = await tx.mobileOrderItem.findFirst({
-        where: {
-          order: { storeId, tableSessionId: booking.tableSessionId },
-          therapistId: booking.therapistId,
-          menuItemId: booking.menuItemId,
-          status: { in: itemFrom },
-        },
+      // บรรทัดบริการของคิวนี้ = บิลเดียวกัน + โปรแกรมเดียวกัน — **ไม่บังคับพนักงานตรง** เพราะเปลี่ยนพนักงานหลังเช็กอินได้
+      // (มีหลายบรรทัดเลือกของพนักงานที่จองไว้ก่อน) · MobileOrderItem ไม่มี storeId ต้องกรองผ่าน order.storeId เอง
+      const sameBill = { order: { storeId, tableSessionId: booking.tableSessionId }, menuItemId: booking.menuItemId }
+      const candidates = await tx.mobileOrderItem.findMany({
+        where: { ...sameBill, status: { in: itemFrom } },
         orderBy: { createdAt: "asc" },
-        select: { id: true },
+        select: { id: true, therapistId: true },
       })
+      const item = candidates.find((c) => c.therapistId === booking.therapistId) ?? candidates[0] ?? null
+
       if (!item) {
-        throw new BookingError(
-          to === "IN_SERVICE"
-            ? "ไม่พบรายการนวดของคิวนี้ในบิล (อาจถูกยกเลิกหรือเริ่มไปแล้ว) — ตรวจที่หน้าห้อง"
-            : "ไม่พบรายการนวดที่กำลังทำของคิวนี้ในบิล — ตรวจที่หน้าห้อง",
-        )
+        // ไม่มีบรรทัดให้ขยับ: ถ้ารายการในบิลไปถึงสถานะปลายทางแล้ว (เริ่ม/เสร็จจากหน้าห้อง) แค่ให้คิวตามให้ทัน
+        const reached = await tx.mobileOrderItem.count({
+          where: { ...sameBill, status: { in: to === "IN_SERVICE" ? ["COOKING", "READY", "SERVED"] : ["SERVED"] } },
+        })
+        if (reached === 0) {
+          throw new BookingError("รายการนวดของคิวนี้ในบิลถูกยกเลิกไปแล้ว — ใช้ “ยกเลิกคิว” หรือตรวจที่หน้าห้อง")
+        }
+        return booking.customerName
       }
+
       const moved = await tx.mobileOrderItem.updateMany({
         where: { id: item.id, order: { storeId }, status: { in: itemFrom } },
         data: { status: itemTo },
@@ -465,7 +470,7 @@ async function advanceBookingService(formData: FormData, to: "IN_SERVICE" | "DON
     })
 
     revalidateCheckInPages(storeId)
-    return { ok: true, message: to === "IN_SERVICE" ? `เริ่มนวดคุณ${customerName}แล้ว` : `คุณ${customerName} นวดเสร็จแล้ว` }
+    return { ok: true, message: to === "IN_SERVICE" ? `เริ่มนวด ${customerName} แล้ว` : `${customerName} นวดเสร็จแล้ว` }
   } catch (error) {
     if (error instanceof BookingError) return { ok: false, error: error.reason }
     return { ok: false, error: "เปลี่ยนสถานะคิวไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }

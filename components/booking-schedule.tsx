@@ -329,8 +329,14 @@ export function BookingSchedule({
             เริ่มนวด
           </button>
         ) : null}
-        {booking.status === "IN_SERVICE" && allowed.includes("EDIT") ? (
-          <button type="button" className={`btn btn-primary${size}`} onClick={() => advance(booking, "DONE")} disabled={pending}>
+        {/* เสร็จแล้ว: กดได้ทั้งตอนกำลังนวด และตอนเช็กอินแล้ว (ปุ่มรอง) — เผื่อเริ่มนวดจากหน้าห้องแล้วคิวไม่ขยับตาม (2026-10-08) */}
+        {(booking.status === "IN_SERVICE" || booking.status === "CHECKED_IN") && allowed.includes("EDIT") ? (
+          <button
+            type="button"
+            className={`btn ${booking.status === "IN_SERVICE" ? "btn-primary" : "btn-ghost"}${size}`}
+            onClick={() => advance(booking, "DONE")}
+            disabled={pending}
+          >
             เสร็จแล้ว
           </button>
         ) : null}
