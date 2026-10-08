@@ -359,14 +359,10 @@ export function BookingSchedule({
             เริ่มนวด
           </button>
         ) : null}
-        {/* เสร็จแล้ว: กดได้ทั้งตอนกำลังนวด และตอนเช็กอินแล้ว (ปุ่มรอง) — เผื่อเริ่มนวดจากหน้าห้องแล้วคิวไม่ขยับตาม (2026-10-08) */}
-        {(booking.status === "IN_SERVICE" || booking.status === "CHECKED_IN") && allowed.includes("EDIT") ? (
-          <button
-            type="button"
-            className={`btn ${booking.status === "IN_SERVICE" ? "btn-primary" : "btn-ghost"}${size}`}
-            onClick={() => advance(booking, "DONE")}
-            disabled={pending}
-          >
+        {/* ★ ปุ่มสถานะทีละขั้นเท่านั้น (เจ้าของสั่ง 2026-10-08): เช็กอิน → เริ่มนวด → เสร็จแล้ว → ปิดบิล
+            เดิมกดจ่ายได้ตั้งแต่เช็กอิน ห้องปิดทั้งที่ยังไม่ได้นวด — ห้ามเพิ่มทางลัดข้ามขั้นกลับมา */}
+        {booking.status === "IN_SERVICE" && allowed.includes("EDIT") ? (
+          <button type="button" className={`btn btn-primary${size}`} onClick={() => advance(booking, "DONE")} disabled={pending}>
             เสร็จแล้ว
           </button>
         ) : null}
@@ -382,10 +378,10 @@ export function BookingSchedule({
             ยกเลิกคิว
           </button>
         ) : null}
-        {canBill && booking.billOpen && booking.tableId && booking.tableSessionId ? (
+        {booking.status === "DONE" && canBill && booking.billOpen && booking.tableId && booking.tableSessionId ? (
           <Link
             href={`/mobile-order/tables/${booking.tableId}/billing?session=${booking.tableSessionId}&back=bookings`}
-            className={`btn ${booking.status === "DONE" ? "btn-primary" : "btn-subtle"}${size}`}
+            className={`btn btn-primary${size}`}
           >
             <IconReceipt size={15} aria-hidden />
             ปิดบิล / ชำระเงิน
@@ -464,16 +460,7 @@ export function BookingSchedule({
     if (booking.status === "BOOKED" && allowed.includes("EDIT")) {
       items.push(<DropdownMenuItem key="edit" onClick={() => startEdit(booking)}>แก้ไขคิว</DropdownMenuItem>)
     }
-    if (booking.status === "CHECKED_IN" && allowed.includes("EDIT")) {
-      items.push(<DropdownMenuItem key="done" onClick={() => advance(booking, "DONE")}>เสร็จแล้ว (ข้ามเริ่มนวด)</DropdownMenuItem>)
-    }
-    if (booking.status !== "DONE" && canBill && booking.billOpen && booking.tableId && booking.tableSessionId) {
-      items.push(
-        <DropdownMenuItem key="bill" render={<Link href={billHref(booking)} />}>
-          ปิดบิล / ชำระเงิน
-        </DropdownMenuItem>,
-      )
-    }
+    // ไม่มีทางลัดข้ามขั้น (เริ่มนวด/เสร็จ/ปิดบิล) ในเมนูนี้ — ขั้นถัดไปมีปุ่มเดียวในแถว (2026-10-08)
     if (TICKET_STATUS.includes(booking.status)) {
       items.push(<DropdownMenuItem key="ticket" onClick={() => printTicket(booking.id)}>พิมพ์ทิกเก็ต</DropdownMenuItem>)
     }

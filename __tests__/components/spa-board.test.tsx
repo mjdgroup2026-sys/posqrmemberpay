@@ -71,6 +71,13 @@ const rooms: RoomBoardRow[] = [
   room("r1", "3/1", { state: "IN_SERVICE", customerName: "สมหญิง", therapistLabel: "001 นิด", until: active.endAt, current: active, billSessionId: "s1", bookings: [active, ...next] }),
   room("r2", "3/2", { state: "IN_SERVICE", customerName: "คุณเกิน", therapistLabel: "001 นิด", until: late.endAt, overrun: true, current: late, billSessionId: "s2", bookings: [late] }),
   room("r3", "3/3", { state: "FREE", nextBookingAt: at("15:00") }),
+  room("r4", "3/4", {
+    state: "OCCUPIED",
+    customerName: "คุณเสร็จ",
+    awaitingPayment: true,
+    current: booking("b9", "คุณเสร็จ", "11:00", "12:00", "DONE", "3/4"),
+    billSessionId: "s4",
+  }),
 ]
 const therapists: TherapistBoardRow[] = []
 
@@ -106,12 +113,16 @@ describe("SpaBoard — กระดานห้องนวดแบบการ
     expect(within(busy).getByText(/\+ อีก 1 คิว/)).toBeInTheDocument()
   })
 
-  it("ปุ่มบนการ์ด: เสร็จแล้ว + ปิดบิล · ไม่มีสิทธิ์แก้/ปิดบิล = ไม่มีปุ่ม", () => {
+  it("★ ปุ่มทีละขั้น: กำลังนวดมีแค่ เสร็จแล้ว (ยังจ่ายไม่ได้) · นวดเสร็จแล้วถึงมี ปิดบิล · ไม่มีสิทธิ์ = ไม่มีปุ่ม", () => {
     renderBoard()
     const busy = screen.getByRole("article", { name: /ห้อง 3\/1/ })
     fireEvent.click(within(busy).getByRole("button", { name: "เสร็จแล้ว" }))
     expect(finishBookingService).toHaveBeenCalled()
-    expect(within(busy).getByRole("link", { name: /ปิดบิล/ })).toHaveAttribute("href", "/mobile-order/tables/r1/billing?session=s1&back=board")
+    // เดิมกดจ่ายได้ระหว่างนวด แล้วห้องปิดก่อนนวดเสร็จ (เจ้าของเจอ 2026-10-08)
+    expect(within(busy).queryByRole("link", { name: /ปิดบิล/ })).toBeNull()
+    const done = screen.getByRole("article", { name: /ห้อง 3\/4/ })
+    expect(within(done).getByRole("link", { name: /ปิดบิล/ })).toHaveAttribute("href", "/mobile-order/tables/r4/billing?session=s4&back=board")
+    expect(within(done).queryByRole("button", { name: "เสร็จแล้ว" })).toBeNull()
 
     cleanup()
     renderBoard({ allowed: ["VIEW"], canBill: false })

@@ -60,6 +60,8 @@ type CardView = {
   billSessionId: string | null
   /// ห้องที่มีงานแต่ไม่มีคิวจอง (walk-in) — ลิงก์ไปหน้าห้องแทนปุ่ม
   walkInRoomId: string | null
+  /// ถึงขั้นปิดบิลแล้ว (นวดเสร็จ/บิลรอปิด) — ปุ่มปิดบิลโผล่เฉพาะตอนนี้
+  billable: boolean
 }
 
 function noopSubscribe(): () => void {
@@ -101,6 +103,7 @@ function roomCard(room: RoomBoardRow, live: boolean): CardView {
     walkInRoomId: null as string | null,
     progress: false,
     overrun: room.overrun,
+    billable: live && room.state === "OCCUPIED",
   }
   if (!live) {
     const count = room.bookings.length
@@ -159,6 +162,8 @@ function therapistCard(t: TherapistBoardRow, live: boolean): CardView {
     walkInRoomId: null as string | null,
     progress: false,
     overrun: t.overrun,
+    // การ์ดพนักงานโฟกัสงานที่กำลังทำ/รอเริ่ม ไม่ใช่บิล — ปิดบิลจากการ์ดห้องหรือแท็บรายการ
+    billable: false,
   }
   const where = [t.programName, t.roomCode ? `ห้อง ${t.roomCode}` : null].filter(Boolean).join(" · ") || null
   if (t.state === "BUSY") {
@@ -296,26 +301,21 @@ export function SpaBoard({
         </button>,
       )
     }
-    if ((booking?.status === "IN_SERVICE" || booking?.status === "CHECKED_IN") && allowed.includes("EDIT")) {
+    // ★ ปุ่มทีละขั้น (เจ้าของสั่ง 2026-10-08): เสร็จแล้วเฉพาะกำลังนวด · ปิดบิลเฉพาะนวดเสร็จ/บิลรอปิด — ห้ามกดจ่ายก่อนนวด
+    if (booking?.status === "IN_SERVICE" && allowed.includes("EDIT")) {
       buttons.push(
-        <button
-          key="done"
-          type="button"
-          className={`btn btn-sm ${booking.status === "IN_SERVICE" ? "btn-primary" : "btn-ghost"}`}
-          disabled={pending}
-          onClick={() => run("ปิดคิว", () => finishBookingService(form({ id: booking.id })))}
-        >
+        <button key="done" type="button" className="btn btn-primary btn-sm" disabled={pending} onClick={() => run("ปิดคิว", () => finishBookingService(form({ id: booking.id })))}>
           เสร็จแล้ว
         </button>,
       )
     }
     const billRoom = card.roomId ?? booking?.tableId ?? null
-    if (canBill && card.billSessionId && billRoom) {
+    if (canBill && card.billable && card.billSessionId && billRoom) {
       buttons.push(
         <Link
           key="bill"
           href={`/mobile-order/tables/${billRoom}/billing?session=${card.billSessionId}&back=board`}
-          className={`btn btn-sm ${card.tone === "billing" ? "btn-primary" : "btn-subtle"}`}
+          className="btn btn-sm btn-primary"
         >
           <IconReceipt size={14} aria-hidden />
           ปิดบิล / ชำระเงิน
