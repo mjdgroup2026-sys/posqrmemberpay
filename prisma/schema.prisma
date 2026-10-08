@@ -515,6 +515,9 @@ model CashierClosing {
   reopenedAt       DateTime?
   reopenedById     String?
   reopenReason     String?
+  /// เวลาที่กด "เปิดรอบขายใหม่" หลังปิดรอบนี้ (2026-10-08) — null = ยังไม่เปิด = แคชเชียร์คนนี้รับเงินไม่ได้ (เฉพาะรอบล่าสุดของวันนี้)
+  /// ตั้งที่ `resumeSales` เท่านั้น · ตัดสินที่ `getSalesLock()` ใน lib/queries.ts ที่เดียว
+  salesResumedAt   DateTime?
 
   store      Store @relation(fields: [storeId], references: [id])
   cashier    User  @relation("ClosingCashier", fields: [cashierId], references: [id])

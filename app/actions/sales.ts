@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { nextSaleNumber } from "@/lib/sale-number"
 import { guardAction } from "@/lib/permissions"
+import { salesLockError } from "@/lib/sales-lock"
 import { publishStoreEvent } from "@/lib/realtime"
 import { toNumber } from "@/lib/format"
 import { isSameBusinessDay } from "@/lib/day"
@@ -46,6 +47,9 @@ export async function createSale(formData: FormData): Promise<ActionResult<Recei
   const storeId = guard.user.storeId
   const db = forStore(storeId)
   const user = guard.user
+  // ปิดยอดรอบล่าสุดแล้ว = รับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08)
+  const locked = await salesLockError(storeId, user.id)
+  if (locked) return { ok: false, error: locked }
 
   const parsed = saleSchema.safeParse({
     items: parseCartJson(formData.get("items")),

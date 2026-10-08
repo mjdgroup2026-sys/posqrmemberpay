@@ -656,6 +656,12 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 (สิทธิ์ `POS_CLOSING:EDIT` ไม่ backfill · เหตุผลบังคับ · เฉพาะรอบล่าสุด · conditional update `where reopenedAt null`) · แถวรอบเดิมไม่ลบ — **ทุก query ที่รวมยอด/นับรอบต้องกรอง `reopenedAt: null`** ·
 เลขรอบใหม่ = สูงสุด + 1 รวมรอบที่ถูกเปิด · ประวัติ `/pos/closing` มีแถวรวมรายวัน (ยอด/จำนวนบิล/ยกเลิก)
 
+**🔨 ปิดยอดแล้วรับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08 เจ้าของสั่ง · migration `20261008120000_closing_sales_resumed` additive + backfill · รอ deploy)**:
+`CashierClosing.salesResumedAt` (null = ยังไม่เปิด) · **ตัดสินที่ `getSalesLock()` ใน `lib/queries.ts` ที่เดียว** (รอบล่าสุดของ **วันนี้** ของคนนั้นที่ไม่ถูก reopen และ salesResumedAt null) ·
+**ทุก action ที่รับเงินต้องเรียก `salesLockError()` (`lib/sales-lock.ts`) ก่อนเขียน** — ตอนนี้: `confirmMobilePayment` · `prepareStaffPromptPay` · `createTakeawaySale` · `createSale` ·
+ไม่ล็อก: สั่งอาหาร/ส่งครัว/จอง/เช็กอิน/เริ่มนวด และบิลที่ธนาคารปิดเอง (SYSTEM) · ล็อกรายคน · `resumeSales` (`POS_CLOSING:ADD`) ไม่แตะรอบที่ปิดแล้ว ·
+backfill = รอบเดิมทุกแถวได้ salesResumedAt = closedAt (คนที่ปิดรอบไว้ก่อน deploy ไม่ถูกล็อกกะทันหัน) · ซ้อมบน dump 20261005-112543 แล้ว (42 → 45 · diff สะอาด)
+
 **✅ ปิดร้าน / ลบร้าน — ขึ้น production แล้ว 2026-09-30 (PR #51 · CI run 36677663970 · `_prisma_migrations` = 41 · สลับไป blue · backup หลัง deploy `posmobileorderdb-20260930-134246.dump` · เจ้าของลองหน้าจริงผ่านแล้ว · migration 2 ไฟล์ `20260930120000_store_status_closed` (ADD VALUE แยก) → `…120100_store_close_columns` additive + CHECK)**:
 การ์ด "ปิดร้าน / ลบร้าน" ท้าย `/mobile-order/settings` (OWNER · พิมพ์ชื่อร้านยืนยัน · ปิดต้องมีเหตุผลและไม่มีบิลค้าง) · `/no-store` มีรายการ "ร้านที่คุณปิดไว้" + ปุ่มเปิดอีกครั้ง ·
 `/admin/stores` ตัวกรอง/ป้าย "ปิดโดยเจ้าของ" (`STORE_STATUS_CHIP` ใน `lib/format.ts`) · เทส `store-lifecycle.test.ts` 7 (รวม ★ ขายพร้อมกดลบ) + tenant-isolation +3 action

@@ -213,3 +213,30 @@ export async function reopenCashierClosing(formData: FormData): Promise<ActionRe
     return { ok: false, error: "เปิดรอบใหม่ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }
   }
 }
+
+/// "เปิดรอบขายใหม่" (2026-10-08 เจ้าของสั่ง) — ปิดยอดแล้วรับเงินไม่ได้จนกว่าจะกดปุ่มนี้
+///
+/// ต่างจาก `reopenCashierClosing` (ถอดรอบที่ปิดผิดออก บิลกลับไปรอปิด) — ที่นี่ **ไม่แตะรอบที่ปิดแล้วเลย**
+/// แค่บันทึกว่าเริ่มรับเงินต่อได้ บิลที่ขายต่อจากนี้ไปรอปิดเป็นรอบถัดไปตามเดิม · เฉพาะรอบล่าสุดของวันนี้ของตัวเอง
+/// · กดพร้อมกันสองเครื่อง = conditional update where salesResumedAt null ผ่านได้ครั้งเดียว (อีกเครื่องได้ "เปิดไว้แล้ว")
+export async function resumeSales(): Promise<ActionResult> {
+  const guard = await guardAction("POS_CLOSING", "ADD")
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const db = forStore(guard.user.storeId)
+
+  const latest = await db.cashierClosing.findFirst({
+    where: { cashierId: guard.user.id, closingDate: businessDateOnly(), reopenedAt: null },
+    orderBy: { roundNo: "desc" },
+    select: { id: true, roundNo: true, salesResumedAt: true },
+  })
+  if (!latest) return { ok: false, error: "วันนี้ยังไม่ได้ปิดยอด — ขายได้ตามปกติ" }
+
+  const opened = await db.cashierClosing.updateMany({
+    where: { id: latest.id, salesResumedAt: null },
+    data: { salesResumedAt: new Date() },
+  })
+  revalidatePath("/pos/closing")
+  revalidatePath("/mobile-order/pos")
+  if (opened.count === 0) return { ok: true, message: "เปิดรอบขายใหม่ไว้แล้ว — รับเงินได้ตามปกติ" }
+  return { ok: true, message: `เปิดรอบขายใหม่แล้ว — บิลจากนี้จะไปอยู่รอบที่ ${latest.roundNo + 1}` }
+}
