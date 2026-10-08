@@ -40,7 +40,17 @@ export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: 
   const qrStale = qr !== null && Math.abs(qr.amount - bill.total) >= 0.01
   const waitingBank = method === "PROMPTPAY" && qr?.mode === "AUTO" && !qrStale
 
+  /// รายการนวดที่ยังไม่เสร็จ (2026-10-08 เจ้าของสั่ง) — ปิดบิลแล้วห้องคืนว่างและคิวถูกปิดเป็นเสร็จ ต้องถามก่อนทุกทางที่ปิดบิลได้
+  const unfinished = bill.unfinishedServices
+  function confirmUnfinished(): boolean {
+    if (unfinished.length === 0) return true
+    const names = unfinished.map((s) => `${s.name}${s.therapistLabel ? ` (${s.therapistLabel})` : ""}`).join(", ")
+    return window.confirm(`ยังมีรายการนวดที่ยังไม่เสร็จ: ${names}\nปิดบิลตอนนี้ห้องจะคืนว่างและคิวถูกปิดเป็นเสร็จแล้ว — ต้องการรับเงินต่อไหม?`)
+  }
+
   async function showQr() {
+    // QR ธนาคารปิดบิลเองทันทีที่ลูกค้าจ่าย — ถามก่อนออก QR ไม่ใช่ตอนกดยืนยัน
+    if (!confirmUnfinished()) return
     setQrPending(true)
     try {
       const fd = new FormData()
@@ -82,6 +92,7 @@ export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: 
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!confirmUnfinished()) return
     setPending(true)
     setFieldErrors({})
 
@@ -154,6 +165,23 @@ export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: 
 
       {bill.sessionStatus === "AWAITING_BILL" ? (
         <div className="alert-banner info">ลูกค้าขอเช็กบิลแล้ว — ยืนยันการรับชำระเงินเพื่อปิดโต๊ะ</div>
+      ) : null}
+
+      {/* เตือนก่อนรับเงินเมื่อยังนวดไม่เสร็จ (2026-10-08) — เปิดหน้านี้ได้จากผังห้องโดยไม่ผ่านปุ่มทีละขั้นของหน้าคิวนวด */}
+      {unfinished.length > 0 ? (
+        <div className="alert-banner warning" role="alert">
+          <strong>ยังมีรายการนวดที่ยังไม่เสร็จ {unfinished.length} รายการ</strong>
+          <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
+            {unfinished.map((s) => (
+              <li key={s.id}>
+                {s.name}
+                {s.therapistLabel ? ` · ${s.therapistLabel}` : ""} — {s.status === "AWAITING_KITCHEN" ? "ยังไม่เริ่มนวด" : "กำลังนวด"}
+              </li>
+            ))}
+          </ul>
+          ปิดบิลตอนนี้ห้องจะคืนว่างและคิวถูกปิดเป็นเสร็จแล้ว — ถ้ายังไม่ได้นวดให้ครบ กด “เสร็จแล้ว” ที่หน้า{" "}
+          <Link href="/spa/bookings?tab=now">คิวนวด</Link> ก่อนแล้วค่อยรับเงิน
+        </div>
       ) : null}
 
       <div className="bill-split">
