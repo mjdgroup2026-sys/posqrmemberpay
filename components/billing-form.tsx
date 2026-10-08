@@ -23,8 +23,10 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
-export function BillingForm({ bill }: { bill: BillingView }) {
+export function BillingForm({ bill, returnTo }: { bill: BillingView; returnTo?: "bookings" }) {
   const router = useRouter()
+  // ปิดบิลเสร็จกลับไปหน้าที่มา — ตารางจอง (ปุ่มปิดบิลบนคิวนวด · 2026-10-08) หรือผังโต๊ะ (ค่าเดิม)
+  const doneHref = returnTo === "bookings" ? "/spa/bookings" : "/mobile-order/tables"
   const [pending, setPending] = useState(false)
   const [method, setMethod] = useState<PaymentMethodValue>("PROMPTPAY")
   const [cashInput, setCashInput] = useState("")
@@ -63,10 +65,10 @@ export function BillingForm({ bill }: { bill: BillingView }) {
     const result = await getStaffBillStatus(fd).catch(() => null)
     if (result?.ok && result.data?.closed) {
       toast.success(result.data.saleNumber ? `ธนาคารยืนยันแล้ว — ปิดบิล ${result.data.saleNumber}` : "บิลนี้ถูกปิดแล้ว")
-      router.push("/mobile-order/tables")
+      router.push(doneHref)
       router.refresh()
     }
-  }, [bill.sessionId, router])
+  }, [bill.sessionId, router, doneHref])
   useRealtime(waitingBank ? "/api/events" : null, () => void checkClosed())
   useEffect(() => {
     if (!waitingBank) return
@@ -100,10 +102,10 @@ export function BillingForm({ bill }: { bill: BillingView }) {
       // มีเงินทอน = อยู่หน้าปิดบิลต่อแล้วโชว์แผงเงินทอนจากบิลจริง (?paid=) จนพนักงานกด "ทอนเงินแล้ว"
       // · ใช้ URL ไม่ใช่ state เพราะปิดบิลแล้วหน้านี้ re-render เป็น "ไม่มีบิล" ทำให้ state หาย · ไม่มีเงินทอน = กลับผังโต๊ะตามเดิม
       if (result.data && result.data.changeDue > 0) {
-        router.replace(`/mobile-order/tables/${bill.tableId}/billing?paid=${result.data.saleId}`)
+        router.replace(`/mobile-order/tables/${bill.tableId}/billing?paid=${result.data.saleId}${returnTo ? `&back=${returnTo}` : ""}`)
         return
       }
-      router.push("/mobile-order/tables")
+      router.push(doneHref)
       router.refresh()
     } catch {
       toast.error("ปิดบิลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
@@ -117,9 +119,15 @@ export function BillingForm({ bill }: { bill: BillingView }) {
       <div className="page-head">
         <div>
           <p className="t-eyebrow">
-            <Link href={`/mobile-order/tables/${bill.tableId}?session=${bill.sessionId}`} className="row" style={{ gap: 6 }}>
-              <IconBack size={14} aria-hidden /> กลับไปรายละเอียดออร์เดอร์
-            </Link>
+            {returnTo === "bookings" ? (
+              <Link href="/spa/bookings" className="row" style={{ gap: 6 }}>
+                <IconBack size={14} aria-hidden /> กลับไปตารางจอง
+              </Link>
+            ) : (
+              <Link href={`/mobile-order/tables/${bill.tableId}?session=${bill.sessionId}`} className="row" style={{ gap: 6 }}>
+                <IconBack size={14} aria-hidden /> กลับไปรายละเอียดออร์เดอร์
+              </Link>
+            )}
           </p>
           <h1 className="t-h1">
             ปิดบิล{placeLabel(bill.tableKind, bill.tableCode)}

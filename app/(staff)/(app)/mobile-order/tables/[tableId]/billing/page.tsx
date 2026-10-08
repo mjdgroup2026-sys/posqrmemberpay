@@ -17,7 +17,11 @@ export default async function BillingPage({ params, searchParams }: PageProps<"/
   if (!granted.MO_TABLES?.includes("EDIT")) redirect("/access-denied?resource=MO_TABLES")
   const { tableId } = await params
   // ?session= = บิลของลูกค้าคนไหนในห้องสปาที่มีหลายบิล (2026-09-23)
-  const { session, paid } = await searchParams
+  const { session, paid, back } = await searchParams
+  // ?back=bookings = มาจากปุ่ม "ปิดบิล / ชำระเงิน" บนตารางจอง (2026-10-08) — จ่ายเสร็จกลับไปตารางจอง ไม่ใช่ผังโต๊ะ
+  const fromBookings = back === "bookings"
+  const doneHref = fromBookings ? "/spa/bookings" : "/mobile-order/tables"
+  const doneLabel = fromBookings ? "ตารางจอง" : "ผังโต๊ะ"
 
   // ?paid=<saleId> = เพิ่งปิดบิลเงินสดที่มีเงินทอน (2026-10-03) — โชว์เงินทอนจากบิลจริงค้างไว้จนพนักงานกด "ทอนเงินแล้ว"
   // ต้องมาก่อน getBillingView เพราะ session ปิดไปแล้ว · getSaleById กรองร้านให้เอง
@@ -39,12 +43,12 @@ export default async function BillingPage({ params, searchParams }: PageProps<"/
               total={sale.total}
               received={sale.amountReceived}
               changeDue={sale.changeDue}
-              actionLabel="ทอนเงินแล้ว · กลับผังโต๊ะ"
-              href="/mobile-order/tables"
+              actionLabel={`ทอนเงินแล้ว · กลับ${doneLabel}`}
+              href={doneHref}
             />
           ) : (
-            <Link href="/mobile-order/tables" className="btn btn-primary">
-              กลับไปผังโต๊ะ
+            <Link href={doneHref} className="btn btn-primary">
+              กลับไป{doneLabel}
             </Link>
           )}
         </>
@@ -117,5 +121,5 @@ export default async function BillingPage({ params, searchParams }: PageProps<"/
     )
   }
 
-  return <BillingForm bill={bill} />
+  return <BillingForm bill={bill} returnTo={fromBookings ? "bookings" : undefined} />
 }
