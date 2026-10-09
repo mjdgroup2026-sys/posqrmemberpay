@@ -1,7 +1,21 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ActionResult } from "@/lib/types"
 import { businessDayKey } from "@/lib/day"
-import { disconnectTestDb, ensureTestUser, isTestDbReachable, resetDb, setStoreSettings, testPrisma, TEST_STORE_ID } from "../helpers/db"
+import {
+  createFullDayShifts,
+  createTestOrder,
+  createTestOrderItem,
+  createTestQrCode,
+  createTestSession,
+  createTestTable,
+  disconnectTestDb,
+  ensureTestUser,
+  isTestDbReachable,
+  resetDb,
+  setStoreSettings,
+  testPrisma,
+  TEST_STORE_ID,
+} from "../helpers/db"
 import { makeFormData } from "../helpers/form"
 import { setActiveTestStore, setTestUser } from "../helpers/session-mock"
 
@@ -10,7 +24,7 @@ vi.mock("@/lib/session", async () => (await import("../helpers/session-mock")).s
 
 const dbReady = await isTestDbReachable()
 
-/// ปิดยอดแล้วรับเงินไม่ได้จนกว่าจะ "เปิดรอบขายใหม่" (2026-10-08 เจ้าของสั่ง)
+/// ปิดยอดแล้วรับเงินไม่ได้จนกว่าจะ "เปิดรอบขายใหม่" (2026-10-08 เจ้าของสั่ง · 2026-10-09 ขยายเป็นขายไม่ได้เลย)
 ///
 /// ล็อกรายคน · เฉพาะวันนี้ · เปิดรอบขายใหม่ไม่แตะรอบที่ปิดแล้ว · เปิดรอบเดิมกลับ (reopen) ก็ปลดล็อก
 describe.skipIf(!dbReady)("ล็อกการรับเงินหลังปิดยอด", () => {
@@ -101,6 +115,82 @@ describe.skipIf(!dbReady)("ล็อกการรับเงินหลั�
     expect((await reopenCashierClosing(makeFormData({ id: round.id, reason: "ปิดผิด นับเงินใหม่" }))).ok).toBe(true)
     expect((await getSalesLock(TEST_STORE_ID, "owner")).locked).toBe(false)
     expect((await sell()).ok).toBe(true)
+  })
+
+  it("ปิดรอบแล้วขายใหม่ไม่ได้ทุกทาง: เปิดโต๊ะ · สั่งเข้าโต๊ะ · เช็กอิน (2026-10-09)", async () => {
+    const { openTableSession } = await import("@/app/actions/tables")
+    const { createStaffTableOrder } = await import("@/app/actions/staff-order")
+    const { checkInBooking } = await import("@/app/actions/bookings")
+    const table = await createTestTable("A1")
+    const menu = await testPrisma().menuItem.create({ data: { storeId: TEST_STORE_ID, name: "ข้าวผัด", price: "50.00" } })
+    await close()
+
+    const open = await openTableSession(makeFormData({ tableId: table.id }))
+    expect(open.ok === false && open.error).toContain("ไม่สามารถขายได้")
+
+    const fd = new FormData()
+    fd.set("tableId", table.id)
+    fd.set("items", JSON.stringify([{ menuItemId: menu.id, quantity: 1, optionIds: [] }]))
+    const order = await createStaffTableOrder(fd)
+    expect(order.ok === false && order.error).toContain("ไม่สามารถขายได้")
+
+    // ด่านอยู่ก่อนอ่านการจอง — id อะไรก็ถูกปฏิเสธด้วยข้อความล็อก
+    const checkIn = await checkInBooking(makeFormData({ id: "any-booking", tableId: table.id }))
+    expect(checkIn.ok === false && checkIn.error).toContain("ไม่สามารถขายได้")
+
+    expect(await testPrisma().tableSession.count({ where: { storeId: TEST_STORE_ID } })).toBe(0)
+    expect(await testPrisma().mobileOrder.count({ where: { storeId: TEST_STORE_ID } })).toBe(0)
+
+    // เปิดรอบขายใหม่แล้วเปิดโต๊ะได้
+    expect((await resumeSales()).ok).toBe(true)
+    expect((await openTableSession(makeFormData({ tableId: table.id }))).ok).toBe(true)
+  })
+
+  it("ปิดรอบแล้วยังทำงานของออร์เดอร์เดิม/จองล่วงหน้าได้ · ลูกค้าสแกน QR เปิดโต๊ะเองได้", async () => {
+    const { startCookingItem, markItemReady, markItemServed } = await import("@/app/actions/orders")
+    const { openTableSession } = await import("@/app/actions/tables")
+    const { saveBooking } = await import("@/app/actions/bookings")
+    const db = testPrisma()
+    const table = await createTestTable("A1")
+    const menu = await db.menuItem.create({ data: { storeId: TEST_STORE_ID, name: "ข้าวผัด", price: "50.00" } })
+    await setStoreSettings({ hasKDS: true })
+    const session = await createTestSession(table.id)
+    const order = await createTestOrder(session.id)
+    const item = await createTestOrderItem(order.id, menu.id)
+    await close()
+
+    // ครัว/เสิร์ฟของออร์เดอร์ที่สั่งไว้แล้วไม่ติดล็อก
+    expect((await startCookingItem(makeFormData({ id: item.id }))).ok).toBe(true)
+    expect((await markItemReady(makeFormData({ id: item.id }))).ok).toBe(true)
+    expect((await markItemServed(makeFormData({ id: item.id }))).ok).toBe(true)
+
+    // ลูกค้าสแกน QR — ไม่ใช่พนักงานคนใด จึงไม่ติดล็อกรายคน
+    const other = await createTestTable("A2")
+    const qr = await createTestQrCode(other.id)
+    expect((await openTableSession(makeFormData({ qrToken: qr.token }))).ok).toBe(true)
+
+    // จองคิวล่วงหน้ายังได้ (ยังไม่ใช่การขาย)
+    await db.storeSettings.update({ where: { storeId: TEST_STORE_ID }, data: { spaEnabled: true } })
+    const station = await db.kitchenStation.create({ data: { storeId: TEST_STORE_ID, name: "นวดไทย" } })
+    const program = await db.menuItem.create({
+      data: { storeId: TEST_STORE_ID, name: "นวดไทย 60", price: "300.00", itemType: "SERVICE", durationMinutes: 60, stationId: station.id },
+    })
+    const therapist = await db.therapist.create({ data: { storeId: TEST_STORE_ID, code: "001", name: "นิด", skills: { connect: [{ id: station.id }] } } })
+    const tomorrow = businessDayKey(new Date(Date.now() + 24 * 60 * 60_000))
+    await createFullDayShifts([therapist.id], [tomorrow])
+    const booked = await saveBooking(
+      makeFormData({
+        customerName: "คุณเอ",
+        customerPhone: "0812345678",
+        menuItemId: program.id,
+        therapistId: therapist.id,
+        tableId: "",
+        bookingDate: tomorrow,
+        startTime: "13:00",
+        note: "",
+      }),
+    )
+    expect(booked.ok).toBe(true)
   })
 
   it("ยังไม่ได้ปิดยอดวันนี้ → เปิดรอบขายใหม่ไม่มีอะไรให้เปิด", async () => {

@@ -74,6 +74,9 @@ export async function createStaffTableOrder(formData: FormData): Promise<ActionR
     return { ok: false, error: storeErrorMessage(error) }
   }
   const storeId = ctx.storeId
+  // ปิดยอดแล้ว = สั่งเข้าโต๊ะไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-09)
+  const locked = await salesLockError(storeId, ctx.user.id)
+  if (locked) return { ok: false, error: locked }
   const db = forStore(storeId)
 
   const parsed = staffTableOrderSchema.safeParse({
@@ -304,7 +307,7 @@ export async function createTakeawaySale(formData: FormData): Promise<ActionResu
     return { ok: false, error: storeErrorMessage(error) }
   }
   const storeId = ctx.storeId
-  // ปิดยอดรอบล่าสุดแล้ว = รับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08)
+  // ปิดยอดรอบล่าสุดแล้ว = ขายไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08)
   const locked = await salesLockError(storeId, ctx.user.id)
   if (locked) return { ok: false, error: locked }
   const db = forStore(storeId)

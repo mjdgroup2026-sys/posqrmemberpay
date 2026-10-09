@@ -20,7 +20,7 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
     getStoreSettings(storeId),
     // Phase 21b — สินค้าในสต็อกเฉพาะหมวดที่เปิดขายที่หน้าขายอาหาร (ว่าง = ไม่มีแท็บสินค้า)
     listPosProducts(storeId),
-    // ปิดยอดแล้ว = รับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08)
+    // ปิดยอดแล้ว = ขายไม่ได้เลยจนกว่าจะเปิดรอบขายใหม่ (2026-10-09 เจ้าของสั่ง) — ซ่อนจอขายทั้งหน้า · ด่านจริงอยู่ที่ action
     getSalesLock(storeId, userId),
   ])
   // โมดูลคลังที่ผู้ดูแลแพลตฟอร์มปิดไว้ (2026-09-30) = ไม่มีแท็บสินค้า · ด่านจริงอยู่ที่ buildProductLines
@@ -34,9 +34,11 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
     ? wantedSession
     : undefined
 
+  if (salesLock.locked) {
+    return <SalesLockBanner block roundNo={salesLock.roundNo} canResume={granted.POS_CLOSING?.includes("ADD") ?? false} />
+  }
+
   return (
-    <>
-    {salesLock.locked ? <SalesLockBanner roundNo={salesLock.roundNo} /> : null}
     <MenuPos
       menu={menu}
       products={sellableProducts}
@@ -49,6 +51,5 @@ export default async function MobileOrderPosPage({ searchParams }: PageProps<"/m
       initialSessionId={initialSessionId}
       storeName={settings?.storeName}
     />
-    </>
   )
 }

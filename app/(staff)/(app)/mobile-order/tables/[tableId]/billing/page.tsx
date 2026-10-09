@@ -122,11 +122,13 @@ export default async function BillingPage({ params, searchParams }: PageProps<"/
     )
   }
 
-  // ปิดยอดแล้ว = รับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08) — ด่านจริงอยู่ที่ action
+  // ปิดยอดแล้ว = ขาย/รับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08) — ด่านจริงอยู่ที่ action
   const salesLock = await getSalesLock(storeId, userId)
   return (
     <>
-      {salesLock.locked ? <SalesLockBanner roundNo={salesLock.roundNo} /> : null}
+      {salesLock.locked ? (
+        <SalesLockBanner roundNo={salesLock.roundNo} canResume={granted.POS_CLOSING?.includes("ADD") ?? false} />
+      ) : null}
       <BillingForm bill={bill} returnTo={returnTo} />
     </>
   )

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { forStore, type StoreTx } from "@/lib/db"
 import { requireSellingStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { salesLockError } from "@/lib/sales-lock"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { findStoreByQrToken } from "@/lib/store-resolve"
@@ -93,8 +94,11 @@ export async function openTableSession(formData: FormData): Promise<ActionResult
   } else {
     try {
       // Phase 16: ต้องมีสิทธิ์เปิดโต๊ะ + แพ็กเกจยังไม่หมดอายุ (Phase 14b) — resolveStoreContext() cache ไว้ จึงไม่ยิง DB ซ้ำ
-      await requireStoreAccess(["MO_TABLES", "ADD"])
+      const ctx = await requireStoreAccess(["MO_TABLES", "ADD"])
       storeId = (await requireSellingStore()).storeId
+      // ปิดยอดแล้ว = เปิดโต๊ะใหม่ไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-09) · ลูกค้าสแกน QR ไม่ติด (ล็อกเป็นรายพนักงาน)
+      const locked = await salesLockError(storeId, ctx.user.id)
+      if (locked) return { ok: false, error: locked }
     } catch (error) {
       return { ok: false, error: storeErrorMessage(error) }
     }
