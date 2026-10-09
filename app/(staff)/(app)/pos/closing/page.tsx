@@ -139,13 +139,12 @@ export default async function ClosingPage({ searchParams }: PageProps<"/pos/clos
 
       <div className="form-split">
         <section className="card-ui card-pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {/* แสดงแค่รอบล่าสุด (2026-10-08 เจ้าของสั่ง) — รอบก่อนหน้าของวันนี้อยู่ในตารางประวัติด้านล่างแทน */}
-          {latest ? (
-            <RoundResult key={latest.id} round={latest} reopenable={canReopen && latest.id === lastRound?.id} />
-          ) : null}
-          {rounds.length > 1 ? (
+          {/* แสดงแค่รอบล่าสุดที่ยังนับยอด (2026-10-08 เจ้าของสั่ง · 2026-10-09 รอบที่ถูกเปิดใหม่ไม่ขึ้นที่นี่ — เคยขึ้นจาง ๆ คู่กับฟอร์มรอบถัดไปจนดูเหมือนหลายรอบ)
+              รอบอื่นทั้งหมดของวัน รวมรอบที่ถูกเปิดใหม่ อยู่ในตารางประวัติแทน */}
+          {lastRound ? <RoundResult key={lastRound.id} round={lastRound} reopenable={canReopen} /> : null}
+          {rounds.length > (lastRound ? 1 : 0) ? (
             <p className="t-caption">
-              รอบก่อนหน้าของวันนี้ <span className="num">{formatNumber(rounds.length - 1)}</span> รอบ — ดูได้ที่ “ประวัติการปิดยอด” ด้านล่าง
+              รอบอื่นของ{isToday ? "วันนี้" : "วันที่เลือก"} <span className="num">{formatNumber(rounds.length - (lastRound ? 1 : 0))}</span> รอบ — ดูได้ที่ “ประวัติการปิดยอด”
             </p>
           ) : null}
 
