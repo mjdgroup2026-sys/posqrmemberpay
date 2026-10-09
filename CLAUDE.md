@@ -659,7 +659,7 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 **✅ ปิดยอดแล้วรับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ — ขึ้น production แล้ว 2026-10-08 22:22 (PR #88 · CI run 37800201791 · backup `posmobileorderdb-20261008-222119.dump` · migration `20261008120000_closing_sales_resumed` additive + backfill · `_prisma_migrations` = 45 · สลับไป green)**:
 `CashierClosing.salesResumedAt` (null = ยังไม่เปิด) · **ตัดสินที่ `getSalesLock()` ใน `lib/queries.ts` ที่เดียว** (รอบล่าสุดของ **วันนี้** ของคนนั้นที่ไม่ถูก reopen และ salesResumedAt null) ·
 **ทุก action ที่ขายใหม่หรือรับเงินต้องเรียก `salesLockError()` (`lib/sales-lock.ts`) ก่อนเขียน** — ตอนนี้: `confirmMobilePayment` · `prepareStaffPromptPay` · `createTakeawaySale` · `createSale` ·
-**(2026-10-09 เจ้าของสั่ง "ต้องไม่ให้ขายเลย")** + `openTableSession` (ฝั่งพนักงาน) · `createStaffTableOrder` · `checkInBooking` · จอขายล็อกแล้วแสดงกล่อง "ปิดรอบไปแล้ว" แทนเมนูทั้งหน้า (`SalesLockBanner block` + ปุ่มเปิดรอบขายใหม่ในตัวเมื่อมี `POS_CLOSING:ADD`) · ผังโต๊ะ/ปิดบิล/คิวนวดขึ้นแถบเตือน ·
+**(2026-10-09 เจ้าของสั่ง "ต้องไม่ให้ขายเลย" · ขึ้น production แล้ว PR #90 · เจ้าของลองหน้าจริงผ่าน)** + `openTableSession` (ฝั่งพนักงาน) · `createStaffTableOrder` · `checkInBooking` · จอขายล็อกแล้วแสดงกล่อง "ปิดรอบไปแล้ว" แทนเมนูทั้งหน้า (`SalesLockBanner block` + ปุ่มเปิดรอบขายใหม่ในตัวเมื่อมี `POS_CLOSING:ADD`) · ผังโต๊ะ/ปิดบิล/คิวนวดขึ้นแถบเตือน ·
 ไม่ล็อก: ครัว/เสิร์ฟ/เริ่มนวด/นวดเสร็จ/ยกเลิกรายการ · จองล่วงหน้า · รวมโต๊ะ · ลูกค้าสแกน QR สั่งเอง (ล็อกรายพนักงาน) · บิลที่ธนาคารปิดเอง (SYSTEM) · ล็อกรายคน · `resumeSales` (`POS_CLOSING:ADD`) ไม่แตะรอบที่ปิดแล้ว ·
 backfill = รอบเดิมทุกแถวได้ salesResumedAt = closedAt (คนที่ปิดรอบไว้ก่อน deploy ไม่ถูกล็อกกะทันหัน) · ซ้อมบน dump 20261005-112543 แล้ว (42 → 45 · diff สะอาด)
 
