@@ -1,8 +1,9 @@
 import Link from "next/link"
-import { getBookingDay, getSpaBoard, getStoreSettings } from "@/lib/queries"
+import { getBookingDay, getSalesLock, getSpaBoard, getStoreSettings } from "@/lib/queries"
 import { businessDayKey, minuteOfBusinessDay, parseDayKey } from "@/lib/day"
 import { requirePageAccess } from "@/lib/permissions"
 import { BookingSchedule, type QueueTab } from "@/components/booking-schedule"
+import { SalesLockBanner } from "@/components/sales-lock-banner"
 
 export const metadata = { title: "คิวนวด" }
 
@@ -14,7 +15,7 @@ const TABS: QueueTab[] = ["now", "timeline", "list"]
 /// ไม่ระบุแท็บ: วันนี้เปิด "ตอนนี้" (การ์ด) · วันอื่นเปิด "ตารางเวลา" · `/spa/board` เดิมพามาแท็บ "ตอนนี้"
 export default async function BookingsPage({ searchParams }: PageProps<"/spa/bookings">) {
   // ด่านชั้นที่ 1 ของ §4 — ต้องมีสิทธิ์ VIEW ก่อนถึงจะ render ได้
-  const { storeId, granted } = await requirePageAccess("SPA_BOOKINGS")
+  const { storeId, granted, id: userId } = await requirePageAccess("SPA_BOOKINGS")
 
   const query = await searchParams
   const todayKey = businessDayKey()
@@ -23,10 +24,12 @@ export default async function BookingsPage({ searchParams }: PageProps<"/spa/boo
   const dayKey = day ? businessDayKey(day) : todayKey
   const tab: QueueTab = TABS.includes(query.tab as QueueTab) ? (query.tab as QueueTab) : dayKey === todayKey ? "now" : "timeline"
 
-  const [settings, data, board] = await Promise.all([
+  const [settings, data, board, salesLock] = await Promise.all([
     getStoreSettings(storeId),
     getBookingDay(storeId, dayKey),
     getSpaBoard(storeId, { dayKey }),
+    // ปิดยอดแล้ว = เช็กอินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-09) · จองล่วงหน้ายังได้
+    getSalesLock(storeId, userId),
   ])
 
   if (!settings?.spaEnabled) {
@@ -55,6 +58,10 @@ export default async function BookingsPage({ searchParams }: PageProps<"/spa/boo
   const renderedAt = new Date()
 
   return (
+    <>
+    {salesLock.locked ? (
+      <SalesLockBanner roundNo={salesLock.roundNo} canResume={granted.POS_CLOSING?.includes("ADD") ?? false} />
+    ) : null}
     <BookingSchedule
       dayKey={data.dayKey}
       todayKey={todayKey}
@@ -72,5 +79,6 @@ export default async function BookingsPage({ searchParams }: PageProps<"/spa/boo
       // ปุ่มปิดบิล/ชำระเงินบนคิว — หน้าปิดบิลต้องมี MO_TABLES:EDIT (ด่านเดิมของหน้านั้นยังตรวจซ้ำ)
       canBill={granted.MO_TABLES?.includes("EDIT") ?? false}
     />
+    </>
   )
 }

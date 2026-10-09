@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { forStore } from "@/lib/db"
 import { requireSellingStore, storeErrorMessage, type StoreContext } from "@/lib/session"
+import { salesLockError } from "@/lib/sales-lock"
 import { requireStoreAccess } from "@/lib/permissions"
 import { publishStoreEvent } from "@/lib/realtime"
 import { assertSlotFree, assertWithinShift, BookingError, resolveBookingTarget } from "@/lib/booking"
@@ -279,6 +280,9 @@ export async function checkInBooking(formData: FormData): Promise<ActionResult<C
     return { ok: false, error: storeErrorMessage(error) }
   }
   const storeId = ctx.storeId
+  // ปิดยอดแล้ว = เช็กอิน (เปิดบิลใหม่) ไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-09) · จองล่วงหน้ายังได้
+  const locked = await salesLockError(storeId, ctx.user.id)
+  if (locked) return { ok: false, error: locked }
   const db = forStore(storeId)
 
   const parsed = bookingCheckInSchema.safeParse({ id: formData.get("id"), tableId: formData.get("tableId") })
