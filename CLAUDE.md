@@ -656,7 +656,7 @@ resource ใหม่ `STOCK_ADJUST` **ไม่ backfill** (ร้านเด�
 (สิทธิ์ `POS_CLOSING:EDIT` ไม่ backfill · เหตุผลบังคับ · เฉพาะรอบล่าสุด · conditional update `where reopenedAt null`) · แถวรอบเดิมไม่ลบ — **ทุก query ที่รวมยอด/นับรอบต้องกรอง `reopenedAt: null`** ·
 เลขรอบใหม่ = สูงสุด + 1 รวมรอบที่ถูกเปิด · ประวัติ `/pos/closing` มีแถวรวมรายวัน (ยอด/จำนวนบิล/ยกเลิก)
 
-**🔨 ปิดยอดแล้วรับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ (2026-10-08 เจ้าของสั่ง · migration `20261008120000_closing_sales_resumed` additive + backfill · รอ deploy)**:
+**✅ ปิดยอดแล้วรับเงินไม่ได้จนกว่าจะเปิดรอบขายใหม่ — ขึ้น production แล้ว 2026-10-08 22:22 (PR #88 · CI run 37800201791 · backup `posmobileorderdb-20261008-222119.dump` · migration `20261008120000_closing_sales_resumed` additive + backfill · `_prisma_migrations` = 45 · สลับไป green)**:
 `CashierClosing.salesResumedAt` (null = ยังไม่เปิด) · **ตัดสินที่ `getSalesLock()` ใน `lib/queries.ts` ที่เดียว** (รอบล่าสุดของ **วันนี้** ของคนนั้นที่ไม่ถูก reopen และ salesResumedAt null) ·
 **ทุก action ที่รับเงินต้องเรียก `salesLockError()` (`lib/sales-lock.ts`) ก่อนเขียน** — ตอนนี้: `confirmMobilePayment` · `prepareStaffPromptPay` · `createTakeawaySale` · `createSale` ·
 ไม่ล็อก: สั่งอาหาร/ส่งครัว/จอง/เช็กอิน/เริ่มนวด และบิลที่ธนาคารปิดเอง (SYSTEM) · ล็อกรายคน · `resumeSales` (`POS_CLOSING:ADD`) ไม่แตะรอบที่ปิดแล้ว ·
